@@ -54,6 +54,18 @@ private slots:
         QCOMPARE(markup.at(2).markers[0].length, 1);
     }
 
+    void findsLinkUrlAtPosition() {
+        const QString text = QStringLiteral("Read [site](https://example.com/docs) now");
+        const int linkStart = text.indexOf(QStringLiteral("site"));
+
+        QCOMPARE(MarkdownHighlighter::linkUrlAt(text, linkStart),
+                 QStringLiteral("https://example.com/docs"));
+        QCOMPARE(MarkdownHighlighter::linkUrlAt(text, linkStart + 3),
+                 QStringLiteral("https://example.com/docs"));
+        QVERIFY(MarkdownHighlighter::linkUrlAt(text, linkStart - 1).isEmpty());
+        QVERIFY(MarkdownHighlighter::linkUrlAt(text, text.indexOf(QStringLiteral("https"))).isEmpty());
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());

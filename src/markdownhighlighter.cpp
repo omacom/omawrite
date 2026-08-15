@@ -239,8 +239,25 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         const int contentEnd = content.start + content.length;
         markup.append({InlineKind::Link, content,
                        {{whole.start, 1},
-                        {contentEnd, whole.start + whole.length - contentEnd}}});
+                        {contentEnd, whole.start + whole.length - contentEnd}},
+                       span(match, 2)});
     }
 
     return markup;
+}
+
+QString MarkdownHighlighter::linkUrlAt(const QString &text, int position) {
+    if (position < 0 || position >= text.length())
+        return {};
+
+    const QList<InlineMarkup> markup = inlineMarkup(text);
+    for (const InlineMarkup &item : markup) {
+        if (item.kind != InlineKind::Link
+                || position < item.content.start
+                || position >= item.content.start + item.content.length) {
+            continue;
+        }
+        return text.mid(item.destination.start, item.destination.length);
+    }
+    return {};
 }

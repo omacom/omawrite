@@ -390,6 +390,19 @@ QVariantList Backend::hiddenRangesAt(int position) const {
     return ranges;
 }
 
+QString Backend::linkUrlAt(int position) const {
+    if (!m_document)
+        return {};
+
+    const int maxPosition = m_document->characterCount() - 1;
+    const QTextBlock block =
+        m_document->findBlock(qBound(0, position, maxPosition));
+    if (!block.isValid())
+        return {};
+
+    return MarkdownHighlighter::linkUrlAt(block.text(), position - block.position());
+}
+
 void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
     if (m_highlighter)
         m_highlighter->setSearch(query, currentMatchStart);
