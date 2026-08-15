@@ -474,6 +474,7 @@ ApplicationWindow {
             }
 
             onMovementStarted: wheelScroll.stop()
+            onContentYChanged: editor.refreshLinkHover()
 
             function scrollByWheel(wheel) {
                 // High-resolution wheels report fractional notches; feed
@@ -793,11 +794,28 @@ ApplicationWindow {
                 property string hoveredLinkUrl: ""
                 property real linkHoverX: 0
                 property real linkHoverY: 0
+                property real linkHoverRootX: 0
+                property real linkHoverRootY: 0
 
                 function updateLinkHover(x, y) {
+                    var rootPoint = editor.mapToItem(contentRoot, x, y);
+                    linkHoverRootX = rootPoint.x;
+                    linkHoverRootY = rootPoint.y;
                     linkHoverX = x;
                     linkHoverY = y;
                     hoveredLinkUrl = backend.linkUrlAt(positionAt(x, y));
+                }
+
+                function refreshLinkHover() {
+                    if (!editorHoverArea.containsMouse) {
+                        clearLinkHover();
+                        return;
+                    }
+                    var point = editor.mapFromItem(contentRoot,
+                                                   linkHoverRootX, linkHoverRootY);
+                    linkHoverX = point.x;
+                    linkHoverY = point.y;
+                    hoveredLinkUrl = backend.linkUrlAt(positionAt(point.x, point.y));
                 }
 
                 function clearLinkHover() {
@@ -805,11 +823,12 @@ ApplicationWindow {
                 }
 
                 MouseArea {
+                    id: editorHoverArea
                     anchors.fill: parent
                     acceptedButtons: Qt.NoButton
                     hoverEnabled: true
                     cursorShape: Qt.IBeamCursor
-                    onEntered: editor.updateLinkHover(mouse.x, mouse.y)
+                    onEntered: editor.updateLinkHover(mouseX, mouseY)
                     onPositionChanged: editor.updateLinkHover(mouse.x, mouse.y)
                     onExited: editor.clearLinkHover()
                 }
@@ -835,7 +854,7 @@ ApplicationWindow {
                                     hoverPosition.y + 20))
             width: Math.min(linkTooltipText.implicitWidth + 16,
                             contentRoot.width - 16)
-            height: linkTooltipText.implicitHeight + 10
+            height: linkTooltipText.implicitHeight + 16
             radius: 3
             color: backend.themeBackground
             border.color: backend.themeAccent
