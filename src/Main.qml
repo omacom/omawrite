@@ -23,7 +23,8 @@ ApplicationWindow {
     readonly property color selectionFill: backend.themeSelection
     // The desktop's text size knob (GNOME's text-scaling-factor, which
     // `omarchy display text size` drives) anchored so its 12px default leaves
-    // the app at the sizes it was designed around.
+    // the app at the sizes it was designed around, times the user's own
+    // text size set with Ctrl+= / Ctrl+- / Ctrl+wheel.
     readonly property real textScale: backend.textScale
     readonly property int editorFontPixelSize: scaledSize(20)
     readonly property int editorWidth: Math.min(
@@ -179,6 +180,24 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+="
+        context: Qt.ApplicationShortcut
+        onActivated: backend.increaseTextSize()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+-"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.decreaseTextSize()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+0"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.resetTextSize()
+    }
+
+    Shortcut {
         sequence: "Ctrl+O"
         context: Qt.ApplicationShortcut
         onActivated: backend.openDialog()
@@ -331,7 +350,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -341,6 +360,7 @@ ApplicationWindow {
 
         Flickable {
             id: editorFlick
+            objectName: "editorScroll"
             anchors.fill: parent
             anchors.leftMargin: 24
             anchors.rightMargin: 24
@@ -463,6 +483,12 @@ ApplicationWindow {
                 // finger scrolling carries pixel-precise pixelDelta.
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: function(wheel) {
+                    if (wheel.modifiers & Qt.ControlModifier) {
+                        editorFlick.zoomByWheel(wheel);
+                        wheel.accepted = true;
+                        return;
+                    }
+
                     scrollLinger.restart();
                     if (wheel.pixelDelta.y !== 0)
                         editorFlick.scrollTo(editorFlick.clampContentY(editorFlick.contentY - wheel.pixelDelta.y));
@@ -473,6 +499,31 @@ ApplicationWindow {
             }
 
             onMovementStarted: wheelScroll.stop()
+
+            // Ctrl+wheel changes the text size, as it does in a browser. A
+            // wheel notch is a whole step, but a touchpad trickles in pixels,
+            // so bank the fractions and step once a whole one is scrolled.
+            property real zoomNotches: 0
+
+            function zoomByWheel(wheel) {
+                // Finger scrolling synthesizes an angleDelta too, so pixelDelta
+                // is the one to test first, as in onWheel.
+                var notches = wheel.pixelDelta.y !== 0
+                    ? wheel.pixelDelta.y / 50
+                    : wheel.angleDelta.y / 120;
+                if (zoomNotches * notches < 0)
+                    zoomNotches = 0;
+
+                zoomNotches += notches;
+                while (zoomNotches >= 1) {
+                    backend.increaseTextSize();
+                    zoomNotches -= 1;
+                }
+                while (zoomNotches <= -1) {
+                    backend.decreaseTextSize();
+                    zoomNotches += 1;
+                }
+            }
 
             function scrollByWheel(wheel) {
                 // High-resolution wheels report fractional notches; feed

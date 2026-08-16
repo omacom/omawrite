@@ -209,13 +209,80 @@ private slots:
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 20);
 
         // `omarchy display text size 16` sets the GNOME factor to 16/12.
-        backend.setTextScale(16.0 / 12.0);
+        backend.setDesktopTextScale(16.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 27);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 27);
 
-        backend.setTextScale(9.0 / 12.0);
+        backend.setDesktopTextScale(9.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+    }
+
+    void stepsTextSizeOnTopOfTheDesktopScale() {
+        Backend backend;
+        QSignalSpy textScaleSpy(&backend, &Backend::textScaleChanged);
+        backend.setDesktopTextScale(1.5);
+        QCOMPARE(backend.textScale(), 1.5);
+
+        backend.increaseTextSize();
+        QCOMPARE(backend.textScale(), 1.5 * 1.1);
+        backend.decreaseTextSize();
+        backend.decreaseTextSize();
+        QCOMPARE(backend.textScale(), 1.5 * 0.9);
+        QCOMPARE(backend.status(), QStringLiteral("Text size 90%"));
+
+        // The ends of the ladder hold instead of running away.
+        for (int step = 0; step < 8; ++step)
+            backend.decreaseTextSize();
+        QCOMPARE(backend.textScale(), 1.5 * 0.67);
+        const int settledCount = textScaleSpy.count();
+        backend.decreaseTextSize();
+        QCOMPARE(textScaleSpy.count(), settledCount);
+
+        // A new window picks the size back up.
+        Backend reopened;
+        QCOMPARE(reopened.textScale(), 0.67);
+
+        backend.resetTextSize();
+        QCOMPARE(backend.textScale(), 1.5);
+        QCOMPARE(Backend().textScale(), 1.0);
+    }
+
+    void banksTouchpadScrollBeforeChangingTextSize() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *scroll = window->findChild<QObject *>(QStringLiteral("editorScroll"));
+        QVERIFY(scroll);
+
+        const auto scrollBy = [scroll](int angle, int pixels) {
+            const QVariant wheel = QVariantMap{
+                {QStringLiteral("angleDelta"), QVariantMap{{QStringLiteral("y"), angle}}},
+                {QStringLiteral("pixelDelta"), QVariantMap{{QStringLiteral("y"), pixels}}}};
+            QVERIFY(QMetaObject::invokeMethod(scroll, "zoomByWheel", Q_ARG(QVariant, wheel)));
+        };
+
+        // A touchpad trickles in pixels: a nudge is not a whole step yet. Its
+        // events carry a synthesized angleDelta as well, as Wayland sends them.
+        scrollBy(240, 20);
+        scrollBy(240, 20);
+        QCOMPARE(backend.textScale(), 1.0);
+        scrollBy(240, 20);
+        QCOMPARE(backend.textScale(), 1.1);
+
+        // A wheel notch is one step, and reversing drops the banked remainder.
+        scrollBy(-120, 0);
+        QCOMPARE(backend.textScale(), 1.0);
+
+        backend.resetTextSize();
     }
 
     void remembersLastSaveDirectory() {

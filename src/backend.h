@@ -23,7 +23,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
-    Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
+    Q_PROPERTY(qreal textScale READ textScale NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
@@ -43,8 +43,9 @@ public:
     int wordCount() const { return m_wordCount; }
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
-    qreal textScale() const { return m_textScale; }
-    void setTextScale(qreal textScale);
+    // What the desktop asks for, times what the user asked for on top of it.
+    qreal textScale() const { return m_desktopTextScale * m_textZoom; }
+    void setDesktopTextScale(qreal textScale);
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
@@ -64,6 +65,9 @@ public:
     Q_INVOKABLE void discardRecovery();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
+    Q_INVOKABLE void increaseTextSize();
+    Q_INVOKABLE void decreaseTextSize();
+    Q_INVOKABLE void resetTextSize();
     Q_INVOKABLE void printDocument();
     Q_INVOKABLE void newWindow();
     Q_INVOKABLE QString clipboardUrl() const;
@@ -91,6 +95,8 @@ signals:
 
 private:
     void loadDocumentText(const QString &text);
+    qreal steppedTextZoom(int direction) const;
+    void setTextZoom(qreal zoom);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
     void setStatus(const QString &status);
@@ -116,7 +122,8 @@ private:
     QString m_status;
     int m_wordCount = 0;
     bool m_darkMode = true;
-    qreal m_textScale = 1.0;
+    qreal m_desktopTextScale = 1.0;
+    qreal m_textZoom = 1.0;
     bool m_loading = false;
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;
