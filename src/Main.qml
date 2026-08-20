@@ -180,7 +180,9 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+="
+        // Ctrl++ is a different shortcut to Qt, not a shifted Ctrl+=, and it is
+        // the only one a layout that puts + on its own key can reach.
+        sequences: ["Ctrl+=", "Ctrl++"]
         context: Qt.ApplicationShortcut
         onActivated: backend.increaseTextSize()
     }

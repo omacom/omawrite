@@ -4,6 +4,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -281,6 +282,33 @@ private slots:
         // A wheel notch is one step, and reversing drops the banked remainder.
         scrollBy(-120, 0);
         QCOMPARE(backend.textScale(), 1.0);
+
+        backend.resetTextSize();
+    }
+
+    void growsTextFromEitherPlusKey() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QQuickWindow *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        // Qt resolves a shifted = to Ctrl++ rather than to Ctrl+=, and a layout
+        // that puts + on its own key never produces Ctrl+= at all.
+        QTest::keyClick(window, Qt::Key_Plus, Qt::ControlModifier);
+        QCOMPARE(backend.textScale(), 1.1);
+        QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(backend.textScale(), 1.25);
+        QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
+        QCOMPARE(backend.textScale(), 1.1);
 
         backend.resetTextSize();
     }
