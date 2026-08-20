@@ -23,7 +23,8 @@ class Backend : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
-    Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
+    Q_PROPERTY(qreal textScale READ textScale NOTIFY textScaleChanged)
+    Q_PROPERTY(qreal zoom READ zoom NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
@@ -43,8 +44,12 @@ public:
     int wordCount() const { return m_wordCount; }
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
-    qreal textScale() const { return m_textScale; }
-    void setTextScale(qreal textScale);
+    // The desktop text size and the in-app zoom, combined into the one
+    // factor the interface scales by.
+    qreal textScale() const { return m_systemTextScale * m_zoom; }
+    qreal zoom() const { return m_zoom; }
+    void setSystemTextScale(qreal textScale);
+    static qreal steppedZoom(qreal zoom, int direction);
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
@@ -64,6 +69,9 @@ public:
     Q_INVOKABLE void discardRecovery();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
+    Q_INVOKABLE void zoomIn();
+    Q_INVOKABLE void zoomOut();
+    Q_INVOKABLE void resetZoom();
     Q_INVOKABLE void printDocument();
     Q_INVOKABLE void newWindow();
     Q_INVOKABLE QString clipboardUrl() const;
@@ -90,6 +98,7 @@ signals:
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
+    void setZoom(qreal zoom);
     void loadDocumentText(const QString &text);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
@@ -116,7 +125,8 @@ private:
     QString m_status;
     int m_wordCount = 0;
     bool m_darkMode = true;
-    qreal m_textScale = 1.0;
+    qreal m_systemTextScale = 1.0;
+    qreal m_zoom = 1.0;
     bool m_loading = false;
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;

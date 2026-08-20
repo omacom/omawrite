@@ -44,6 +44,45 @@ private slots:
                  QStringLiteral("Already.md"));
     }
 
+    void stepsZoomAlongTheLadder() {
+        QCOMPARE(Backend::steppedZoom(1.0, 1), 1.1);
+        QCOMPARE(Backend::steppedZoom(1.0, -1), 0.9);
+        // A value between two steps snaps onto the ladder.
+        QCOMPARE(Backend::steppedZoom(1.2, 1), 1.25);
+        QCOMPARE(Backend::steppedZoom(1.2, -1), 1.1);
+        // The ends hold rather than run off.
+        QCOMPARE(Backend::steppedZoom(3.0, 1), 3.0);
+        QCOMPARE(Backend::steppedZoom(0.5, -1), 0.5);
+    }
+
+    void remembersZoomBetweenSessions() {
+        {
+            Backend backend;
+            QCOMPARE(backend.zoom(), 1.0);
+            backend.zoomIn();
+            QCOMPARE(backend.zoom(), 1.1);
+        }
+
+        Backend restarted;
+        QCOMPARE(restarted.zoom(), 1.1);
+        restarted.resetZoom();
+        QCOMPARE(restarted.zoom(), 1.0);
+    }
+
+    void scalesTextByBothTheDesktopSizeAndTheZoom() {
+        Backend backend;
+        QSignalSpy textScaleSpy(&backend, &Backend::textScaleChanged);
+
+        backend.setSystemTextScale(1.5);
+        QCOMPARE(backend.textScale(), 1.5);
+
+        backend.zoomIn();
+        QCOMPARE(backend.textScale(), 1.5 * 1.1);
+        QCOMPARE(textScaleSpy.count(), 2);
+
+        backend.resetZoom();
+    }
+
     void findsInlineMarkdownRanges() {
         const auto markup = MarkdownHighlighter::inlineMarkup(
             QStringLiteral("**bold** and *italic* and [site](https://example.com)"));
@@ -209,13 +248,26 @@ private slots:
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 20);
 
         // `omarchy display text size 16` sets the GNOME factor to 16/12.
-        backend.setTextScale(16.0 / 12.0);
+        backend.setSystemTextScale(16.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 27);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 27);
 
-        backend.setTextScale(9.0 / 12.0);
+        backend.setSystemTextScale(9.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+
+        // The footer icons grow with the text beside them.
+        QObject *saveButton = window->findChild<QObject *>(QStringLiteral("saveButton"));
+        QVERIFY(saveButton);
+        QCOMPARE(saveButton->property("width").toInt(), 12);
+
+        // Zooming scales on top of the desktop text size.
+        backend.zoomIn();
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 17);
+        QCOMPARE(saveButton->property("width").toInt(), 13);
+        backend.resetZoom();
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+        QCOMPARE(saveButton->property("width").toInt(), 12);
     }
 
     void remembersLastSaveDirectory() {
