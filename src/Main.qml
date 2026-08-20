@@ -337,6 +337,7 @@ ApplicationWindow {
     }
 
     Item {
+        id: contentRoot
         anchors.fill: parent
 
         Flickable {
@@ -473,6 +474,7 @@ ApplicationWindow {
             }
 
             onMovementStarted: wheelScroll.stop()
+            onContentYChanged: editor.refreshLinkHover()
 
             function scrollByWheel(wheel) {
                 // High-resolution wheels report fractional notches; feed
@@ -789,10 +791,88 @@ ApplicationWindow {
                     font.weight: editor.font.weight
                 }
 
+                property string hoveredLinkUrl: ""
+                property real linkHoverX: 0
+                property real linkHoverY: 0
+                property real linkHoverRootX: 0
+                property real linkHoverRootY: 0
+
+                function updateLinkHover(x, y) {
+                    var rootPoint = editor.mapToItem(contentRoot, x, y);
+                    linkHoverRootX = rootPoint.x;
+                    linkHoverRootY = rootPoint.y;
+                    linkHoverX = x;
+                    linkHoverY = y;
+                    hoveredLinkUrl = backend.linkUrlAt(positionAt(x, y));
+                }
+
+                function refreshLinkHover() {
+                    if (!editorHoverArea.containsMouse) {
+                        clearLinkHover();
+                        return;
+                    }
+                    var point = editor.mapFromItem(contentRoot,
+                                                   linkHoverRootX, linkHoverRootY);
+                    linkHoverX = point.x;
+                    linkHoverY = point.y;
+                    hoveredLinkUrl = backend.linkUrlAt(positionAt(point.x, point.y));
+                }
+
+                function clearLinkHover() {
+                    hoveredLinkUrl = "";
+                }
+
+                MouseArea {
+                    id: editorHoverArea
+                    anchors.fill: parent
+                    acceptedButtons: Qt.NoButton
+                    hoverEnabled: true
+                    cursorShape: Qt.IBeamCursor
+                    onEntered: editor.updateLinkHover(mouseX, mouseY)
+                    onPositionChanged: editor.updateLinkHover(mouse.x, mouse.y)
+                    onExited: editor.clearLinkHover()
+                }
+
                 Component.onCompleted: {
                     backend.attachDocument(textDocument);
                     forceActiveFocus();
                 }
+            }
+        }
+
+        // Keep the URL outside the clipped editor so it stays readable.
+        Rectangle {
+            id: linkTooltip
+            property point hoverPosition: editor.mapToItem(
+                contentRoot, editor.linkHoverX, editor.linkHoverY)
+
+            visible: editor.hoveredLinkUrl.length > 0
+            z: 20
+            x: Math.max(8, Math.min(contentRoot.width - width - 8,
+                                    hoverPosition.x + 12))
+            y: Math.max(8, Math.min(contentRoot.height - height - 8,
+                                    hoverPosition.y + 20))
+            width: Math.min(linkTooltipText.implicitWidth + 16,
+                            contentRoot.width - 16)
+            height: linkTooltipText.implicitHeight + 16
+            radius: 3
+            color: backend.themeBackground
+            border.color: backend.themeAccent
+
+            Text {
+                id: linkTooltipText
+                objectName: "linkTooltipText"
+                anchors.fill: parent
+                anchors.margins: 8
+                // A destination is arbitrary document text, and AutoText would
+                // render one that looks like HTML instead of showing it.
+                textFormat: Text.PlainText
+                text: editor.hoveredLinkUrl
+                color: backend.themeForeground
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.scaledSize(12)
+                elide: Text.ElideMiddle
+                verticalAlignment: Text.AlignVCenter
             }
         }
 

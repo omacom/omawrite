@@ -25,12 +25,14 @@ public:
         InlineKind kind;
         Span content;
         Span markers[2];
+        Span destination{};
     };
 
     // Single source of truth for inline markdown spans: the highlighter uses it
     // to style content and hide markers, and the editor uses it (via
     // Backend::hiddenRangesAt) to skip the caret over the hidden markers.
     static QList<InlineMarkup> inlineMarkup(const QString &text);
+    static QString linkUrlAt(const QString &text, int position);
 
 protected:
     void highlightBlock(const QString &text) override;

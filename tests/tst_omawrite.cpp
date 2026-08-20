@@ -54,6 +54,43 @@ private slots:
         QCOMPARE(markup.at(2).markers[0].length, 1);
     }
 
+    void findsLinkUrlAtPosition() {
+        const QString text = QStringLiteral("Read [site](https://example.com/docs) now");
+        const int linkStart = text.indexOf(QStringLiteral("site"));
+
+        QCOMPARE(MarkdownHighlighter::linkUrlAt(text, linkStart),
+                 QStringLiteral("https://example.com/docs"));
+        QCOMPARE(MarkdownHighlighter::linkUrlAt(text, linkStart + 3),
+                 QStringLiteral("https://example.com/docs"));
+        QVERIFY(MarkdownHighlighter::linkUrlAt(text, linkStart - 1).isEmpty());
+        QVERIFY(MarkdownHighlighter::linkUrlAt(text, text.indexOf(QStringLiteral("https"))).isEmpty());
+    }
+
+    void showsLinkTooltipUrlAsPlainText() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *tooltipText =
+            window->findChild<QObject *>(QStringLiteral("linkTooltipText"));
+        QVERIFY(tooltipText);
+
+        // A destination Qt would mistake for HTML must still read as itself.
+        const QString destination =
+            QStringLiteral("<img src=\"https://example.com/pixel\">");
+        QVERIFY(Qt::mightBeRichText(destination));
+        tooltipText->setProperty("text", destination);
+        QCOMPARE(tooltipText->property("text").toString(), destination);
+        QCOMPARE(tooltipText->property("textFormat").toInt(), int(Qt::PlainText));
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
