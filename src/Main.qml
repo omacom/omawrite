@@ -861,8 +861,12 @@ ApplicationWindow {
 
             Text {
                 id: linkTooltipText
+                objectName: "linkTooltipText"
                 anchors.fill: parent
                 anchors.margins: 8
+                // A destination is arbitrary document text, and AutoText would
+                // render one that looks like HTML instead of showing it.
+                textFormat: Text.PlainText
                 text: editor.hoveredLinkUrl
                 color: backend.themeForeground
                 font.family: "iA Writer Mono S"
