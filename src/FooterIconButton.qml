@@ -14,6 +14,10 @@ Item {
     width: 16
     height: 16
 
+    // The icon paths are drawn on a 16px grid, so a larger button paints the
+    // same shape at a larger stroke.
+    readonly property real drawScale: width / 16
+
     ToolTip.visible: hitArea.containsMouse && tooltip.length > 0
     ToolTip.text: tooltip
 
@@ -29,10 +33,12 @@ Item {
         transformOrigin: Item.TopLeft
         scale: 1 / dpr
         onDprChanged: requestPaint()
+        onWidthChanged: requestPaint()
 
         onPaint: {
             var context = getContext("2d");
-            context.setTransform(dpr, 0, 0, dpr, 0, 0);
+            var unit = dpr * control.drawScale;
+            context.setTransform(unit, 0, 0, unit, 0, 0);
             context.clearRect(0, 0, width, height);
             context.strokeStyle = control.iconColor;
             context.lineWidth = 1.4;
@@ -76,8 +82,8 @@ Item {
     MouseArea {
         id: hitArea
         anchors.centerIn: parent
-        width: 28
-        height: 28
+        width: control.width + 12
+        height: control.height + 12
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: control.clicked()

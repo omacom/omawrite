@@ -256,11 +256,18 @@ private slots:
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
 
+        // The footer icons grow with the text beside them.
+        QObject *saveButton = window->findChild<QObject *>(QStringLiteral("saveButton"));
+        QVERIFY(saveButton);
+        QCOMPARE(saveButton->property("width").toInt(), 12);
+
         // Zooming scales on top of the desktop text size.
         backend.zoomIn();
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 17);
+        QCOMPARE(saveButton->property("width").toInt(), 13);
         backend.resetZoom();
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+        QCOMPARE(saveButton->property("width").toInt(), 12);
     }
 
     void remembersLastSaveDirectory() {

@@ -853,11 +853,13 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
-            spacing: 12
+            spacing: win.scaledSize(12)
             opacity: 0.55
 
             FooterIconButton {
                 objectName: "saveButton"
+                width: win.scaledSize(16)
+                height: win.scaledSize(16)
                 iconName: "save"
                 iconColor: win.mutedColor
                 tooltip: "Save"
@@ -866,6 +868,8 @@ ApplicationWindow {
 
             FooterIconButton {
                 objectName: "openButton"
+                width: win.scaledSize(16)
+                height: win.scaledSize(16)
                 iconName: "open"
                 iconColor: win.mutedColor
                 tooltip: "Open"
