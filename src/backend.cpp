@@ -35,6 +35,11 @@
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString zoomSetting = QStringLiteral("view/zoom");
+// The zoom steps a browser uses, so Ctrl+= and Ctrl+- land where the muscle
+// memory from Chromium and Firefox expects.
+const qreal zoomSteps[] = {0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0};
+constexpr int zoomStepCount = int(sizeof(zoomSteps) / sizeof(zoomSteps[0]));
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -91,6 +96,11 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             }
         }
     }
+    // A hand-edited settings file could hold anything; keep the restored
+    // zoom inside the range the shortcuts can reach.
+    const qreal savedZoom = QSettings().value(zoomSetting, 1.0).toReal();
+    m_zoom = qBound(zoomSteps[0], savedZoom, zoomSteps[zoomStepCount - 1]);
+
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
@@ -158,11 +168,51 @@ void Backend::setDarkMode(bool darkMode) {
     emit darkModeChanged();
 }
 
-void Backend::setTextScale(qreal textScale) {
-    if (qFuzzyCompare(m_textScale, textScale))
+void Backend::setSystemTextScale(qreal textScale) {
+    if (qFuzzyCompare(m_systemTextScale, textScale))
         return;
 
-    m_textScale = textScale;
+    m_systemTextScale = textScale;
+    emit textScaleChanged();
+}
+
+// The next step up (direction 1) or down (-1) from the given zoom, snapping a
+// value that sits between two steps onto the ladder.
+qreal Backend::steppedZoom(qreal zoom, int direction) {
+    if (direction > 0) {
+        for (int step = 0; step < zoomStepCount; ++step) {
+            if (zoomSteps[step] > zoom + 0.001)
+                return zoomSteps[step];
+        }
+        return zoomSteps[zoomStepCount - 1];
+    }
+
+    for (int step = zoomStepCount - 1; step >= 0; --step) {
+        if (zoomSteps[step] < zoom - 0.001)
+            return zoomSteps[step];
+    }
+    return zoomSteps[0];
+}
+
+void Backend::zoomIn() {
+    setZoom(steppedZoom(m_zoom, 1));
+}
+
+void Backend::zoomOut() {
+    setZoom(steppedZoom(m_zoom, -1));
+}
+
+void Backend::resetZoom() {
+    setZoom(1.0);
+}
+
+void Backend::setZoom(qreal zoom) {
+    if (qFuzzyCompare(m_zoom, zoom))
+        return;
+
+    m_zoom = zoom;
+    QSettings().setValue(zoomSetting, m_zoom);
+    setStatus(QStringLiteral("Text size %1%").arg(qRound(m_zoom * 100)));
     emit textScaleChanged();
 }
 

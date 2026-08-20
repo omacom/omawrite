@@ -23,7 +23,7 @@ ApplicationWindow {
     readonly property color selectionFill: backend.themeSelection
     // The desktop's text size knob (GNOME's text-scaling-factor, which
     // `omarchy display text size` drives) anchored so its 12px default leaves
-    // the app at the sizes it was designed around.
+    // the app at the sizes it was designed around, times the in-app zoom.
     readonly property real textScale: backend.textScale
     readonly property int editorFontPixelSize: scaledSize(20)
     readonly property int editorWidth: Math.min(
@@ -83,6 +83,29 @@ ApplicationWindow {
     // Every hardcoded size in the interface is expressed at text scale 1.
     function scaledSize(pixels) {
         return Math.max(1, Math.round(pixels * win.textScale));
+    }
+
+    // One zoom step per wheel notch. Finger scrolling arrives as a stream of
+    // small pixel deltas instead, so those add up to a notch before they move
+    // the zoom, which keeps a pinch from running to the end of the ladder.
+    property real zoomWheelDelta: 0
+
+    function zoomByWheel(wheel) {
+        var delta = wheel.angleDelta.y !== 0 ? wheel.angleDelta.y : wheel.pixelDelta.y * 4;
+        if (delta === 0)
+            return;
+        if (delta > 0 !== zoomWheelDelta > 0)
+            zoomWheelDelta = 0;
+
+        zoomWheelDelta += delta;
+        while (zoomWheelDelta >= 120) {
+            zoomWheelDelta -= 120;
+            backend.zoomIn();
+        }
+        while (zoomWheelDelta <= -120) {
+            zoomWheelDelta += 120;
+            backend.zoomOut();
+        }
     }
 
     function toggleFullScreen() {
@@ -194,6 +217,27 @@ ApplicationWindow {
         sequence: "Ctrl+Shift+S"
         context: Qt.ApplicationShortcut
         onActivated: backend.saveAsDialog()
+    }
+
+    // Ctrl and the plus key, which the layout may only reach through Shift,
+    // and Ctrl and minus. Listing a sequence twice makes Qt call the match
+    // ambiguous and fire nothing, so each spelling appears once.
+    Shortcut {
+        sequences: ["Ctrl+=", "Ctrl++"]
+        context: Qt.ApplicationShortcut
+        onActivated: backend.zoomIn()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+-"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.zoomOut()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+0"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.resetZoom()
     }
 
     Shortcut {
@@ -331,7 +375,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nCtrl+=  Bigger Text\nCtrl+-  Smaller Text\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -463,6 +507,13 @@ ApplicationWindow {
                 // finger scrolling carries pixel-precise pixelDelta.
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: function(wheel) {
+                    // Ctrl and the wheel zooms, as it does in a browser.
+                    if (wheel.modifiers & Qt.ControlModifier) {
+                        win.zoomByWheel(wheel);
+                        wheel.accepted = true;
+                        return;
+                    }
+
                     scrollLinger.restart();
                     if (wheel.pixelDelta.y !== 0)
                         editorFlick.scrollTo(editorFlick.clampContentY(editorFlick.contentY - wheel.pixelDelta.y));

@@ -22,6 +22,8 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
 - `Ctrl+H` opens find and replace.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
+- `Ctrl+=` and `Ctrl+-` make the text bigger and smaller, and `Ctrl+0` returns
+  it to the default. `Ctrl` and the mouse wheel does the same.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
@@ -30,6 +32,9 @@ and warns before an external change can replace local work.
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
 Omawrite at the size it is designed around; larger and smaller sizes scale from there.
+
+The zoom shortcuts scale on top of that, along the same steps a browser uses, from
+half size to triple. Omawrite remembers the zoom between sessions.
 
 ## Requirements
 
