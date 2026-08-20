@@ -30,11 +30,19 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <iterator>
 
 #include "markdownhighlighter.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString textZoomSetting = QStringLiteral("text/zoom");
+
+// The user's own text size, multiplied onto the desktop's text scale.
+// Chromium's zoom ladder, trimmed to the range the whole window still reads
+// well at, so Ctrl+wheel here steps like Ctrl+wheel in a browser.
+constexpr qreal textZoomSteps[] = {0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0};
+constexpr int textZoomStepCount = int(std::size(textZoomSteps));
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -72,6 +80,15 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
 }
 
 Backend::Backend(QObject *parent) : QObject(parent) {
+    // A settings file truncated by a crash reads back as an empty value, and
+    // both that and a NaN would clamp to the smallest size rather than fall
+    // back to the default.
+    bool zoomOk = false;
+    const qreal storedZoom = QSettings().value(textZoomSetting, 1.0).toDouble(&zoomOk);
+    m_textZoom = zoomOk && storedZoom > 0 ? qBound(textZoomSteps[0], storedZoom,
+                                                   textZoomSteps[textZoomStepCount - 1])
+                                          : 1.0;
+
     const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(stateDirectory);
     // Claim an orphaned snapshot before taking an empty slot. This ensures a
@@ -158,11 +175,47 @@ void Backend::setDarkMode(bool darkMode) {
     emit darkModeChanged();
 }
 
-void Backend::setTextScale(qreal textScale) {
-    if (qFuzzyCompare(m_textScale, textScale))
+void Backend::setDesktopTextScale(qreal textScale) {
+    if (qFuzzyCompare(m_desktopTextScale, textScale))
         return;
 
-    m_textScale = textScale;
+    m_desktopTextScale = textScale;
+    emit textScaleChanged();
+}
+
+void Backend::increaseTextSize() {
+    setTextZoom(steppedTextZoom(1));
+}
+
+void Backend::decreaseTextSize() {
+    setTextZoom(steppedTextZoom(-1));
+}
+
+void Backend::resetTextSize() {
+    setTextZoom(1.0);
+}
+
+// The neighbouring rung, starting from whichever rung the current zoom sits
+// closest to; the ends of the ladder hold.
+qreal Backend::steppedTextZoom(int direction) const {
+    int closest = 0;
+    for (int step = 1; step < textZoomStepCount; ++step) {
+        if (qAbs(textZoomSteps[step] - m_textZoom) < qAbs(textZoomSteps[closest] - m_textZoom))
+            closest = step;
+    }
+
+    return textZoomSteps[qBound(0, closest + direction, textZoomStepCount - 1)];
+}
+
+void Backend::setTextZoom(qreal zoom) {
+    // Report the size even when the ladder has run out, so a keypress that
+    // changes nothing still says why.
+    setStatus(QStringLiteral("Text size %1%").arg(qRound(zoom * 100)));
+    if (qFuzzyCompare(m_textZoom, zoom))
+        return;
+
+    m_textZoom = zoom;
+    QSettings().setValue(textZoomSetting, zoom);
     emit textScaleChanged();
 }
 
