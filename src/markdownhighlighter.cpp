@@ -83,6 +83,10 @@ void MarkdownHighlighter::rebuildFormats() {
     m_italicFormat.setFontItalic(true);
     m_italicFormat.setForeground(text);
 
+    m_strikethroughFormat = QTextCharFormat();
+    m_strikethroughFormat.setFontStrikeOut(true);
+    m_strikethroughFormat.setForeground(text);
+
     m_codeFormat = QTextCharFormat();
     m_codeFormat.setForeground(text);
     m_codeFormat.setBackground(codeBackground);
@@ -107,7 +111,8 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
     if (!text.isEmpty()) {
         highlightMarkers(text);
         if (text.contains(QLatin1Char('`')) || text.contains(QLatin1Char('*'))
-            || text.contains(QLatin1Char('_')) || text.contains(QLatin1Char('['))) {
+            || text.contains(QLatin1Char('_')) || text.contains(QLatin1Char('['))
+            || text.contains(QLatin1Char('~'))) {
             highlightInline(text);
         }
     }
@@ -192,7 +197,8 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         const QTextCharFormat &contentFormat =
             item.kind == InlineKind::Bold ? m_boldFormat
             : item.kind == InlineKind::Italic ? m_italicFormat
-                                              : m_linkFormat;
+            : item.kind == InlineKind::Strikethrough ? m_strikethroughFormat
+                                                     : m_linkFormat;
         setFormat(item.content.start, item.content.length, contentFormat);
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
@@ -202,7 +208,7 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
 QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const QString &text) {
     QList<InlineMarkup> markup;
     if (!text.contains(QLatin1Char('*')) && !text.contains(QLatin1Char('_'))
-            && !text.contains(QLatin1Char('['))) {
+            && !text.contains(QLatin1Char('[')) && !text.contains(QLatin1Char('~'))) {
         return markup;
     }
 
@@ -227,6 +233,14 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         const int contentIndex = match.capturedStart(1) >= 0 ? 1 : 2;
         markup.append({InlineKind::Italic, span(match, contentIndex),
                        {{whole.start, 1}, {whole.start + whole.length - 1, 1}}});
+    }
+
+    static const QRegularExpression strikethroughRe(QStringLiteral("(~~)(.+?)(~~)"));
+    QRegularExpressionMatchIterator strikethroughMatches = strikethroughRe.globalMatch(text);
+    while (strikethroughMatches.hasNext()) {
+        const QRegularExpressionMatch match = strikethroughMatches.next();
+        markup.append({InlineKind::Strikethrough, span(match, 2),
+                       {span(match, 1), span(match, 3)}});
     }
 
     static const QRegularExpression linkRe(

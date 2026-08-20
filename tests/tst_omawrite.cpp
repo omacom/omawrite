@@ -54,6 +54,17 @@ private slots:
         QCOMPARE(markup.at(2).markers[0].length, 1);
     }
 
+    void findsStrikethroughRanges() {
+        const auto markup =
+            MarkdownHighlighter::inlineMarkup(QStringLiteral("keep ~~drop this~~ keep"));
+        QCOMPARE(markup.size(), 1);
+        QCOMPARE(markup.at(0).kind, MarkdownHighlighter::InlineKind::Strikethrough);
+        QCOMPARE(markup.at(0).content.start, 7);
+        QCOMPARE(markup.at(0).content.length, 9);
+        QCOMPARE(markup.at(0).markers[0].length, 2);
+        QCOMPARE(markup.at(0).markers[1].length, 2);
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
@@ -110,6 +121,73 @@ private slots:
         QCOMPARE(changedContents.write("changed elsewhere"), qint64(17));
         changedContents.close();
         QTRY_COMPARE(externalChangeSpy.count(), 1);
+    }
+
+    void togglesWrappedSelection() {
+        const QString mutationsPath = QFINDTESTDATA("../src/EditorMutations.js");
+        QVERIFY(!mutationsPath.isEmpty());
+
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        const QByteArray harness = R"QML(
+            import QtQuick
+            import "EditorMutations.js" as EditorMutations
+
+            TextEdit {
+                property string wrappedText
+                property string unwrappedText
+                property int unwrappedSelectionStart
+                property int unwrappedSelectionEnd
+                property string emptyToggleText
+                property string italicInsideBold
+                property string italicAroundBold
+
+                Component.onCompleted: {
+                    text = "strike this";
+                    select(0, 6);
+                    EditorMutations.toggleWrap(this, "~~", "~~");
+                    wrappedText = text;
+                    EditorMutations.toggleWrap(this, "~~", "~~");
+                    unwrappedText = text;
+                    unwrappedSelectionStart = selectionStart;
+                    unwrappedSelectionEnd = selectionEnd;
+
+                    text = "";
+                    cursorPosition = 0;
+                    EditorMutations.toggleWrap(this, "~~", "~~");
+                    EditorMutations.toggleWrap(this, "~~", "~~");
+                    emptyToggleText = text;
+
+                    text = "**bold**";
+                    select(2, 6);
+                    EditorMutations.toggleWrap(this, "*", "*");
+                    italicInsideBold = text;
+
+                    text = "**bold**";
+                    select(0, 8);
+                    EditorMutations.toggleWrap(this, "*", "*");
+                    italicAroundBold = text;
+                }
+            }
+        )QML";
+        const QUrl harnessUrl = QUrl::fromLocalFile(
+            QFileInfo(mutationsPath).absolutePath() + QStringLiteral("/ToggleHarness.qml"));
+        component.setData(harness, harnessUrl);
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> editor(component.create());
+        QVERIFY2(editor, qPrintable(component.errorString()));
+
+        QCOMPARE(editor->property("wrappedText").toString(),
+                 QStringLiteral("~~strike~~ this"));
+        QCOMPARE(editor->property("unwrappedText").toString(),
+                 QStringLiteral("strike this"));
+        QCOMPARE(editor->property("unwrappedSelectionStart").toInt(), 0);
+        QCOMPARE(editor->property("unwrappedSelectionEnd").toInt(), 6);
+        QCOMPARE(editor->property("emptyToggleText").toString(), QString());
+        QCOMPARE(editor->property("italicInsideBold").toString(),
+                 QStringLiteral("***bold***"));
+        QCOMPARE(editor->property("italicAroundBold").toString(),
+                 QStringLiteral("***bold***"));
     }
 
     void keepsCursorAndSelectionStableAcrossInsertions() {

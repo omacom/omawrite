@@ -167,6 +167,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Shift+X"
+        context: Qt.WindowShortcut
+        onActivated: editor.wrapSelection("~~", "~~")
+    }
+
+    Shortcut {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
@@ -331,7 +337,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -568,13 +574,7 @@ ApplicationWindow {
 
                 function wrapSelection(before, after) {
                     forceActiveFocus();
-                    var start = Math.min(selectionStart, selectionEnd);
-                    var end = Math.max(selectionStart, selectionEnd);
-                    var selected = text.slice(start, end);
-                    EditorMutations.replaceRange(editor, start, end,
-                                                 before + selected + after,
-                                                 before.length,
-                                                 before.length + selected.length);
+                    EditorMutations.toggleWrap(editor, before, after);
                 }
 
                 function insertLink() {
