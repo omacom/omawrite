@@ -218,6 +218,40 @@ private slots:
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
     }
 
+    void keepsTextColumnInsideNarrowWindows() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QObject *viewport = editor->parent();
+        QVERIFY(viewport);
+
+        // A resize reaches the window through its platform window, so the
+        // bindings only see the new width once the events are delivered.
+        const int minimumWidth = window->property("minimumWidth").toInt();
+        window->setProperty("width", minimumWidth);
+        QCoreApplication::processEvents();
+        QCOMPARE(window->property("width").toInt(), minimumWidth);
+        QVERIFY(editor->property("x").toInt() > 0);
+
+        // A tiling compositor resizes below the minimum the window asks for.
+        window->setProperty("width", 394);
+        QCoreApplication::processEvents();
+        QCOMPARE(window->property("width").toInt(), 394);
+        QVERIFY(editor->property("width").toInt()
+                <= viewport->property("width").toInt());
+        QVERIFY(editor->property("x").toInt() >= 0);
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());
