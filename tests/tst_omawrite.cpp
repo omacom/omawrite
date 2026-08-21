@@ -3,6 +3,7 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickWindow>
 #include <QQuickTextDocument>
 #include <QQuickStyle>
 #include <QTextBlock>
@@ -307,6 +308,9 @@ private slots:
         QScopedPointer<QObject> window(component.create());
         QVERIFY2(window, qPrintable(component.errorString()));
 
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QVERIFY(editor);
         auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
@@ -324,25 +328,27 @@ private slots:
         QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
                                          Q_ARG(QVariant, QVariant(QStringLiteral("body")))));
 
-        QKeyEvent undoEvent(QEvent::KeyPress, Qt::Key_Z, Qt::ControlModifier);
-        QCoreApplication::sendEvent(editor, &undoEvent);
-        QVERIFY(undoEvent.isAccepted());
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\n"));
-        QVERIFY(QMetaObject::invokeMethod(editor, "undoDocument"));
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading"));
         const qreal expectedIndent = -window->property("headingCellWidth").toReal() * 4;
         QVERIFY(qAbs(document->begin().blockFormat().textIndent() - expectedIndent) < 0.01);
-        QVERIFY(QMetaObject::invokeMethod(editor, "undoDocument"));
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
         QCOMPARE(editor->property("text").toString(), QString());
 
         for (int i = 0; i < 2; ++i) {
             editor->setProperty("cursorPosition", editor->property("text").toString().size());
-            QVERIFY(QMetaObject::invokeMethod(editor, "undoDocument"));
+            QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
             QCoreApplication::processEvents();
             QCOMPARE(editor->property("text").toString(), QString());
         }
 
-        QVERIFY(QMetaObject::invokeMethod(editor, "redoDocument"));
+        QTest::keyClick(quickWindow, Qt::Key_Z,
+                        Qt::ControlModifier | Qt::ShiftModifier);
         QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading"));
         QVERIFY(qAbs(document->begin().blockFormat().textIndent() - expectedIndent) < 0.01);
     }
