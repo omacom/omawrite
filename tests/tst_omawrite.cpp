@@ -358,6 +358,81 @@ private slots:
         QVERIFY(qAbs(document->begin().blockFormat().textIndent() - expectedIndent) < 0.01);
     }
 
+    void changingTextScaleResetsHistory() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        QVERIFY(document);
+
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert",
+                                         Q_ARG(int, 0),
+                                         Q_ARG(QString, QStringLiteral("### Heading"))));
+        QVERIFY(QMetaObject::invokeMethod(editor, "smartReturn",
+                                         Q_ARG(QVariant, QVariant(false))));
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("body")))));
+
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\n"));
+        QVERIFY(document->isUndoAvailable());
+        QVERIFY(document->isRedoAvailable());
+
+        const qreal initialGutter = window->property("headingGutterWidth").toReal();
+        backend.setTextScale(2.0);
+        QTRY_VERIFY(window->property("headingGutterWidth").toReal() > initialGutter);
+
+        const QString textAfterScale = editor->property("text").toString();
+        const qreal scaledGutter = window->property("headingGutterWidth").toReal();
+        const qreal scaledHeadingIndent = -window->property("headingCellWidth").toReal() * 4;
+        QVERIFY(!document->isUndoAvailable());
+        QVERIFY(!document->isRedoAvailable());
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next())
+            QVERIFY(qAbs(block.blockFormat().leftMargin() - scaledGutter) < 0.01);
+        QVERIFY(qAbs(document->begin().blockFormat().textIndent() - scaledHeadingIndent) < 0.01);
+
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QTest::keyClick(quickWindow, Qt::Key_Z,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(editor->property("text").toString(), textAfterScale);
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next())
+            QVERIFY(qAbs(block.blockFormat().leftMargin() - scaledGutter) < 0.01);
+        QVERIFY(qAbs(document->begin().blockFormat().textIndent() - scaledHeadingIndent) < 0.01);
+
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("one")))));
+        editor->setProperty("cursorPosition", QStringLiteral("### Heading\n\n").size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("two")))));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\ntwoone"));
+
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\none"));
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), textAfterScale);
+        QTest::keyClick(quickWindow, Qt::Key_Z,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\none"));
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());

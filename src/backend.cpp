@@ -220,7 +220,7 @@ void Backend::setHeadingCellWidth(qreal width) {
         return;
 
     m_headingCellWidth = width;
-    updateAllBlocksTypography();
+    applyDocumentTypography();
 }
 
 void Backend::openDialog() {
@@ -776,8 +776,9 @@ void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
 
-    // A full pass is only used for freshly loaded/attached documents, so it is
-    // safe to drop undo history here (re-enabling clears the stack anyway).
+    // Block typography is layout metadata, not a user edit. Keep it out of the
+    // undo stack. Qt clears both history branches when undo is disabled, which
+    // is intentional when a live text-size change requires a full reformat.
     const bool undoEnabled = m_document->isUndoRedoEnabled();
     m_document->setUndoRedoEnabled(false);
 
