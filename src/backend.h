@@ -3,6 +3,7 @@
 #include <QObject>
 #include <QPointer>
 #include <QByteArray>
+#include <QDir>
 #include <QFileSystemWatcher>
 #include <QString>
 #include <QTimer>
@@ -28,6 +29,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
+    Q_PROPERTY(QUrl folderUrl READ folderUrl NOTIFY folderChanged)
+    Q_PROPERTY(QString folderName READ folderName NOTIFY folderChanged)
+    Q_PROPERTY(bool folderHasParent READ folderHasParent NOTIFY folderChanged)
+    Q_PROPERTY(QVariantList folderEntries READ folderEntries NOTIFY folderChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -49,14 +54,28 @@ public:
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
+    QUrl folderUrl() const { return m_folderUrl; }
+    QString folderName() const;
+    bool folderHasParent() const;
+    QVariantList folderEntries() const;
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
+    static QString sanitizedEntryName(const QString &text);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     Q_INVOKABLE void openDialog();
+    Q_INVOKABLE void setFolder(const QUrl &url);
+    Q_INVOKABLE void openParentFolder();
+    Q_INVOKABLE QUrl createDocument(const QString &name);
+    Q_INVOKABLE QUrl createFolder(const QString &name);
+    Q_INVOKABLE int sidebarWidth() const;
+    Q_INVOKABLE void saveSidebarWidth(int width);
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
+    Q_INVOKABLE void saveNow();
+    Q_INVOKABLE bool saveBeforeLeaving();
+    Q_INVOKABLE bool saveBeforeClosing();
     Q_INVOKABLE void saveForClose();
     Q_INVOKABLE void saveAsDialog();
     Q_INVOKABLE void saveAs(const QUrl &url);
@@ -88,22 +107,30 @@ signals:
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void folderChanged();
+    void documentLoaded();
 
 private:
     void loadDocumentText(const QString &text);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
     void setStatus(const QString &status);
-    void saveTo(const QUrl &url);
+    bool saveTo(const QUrl &url);
     QUrl suggestedSaveUrl() const;
+    QDir defaultDirectory() const;
+    void applyFolder(const QString &path, bool remember);
+    void watchCurrentFolder();
     QString currentDocumentText() const;
     void setWordCount(int words);
     void refreshWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
-    void scheduleRecovery();
-    void writeRecovery();
+    void schedulePersist();
+    void persistDocument();
+    bool saveToItsOwnFile();
+    bool writeRecovery();
+    QUrl unusedDocumentUrl(const QString &fileName) const;
     void restoreRecovery();
     void clearRecovery();
     QString recoveryPath() const;
@@ -124,14 +151,17 @@ private:
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;
     QTimer m_wordCountTimer;
-    QTimer m_recoveryTimer;
+    QTimer m_persistTimer;
     QFileSystemWatcher m_fileWatcher;
+    QUrl m_folderUrl;
+    QFileSystemWatcher m_folderWatcher;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
     bool m_hasKnownFileContents = false;
+    bool m_externalChangePending = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 

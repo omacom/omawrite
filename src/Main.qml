@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: backend.fileName + " - Omawrite"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -28,50 +28,106 @@ ApplicationWindow {
     readonly property int editorFontPixelSize: scaledSize(20)
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
-        Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
-    property bool closeConfirmed: false
+        Math.max(360, width - fileSidebar.width
+                 - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
     property bool searchOpen: false
+    property bool sidebarOpen: false
+    property int sidebarLogicalWidth: 240
     property bool searchUpdating: false
     property var searchMatches: []
     property int searchMatchIndex: -1
-    property url pendingOpenUrl
-    property string pendingAction: ""
     property bool replaceOpen: false
-    property bool awaitingPendingSave: false
+    property bool keyboardWaitingForDialog: false
+    property bool closeAnyway: false
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
 
+    // If the work reached neither its file nor a draft there is nowhere left
+    // to put it, so the first close is refused and says so; a second one is
+    // taken as meaning it.
     onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
+        if (closeAnyway || backend.saveBeforeClosing())
             return;
-
         close.accepted = false;
-        pendingAction = "close";
-        if (!unsavedChangesDialog.opened)
-            unsavedChangesDialog.open();
+        closeAnyway = true;
+    }
+    onActiveChanged: if (!active) backend.saveNow()
+
+    function setSidebarOpen(open) {
+        sidebarOpen = open;
+        if (open)
+            fileSidebar.focusList();
+        else
+            editor.forceActiveFocus();
+    }
+
+    function toggleSidebar() {
+        setSidebarOpen(!sidebarOpen);
     }
 
     function requestOpen(url) {
-        if (!backend.modified) {
-            backend.open(url);
+        // Refuse to swap the document out from under work that could not be
+        // written; the status line says why. Closing still goes through, on
+        // the recovery draft saveBeforeLeaving leaves behind.
+        if (!backend.saveBeforeLeaving())
             return;
-        }
-        pendingOpenUrl = url;
-        pendingAction = "open";
-        unsavedChangesDialog.open();
+        backend.open(url);
     }
 
-    function completePendingAction() {
-        var action = pendingAction;
-        pendingAction = "";
-        if (action === "close") {
-            closeConfirmed = true;
-            close();
-        } else if (action === "open") {
-            backend.open(pendingOpenUrl);
+    // A closing modal hands focus back to whatever held it before it opened,
+    // so wait it out rather than race it.
+    function handKeyboardToEditor() {
+        if (externalChangeDialog.visible) {
+            keyboardWaitingForDialog = true;
+            return;
         }
+        editor.forceActiveFocus();
+    }
+
+    function releaseKeyboardAfterDialog() {
+        if (!keyboardWaitingForDialog)
+            return;
+        keyboardWaitingForDialog = false;
+        editor.forceActiveFocus();
+    }
+
+    // The editor places the caret item when the cursor moves and never again
+    // while the text is re-laid out under it — which is what loading a
+    // document does, after the caret has been placed.
+    property bool settlingCaret: false
+
+    Component {
+        id: caretShape
+
+        Rectangle {
+            width: 1
+            color: win.strongTextColor
+            opacity: editor.activeFocus ? 1 : 0
+            x: editor.cursorRectangle.x
+            y: editor.cursorRectangle.y
+            height: editor.cursorRectangle.height
+        }
+    }
+
+    function settleCaret() {
+        if (!settlingCaret)
+            return;
+
+        // A fresh delegate is built against the finished text. Both
+        // assignments land in one turn, so no frame is drawn without a caret.
+        editor.cursorDelegate = null;
+        editor.cursorDelegate = caretShape;
+        editorFlick.ensureCursorVisible();
+    }
+
+    // The net for a relayout that arrives after the load is announced.
+    Timer {
+        id: caretSettleWindow
+        interval: 400
+
+        onTriggered: win.settlingCaret = false
     }
 
     FontMetrics {
@@ -179,6 +235,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+E"
+        context: Qt.ApplicationShortcut
+        onActivated: win.toggleSidebar()
+    }
+
+    Shortcut {
         sequence: "Ctrl+O"
         context: Qt.ApplicationShortcut
         onActivated: backend.openDialog()
@@ -249,15 +311,12 @@ ApplicationWindow {
             saveFileDialog.open();
         }
 
-        function onCloseAfterSave() {
-            win.closeConfirmed = true;
-            win.close();
-        }
-
-        function onSaveSucceeded() {
-            win.awaitingPendingSave = false;
-            if (win.pendingAction !== "")
-                win.completePendingAction();
+        function onDocumentLoaded() {
+            editor.cursorPosition = editor.length;
+            win.settlingCaret = true;
+            win.settleCaret();
+            caretSettleWindow.restart();
+            win.handKeyboardToEditor();
         }
 
         function onExternalChangeDetected(deleted, locallyModified) {
@@ -281,38 +340,12 @@ ApplicationWindow {
         fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
         onAccepted: backend.saveAs(selectedFile)
-        onRejected: {
-            backend.fileDialogCanceled();
-            win.awaitingPendingSave = false;
-            win.pendingAction = "";
-        }
-    }
-
-    UnsavedChangesDialog {
-        id: unsavedChangesDialog
-        fileName: backend.fileName
-        darkMode: win.darkMode
-        textScale: win.textScale
-        textColor: win.textColor
-        strongTextColor: win.strongTextColor
-        activeButtonColor: backend.themeAccent
-        containerWidth: win.width
-        containerHeight: win.height
-
-        onDiscardRequested: {
-            backend.discardRecovery();
-            win.completePendingAction();
-        }
-
-        onSaveRequested: {
-            win.awaitingPendingSave = true;
-            backend.save();
-        }
-        onCancelRequested: win.pendingAction = ""
+        onRejected: backend.fileDialogCanceled()
     }
 
     ExternalChangeDialog {
         id: externalChangeDialog
+        objectName: "externalChangeDialog"
         darkMode: win.darkMode
         textScale: win.textScale
         textColor: win.textColor
@@ -322,6 +355,7 @@ ApplicationWindow {
 
         onKeepRequested: backend.keepExternalVersion()
         onReloadRequested: backend.reloadFromDisk()
+        onClosed: win.releaseKeyboardAfterDialog()
     }
 
     Dialog {
@@ -331,16 +365,63 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+E  Files\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts\n\nIn the sidebar: Up/Down or j/k move, Enter opens,\nBackspace or h goes up, a new file, A new folder,\nEsc returns to writing"
             lineHeight: 1.5
         }
     }
 
+    FileSidebar {
+        id: fileSidebar
+        objectName: "fileSidebar"
+        anchors.left: parent.left
+        anchors.top: parent.top
+        anchors.bottom: parent.bottom
+        expanded: win.sidebarOpen
+        darkMode: win.darkMode
+        textScale: win.textScale
+        pageColor: win.pageColor
+        textColor: win.textColor
+        mutedColor: win.mutedColor
+        accentColor: backend.themeAccent
+        selectionFill: win.selectionFill
+        folderUrl: backend.folderUrl
+        folderName: backend.folderName
+        folderHasParent: backend.folderHasParent
+        entries: backend.folderEntries
+        currentFileUrl: backend.fileUrl
+        logicalWidth: win.sidebarLogicalWidth
+        // Never let the panel squeeze the writing column below its minimum.
+        maximumLogicalWidth: Math.max(minimumLogicalWidth,
+                                      Math.round(win.width / win.textScale) - 420)
+
+        onParentFolderRequested: backend.openParentFolder()
+        onFolderRequested: function(folderUrl) { backend.setFolder(folderUrl); }
+        // requestOpen guards unsaved work with the same dialog Ctrl+O uses.
+        onFileRequested: function(fileUrl) { win.requestOpen(fileUrl); }
+        onCreateDocumentRequested: function(name) {
+            var created = backend.createDocument(name);
+            if (created.toString() === "")
+                return;
+            win.requestOpen(created);
+            fileSidebar.selectUrl(created);
+        }
+        onCreateFolderRequested: function(name) {
+            var created = backend.createFolder(name);
+            if (created.toString() !== "")
+                fileSidebar.selectUrl(created);
+        }
+        onWidthChangeRequested: function(width) { win.sidebarLogicalWidth = width; }
+        onWidthCommitted: backend.saveSidebarWidth(win.sidebarLogicalWidth)
+        onDismissed: editor.forceActiveFocus()
+    }
+
     Item {
         anchors.fill: parent
+        anchors.leftMargin: fileSidebar.width
 
         Flickable {
             id: editorFlick
+            objectName: "editorFlick"
             anchors.fill: parent
             anchors.leftMargin: 24
             anchors.rightMargin: 24
@@ -532,7 +613,11 @@ ApplicationWindow {
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
-                x: Math.round((editorFlick.width - width) / 2)
+                // Whole pixels keep natively hinted glyphs crisp; pinning the
+                // column to them elsewhere only makes it step when dragged.
+                x: renderType === TextEdit.NativeRendering
+                    ? Math.round((editorFlick.width - width) / 2)
+                    : (editorFlick.width - width) / 2
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
@@ -554,11 +639,9 @@ ApplicationWindow {
                 // the compositor delivers the fractional scale after the
                 // first frame). Fall back to Qt's scalable renderer there.
                 renderType: Screen.devicePixelRatio % 1 === 0 ? TextEdit.NativeRendering : TextEdit.QtRendering
-                cursorDelegate: Rectangle {
-                    width: 1
-                    color: win.strongTextColor
-                }
+                cursorDelegate: caretShape
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                onContentSizeChanged: win.settleCaret()
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -774,6 +857,13 @@ ApplicationWindow {
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
+                    if (contentChanged) {
+                        // A failed close only confirms discarding the text that
+                        // was on screen for that attempt. New writing must get
+                        // its own chance to be saved.
+                        win.closeAnyway = false;
+                        win.settlingCaret = false;
+                    }
                     if (win.searchOpen && contentChanged)
                         win.updateSearch();
                 }
@@ -819,6 +909,14 @@ ApplicationWindow {
                 iconColor: win.mutedColor
                 tooltip: "Open"
                 onClicked: backend.openDialog()
+            }
+
+            FooterIconButton {
+                objectName: "filesButton"
+                iconName: "files"
+                iconColor: win.mutedColor
+                tooltip: "Files"
+                onClicked: win.setSidebarOpen(!win.sidebarOpen)
             }
 
             Label {
@@ -1001,6 +1099,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        sidebarLogicalWidth = backend.sidebarWidth();
         var geometry = backend.windowGeometry();
         if (geometry.x >= 0) x = geometry.x;
         if (geometry.y >= 0) y = geometry.y;

@@ -19,7 +19,10 @@ Dialog {
 
     modal: true
     focus: true
-    closePolicy: Popup.CloseOnEscape
+    // Both ways out are answers. Escape would be a third, and every meaning it
+    // could be given — keep, reload, or neither — decides the thing being
+    // asked, so it is not offered.
+    closePolicy: Popup.NoAutoClose
     width: Math.min(520, containerWidth - 48)
     x: Math.round((containerWidth - width) / 2)
     y: Math.round((containerHeight - height) / 2)

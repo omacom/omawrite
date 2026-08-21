@@ -35,6 +35,8 @@
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString browseDirectorySetting = QStringLiteral("file/browseDirectory");
+const QString sidebarWidthSetting = QStringLiteral("window/sidebarWidth");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -94,9 +96,9 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
-    m_recoveryTimer.setSingleShot(true);
-    m_recoveryTimer.setInterval(750);
-    connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
+    m_persistTimer.setSingleShot(true);
+    m_persistTimer.setInterval(750);
+    connect(&m_persistTimer, &QTimer::timeout, this, &Backend::persistDocument);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
@@ -114,8 +116,19 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     }
                 }
 
+                m_externalChangePending = true;
                 emit externalChangeDetected(deleted, m_modified);
+                // A replacement leaves the old inode behind, and the path with
+                // it, so re-arm or a second change would never be noticed.
+                watchCurrentFile();
             });
+
+    connect(&m_folderWatcher, &QFileSystemWatcher::directoryChanged, this,
+            [this]() { emit folderChanged(); });
+    const QString remembered = QSettings().value(browseDirectorySetting).toString();
+    applyFolder(QDir(remembered).exists() ? remembered
+                                          : defaultDirectory().absolutePath(),
+                false);
 
     loadOmarchyTheme();
     watchOmarchyTheme();
@@ -198,6 +211,70 @@ void Backend::openDialog() {
     emit openDialogRequested();
 }
 
+void Backend::setFolder(const QUrl &url) {
+    if (!url.isLocalFile())
+        return;
+
+    applyFolder(url.toLocalFile(), true);
+}
+
+void Backend::openParentFolder() {
+    QDir directory(m_folderUrl.toLocalFile());
+    if (!directory.cdUp())
+        return;
+
+    applyFolder(directory.absolutePath(), true);
+}
+
+QUrl Backend::createDocument(const QString &name) {
+    const QDir directory(m_folderUrl.toLocalFile());
+    const QString fileName = suggestedFileName(name);
+    const QString path = directory.filePath(fileName);
+    if (QFileInfo::exists(path)) {
+        setStatus(QStringLiteral("%1 already exists.").arg(fileName));
+        return {};
+    }
+
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly)) {
+        setStatus(QStringLiteral("Could not create %1.").arg(fileName));
+        return {};
+    }
+    file.close();
+
+    setStatus(QStringLiteral("Created %1").arg(fileName));
+    // The folder watcher reports this too, but not before the new row is
+    // wanted on screen.
+    emit folderChanged();
+    return QUrl::fromLocalFile(path);
+}
+
+QUrl Backend::createFolder(const QString &name) {
+    QDir directory(m_folderUrl.toLocalFile());
+    const QString folderName = sanitizedEntryName(name);
+    if (directory.exists(folderName)) {
+        setStatus(QStringLiteral("%1 already exists.").arg(folderName));
+        return {};
+    }
+
+    if (!directory.mkdir(folderName)) {
+        setStatus(QStringLiteral("Could not create %1.").arg(folderName));
+        return {};
+    }
+
+    setStatus(QStringLiteral("Created %1").arg(folderName));
+    emit folderChanged();
+    return QUrl::fromLocalFile(directory.filePath(folderName));
+}
+
+int Backend::sidebarWidth() const {
+    return QSettings().value(sidebarWidthSetting, 240).toInt();
+}
+
+void Backend::saveSidebarWidth(int width) {
+    QSettings().setValue(sidebarWidthSetting, width);
+}
+
 void Backend::open(const QUrl &url) {
     if (!url.isLocalFile()) {
         setStatus(QStringLiteral("Only local files can be opened."));
@@ -212,6 +289,9 @@ void Backend::open(const QUrl &url) {
     }
 
     const QByteArray contents = file.readAll();
+    // Only now, with the new text in hand: whatever was contested belonged to
+    // the document being replaced, and an open that failed replaces nothing.
+    m_externalChangePending = false;
     loadDocumentText(QString::fromUtf8(contents));
     clearRecovery();
     m_lastKnownFileContents = contents;
@@ -229,6 +309,57 @@ void Backend::save() {
     }
 
     saveTo(m_fileUrl);
+}
+
+void Backend::saveNow() {
+    m_persistTimer.stop();
+    persistDocument();
+}
+
+// The file the document belongs in: its own if it has one, one named from its
+// first line if it does not. False when the write did not land there.
+bool Backend::saveToItsOwnFile() {
+    if (!m_modified)
+        return true;
+
+    if (m_fileUrl.isLocalFile())
+        return saveTo(m_fileUrl);
+
+    const QString text = currentDocumentText();
+    if (text.trimmed().isEmpty()) {
+        clearRecovery();
+        setModified(false);
+        return true;
+    }
+
+    return saveTo(unusedDocumentUrl(suggestedFileName(text)));
+}
+
+// Switching documents asks the strict question: the work has to have reached
+// the file it belongs in, because the writer is about to lose sight of it.
+bool Backend::saveBeforeLeaving() {
+    m_persistTimer.stop();
+
+    if (saveToItsOwnFile())
+        return true;
+
+    // Worth a draft even though the switch is declined.
+    writeRecovery();
+    return false;
+}
+
+// Closing asks the weaker one: anywhere at all will do. It has to be the draft
+// written for this attempt, though — an older one on disk proves only that
+// something was saved once, not that it holds what is on screen now.
+bool Backend::saveBeforeClosing() {
+    m_persistTimer.stop();
+
+    if (saveToItsOwnFile() || writeRecovery())
+        return true;
+
+    setStatus(QStringLiteral("Could not save %1 anywhere; close again to discard.")
+                  .arg(fileName()));
+    return false;
 }
 
 void Backend::saveForClose() {
@@ -258,11 +389,21 @@ void Backend::discardRecovery() {
 }
 
 void Backend::reloadFromDisk() {
-    if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+    if (!m_fileUrl.isLocalFile())
+        return;
+
+    open(m_fileUrl);
+
+    // A reload that did not happen has answered nothing, and the prompt that
+    // asked has already closed itself. Ask again rather than leave the guard
+    // standing with nothing able to clear it.
+    if (m_externalChangePending)
+        emit externalChangeDetected(!QFileInfo::exists(m_fileUrl.toLocalFile()),
+                                    m_modified);
 }
 
 void Backend::keepExternalVersion() {
+    m_externalChangePending = false;
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
         m_lastKnownFileContents = file.readAll();
@@ -272,7 +413,7 @@ void Backend::keepExternalVersion() {
         m_hasKnownFileContents = false;
     }
     setModified(true);
-    scheduleRecovery();
+    schedulePersist();
     watchCurrentFile();
     setStatus(QStringLiteral("Kept your version"));
 }
@@ -356,8 +497,7 @@ bool Backend::editorTextChanged() {
 
     scheduleWordCount();
     setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
-    scheduleRecovery();
+    schedulePersist();
     return true;
 }
 
@@ -436,6 +576,7 @@ void Backend::loadDocumentText(const QString &text) {
     applyDocumentTypography();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
+    emit documentLoaded();
 }
 
 void Backend::setFileUrl(const QUrl &url) {
@@ -445,6 +586,8 @@ void Backend::setFileUrl(const QUrl &url) {
     m_fileUrl = url;
     emit fileUrlChanged();
     watchCurrentFile();
+    if (m_fileUrl.isLocalFile())
+        applyFolder(QFileInfo(m_fileUrl.toLocalFile()).absolutePath(), true);
 }
 
 void Backend::setModified(bool modified) {
@@ -463,11 +606,19 @@ void Backend::setStatus(const QString &status) {
     emit statusChanged();
 }
 
-void Backend::saveTo(const QUrl &url) {
+bool Backend::saveTo(const QUrl &url) {
+    // The prompt is on screen asking which version to keep, so the file is not
+    // ours to write until it is answered. Saving somewhere else is still fine.
+    if (m_externalChangePending && url == m_fileUrl) {
+        setStatus(QStringLiteral("%1 changed on disk; answer that first.")
+                      .arg(fileName()));
+        return false;
+    }
+
     if (!url.isLocalFile()) {
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Only local files can be saved."));
-        return;
+        return false;
     }
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
@@ -475,7 +626,7 @@ void Backend::saveTo(const QUrl &url) {
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Could not save %1.").arg(targetName));
-        return;
+        return false;
     }
 
     const QByteArray contents = currentDocumentText().toUtf8();
@@ -493,7 +644,7 @@ void Backend::saveTo(const QUrl &url) {
         watchCurrentFile();
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Could not write %1.").arg(targetName));
-        return;
+        return false;
     }
 
     const bool shouldClose = m_closeAfterSave;
@@ -511,30 +662,46 @@ void Backend::saveTo(const QUrl &url) {
 
     if (shouldClose)
         emit closeAfterSave();
+
+    return true;
 }
 
-void Backend::scheduleRecovery() {
-    m_recoveryTimer.start();
+void Backend::schedulePersist() {
+    m_persistTimer.start();
+}
+
+// A named document is written to its file. Anything that stops that — an
+// unwritable file, or an outside change the writer has not answered yet, which
+// is not ours to overwrite — falls back to the recovery draft, so quitting
+// after a failed save still comes back.
+void Backend::persistDocument() {
+    if (!m_modified)
+        return;
+
+    if (m_fileUrl.isLocalFile() && saveTo(m_fileUrl))
+        return;
+
+    writeRecovery();
 }
 
 QString Backend::recoveryPath() const {
     return m_recoveryPath;
 }
 
-void Backend::writeRecovery() {
+bool Backend::writeRecovery() {
     if (!m_modified)
-        return;
+        return true;
     const QString path = recoveryPath();
     if (path.isEmpty())
-        return;
+        return false;
     QDir().mkpath(QFileInfo(path).absolutePath());
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly))
-        return;
+        return false;
     const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
                                {QStringLiteral("text"), currentDocumentText()}};
     file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
-    file.commit();
+    return file.commit();
 }
 
 void Backend::restoreRecovery() {
@@ -561,7 +728,7 @@ void Backend::restoreRecovery() {
 }
 
 void Backend::clearRecovery() {
-    m_recoveryTimer.stop();
+    m_persistTimer.stop();
     QFile::remove(recoveryPath());
 }
 
@@ -571,6 +738,57 @@ void Backend::watchCurrentFile() {
         m_fileWatcher.removePaths(watched);
     if (m_fileUrl.isLocalFile() && QFileInfo::exists(m_fileUrl.toLocalFile()))
         m_fileWatcher.addPath(m_fileUrl.toLocalFile());
+}
+
+void Backend::applyFolder(const QString &path, bool remember) {
+    const QDir directory = QDir(path).exists() ? QDir(path) : defaultDirectory();
+    const QUrl folderUrl = QUrl::fromLocalFile(directory.absolutePath());
+    if (m_folderUrl == folderUrl)
+        return;
+
+    m_folderUrl = folderUrl;
+    watchCurrentFolder();
+    if (remember)
+        QSettings().setValue(browseDirectorySetting, directory.absolutePath());
+    emit folderChanged();
+}
+
+void Backend::watchCurrentFolder() {
+    const QStringList watched = m_folderWatcher.directories();
+    if (!watched.isEmpty())
+        m_folderWatcher.removePaths(watched);
+    if (m_folderUrl.isLocalFile())
+        m_folderWatcher.addPath(m_folderUrl.toLocalFile());
+}
+
+QString Backend::folderName() const {
+    const QDir directory(m_folderUrl.toLocalFile());
+    // The root directory has no name of its own; show its path instead.
+    return directory.isRoot() ? directory.absolutePath() : directory.dirName();
+}
+
+bool Backend::folderHasParent() const {
+    return !QDir(m_folderUrl.toLocalFile()).isRoot();
+}
+
+QVariantList Backend::folderEntries() const {
+    static const QStringList markdownFilter{QStringLiteral("*.md"),
+                                            QStringLiteral("*.markdown")};
+    // AllDirs exempts folders from the name filter so an empty one can still
+    // be walked into, while files stay narrowed to what Omawrite can open:
+    // this is a view of a writing folder, not a file manager.
+    QVariantList entries;
+    const QFileInfoList infos = QDir(m_folderUrl.toLocalFile())
+        .entryInfoList(markdownFilter, QDir::AllDirs | QDir::Files | QDir::NoDotAndDotDot,
+                       QDir::DirsFirst | QDir::Name | QDir::IgnoreCase);
+    entries.reserve(infos.size());
+    for (const QFileInfo &info : infos) {
+        entries.append(QVariantMap{
+            {QStringLiteral("name"), info.fileName()},
+            {QStringLiteral("url"), QUrl::fromLocalFile(info.absoluteFilePath())},
+            {QStringLiteral("isDir"), info.isDir()}});
+    }
+    return entries;
 }
 
 void Backend::loadOmarchyTheme() {
@@ -662,16 +880,38 @@ void Backend::watchOmarchyTheme() {
         m_themeWatcher.addPath(colorsPath);
 }
 
+// A save cannot report a clash the way creating a document does, so the name
+// gives way instead.
+QUrl Backend::unusedDocumentUrl(const QString &fileName) const {
+    const QDir directory(m_folderUrl.toLocalFile());
+    if (!QFileInfo::exists(directory.filePath(fileName)))
+        return QUrl::fromLocalFile(directory.filePath(fileName));
+
+    const QFileInfo info(fileName);
+    const QString base = info.completeBaseName();
+    const QString suffix = info.suffix().isEmpty() ? QString()
+                                                   : QLatin1Char('.') + info.suffix();
+    for (int n = 2; n < 1000; ++n) {
+        const QString candidate = QStringLiteral("%1 %2%3").arg(base).arg(n).arg(suffix);
+        if (!QFileInfo::exists(directory.filePath(candidate)))
+            return QUrl::fromLocalFile(directory.filePath(candidate));
+    }
+    return QUrl::fromLocalFile(directory.filePath(fileName));
+}
+
 QUrl Backend::suggestedSaveUrl() const {
     if (m_fileUrl.isLocalFile())
         return m_fileUrl;
 
+    return QUrl::fromLocalFile(
+        defaultDirectory().filePath(suggestedFileName(currentDocumentText())));
+}
+
+QDir Backend::defaultDirectory() const {
     const QString savedDirectory = QSettings().value(lastSaveDirectorySetting).toString();
-    const QDir directory = savedDirectory.isEmpty() || !QDir(savedDirectory).exists()
+    return savedDirectory.isEmpty() || !QDir(savedDirectory).exists()
         ? QDir::home()
         : QDir(savedDirectory);
-    return QUrl::fromLocalFile(
-        directory.filePath(suggestedFileName(currentDocumentText())));
 }
 
 QString Backend::currentDocumentText() const {
@@ -690,13 +930,18 @@ int Backend::countWords(const QString &text) {
     return count;
 }
 
-QString Backend::suggestedFileName(const QString &text) {
+QString Backend::sanitizedEntryName(const QString &text) {
     QString name = text.section(QLatin1Char('\n'), 0, 0).trimmed();
     name.replace(QRegularExpression(QStringLiteral("[/\\x00-\\x1f\\x7f]")),
                  QStringLiteral("-"));
     name = name.left(120).trimmed();
     if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
         name = QStringLiteral("Untitled");
+    return name;
+}
+
+QString Backend::suggestedFileName(const QString &text) {
+    QString name = sanitizedEntryName(text);
     if (!name.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
         name += QStringLiteral(".md");
     return name;

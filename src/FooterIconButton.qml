@@ -54,7 +54,7 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
-            } else {
+            } else if (control.iconName === "open") {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);
                 context.lineTo(6.5, 3.5);
@@ -62,6 +62,14 @@ Item {
                 context.lineTo(13.5, 5.5);
                 context.lineTo(13.5, 13);
                 context.closePath();
+            } else {
+                context.moveTo(2.5, 3.5);
+                context.lineTo(13.5, 3.5);
+                context.lineTo(13.5, 12.5);
+                context.lineTo(2.5, 12.5);
+                context.closePath();
+                context.moveTo(6.5, 3.5);
+                context.lineTo(6.5, 12.5);
             }
             context.stroke();
         }
