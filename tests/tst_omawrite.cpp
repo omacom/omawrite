@@ -294,6 +294,11 @@ private slots:
         QVERIFY(editorParent);
         QVERIFY(editor->property("x").toReal() + editor->property("width").toReal()
                 <= editorParent->property("width").toReal() + 0.01);
+
+        const qreal bodyLeft = editor->property("x").toReal() + scaledGutter;
+        const qreal bodyRight = bodyLeft + editor->property("bodyWidth").toReal();
+        const qreal rightSpace = editorParent->property("width").toReal() - bodyRight;
+        QVERIFY(qAbs(bodyLeft - rightSpace) < 1.0);
     }
 
     void undoingHeadingDoesNotExposeTypographyStep() {

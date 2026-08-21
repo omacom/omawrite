@@ -429,7 +429,8 @@ ApplicationWindow {
                 id: editor
                 objectName: "sourceEditor"
                 readonly property real bodyWidth: Math.min(
-                    win.editorWidth, Math.max(1, editorFlick.width - win.headingGutterWidth))
+                    win.editorWidth, Math.max(1, editorFlick.width
+                                              - win.headingGutterWidth * 2))
                 x: Math.max(0, Math.round((editorFlick.width - bodyWidth) / 2)
                             - win.headingGutterWidth)
                 y: Math.max(42, Math.round(win.height * 0.05))
