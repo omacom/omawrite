@@ -4,6 +4,8 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QTextDocument>
+#include <QTextLayout>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -244,6 +246,161 @@ private slots:
         fallbackDocument.saveAsDialog();
         const QUrl fallbackUrl = fallbackDialogSpy.takeFirst().constFirst().toUrl();
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
+    }
+
+    void togglesFocusMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("focus-test.md"));
+
+        Backend backend;
+        QSignalSpy focusSpy(&backend, &Backend::focusModeChanged);
+        QVERIFY(!backend.focusMode());
+
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QCOMPARE(backend.status(), QStringLiteral("Saved focus-test.md"));
+
+        backend.toggleFocusMode();
+        QVERIFY(backend.focusMode());
+        QCOMPARE(focusSpy.count(), 1);
+        QCOMPARE(backend.status(), QStringLiteral("Saved focus-test.md"));
+
+        backend.toggleFocusMode();
+        QVERIFY(!backend.focusMode());
+        QCOMPARE(focusSpy.count(), 2);
+        QCOMPARE(backend.status(), QStringLiteral("Saved focus-test.md"));
+    }
+
+    void focusModeDimsInactiveBlocks() {
+        QTextDocument doc;
+        doc.setPlainText(QStringLiteral("First paragraph\n\nSecond paragraph"));
+        MarkdownHighlighter highlighter(&doc);
+        highlighter.setColors(QStringLiteral("#101010"), QStringLiteral("#eeeeee"),
+                              QStringLiteral("#5584aa"));
+
+        // Enable focus mode with cursor in the first block
+        highlighter.setFocusCursorPosition(0);
+        highlighter.setFocusMode(true);
+
+        // First block (active) should keep its original undimmed foreground
+        QTextBlock firstBlock = doc.findBlockByNumber(0);
+        bool firstIsDimmed = !firstBlock.layout()->formats().isEmpty()
+            && firstBlock.layout()->formats().first().format.foreground().color() != QColor(QStringLiteral("#eeeeee"));
+        QVERIFY(!firstIsDimmed);
+
+        // Third block (inactive, "Second paragraph") should be dimmed
+        QTextBlock thirdBlock = doc.findBlockByNumber(2);
+        QVERIFY(!thirdBlock.layout()->formats().isEmpty());
+        QColor dimmedColor = thirdBlock.layout()->formats().first().format.foreground().color();
+        QVERIFY(dimmedColor.isValid());
+        QVERIFY(dimmedColor != QColor(QStringLiteral("#eeeeee")));
+        QVERIFY(dimmedColor != QColor(QStringLiteral("#101010")));
+
+        // Move cursor to third block — first should dim, third should un-dim
+        highlighter.setFocusCursorPosition(thirdBlock.position());
+        QTextBlock updatedFirst = doc.findBlockByNumber(0);
+        QVERIFY(!updatedFirst.layout()->formats().isEmpty());
+        QColor nowDimmed = updatedFirst.layout()->formats().first().format.foreground().color();
+        QCOMPARE(nowDimmed, dimmedColor);
+
+        QTextBlock updatedThird = doc.findBlockByNumber(2);
+        bool thirdIsDimmed = !updatedThird.layout()->formats().isEmpty()
+            && updatedThird.layout()->formats().first().format.foreground().color() == dimmedColor;
+        QVERIFY(!thirdIsDimmed);
+    }
+
+    void focusModeKeepsInlineMarkersHidden() {
+        QTextDocument doc;
+        doc.setPlainText(QStringLiteral("active line\n\nsome **bold** here"));
+        MarkdownHighlighter highlighter(&doc);
+        highlighter.setColors(QStringLiteral("#101010"), QStringLiteral("#eeeeee"),
+                              QStringLiteral("#5584aa"));
+
+        highlighter.setFocusCursorPosition(0);
+        highlighter.setFocusMode(true);
+
+        const QTextBlock dimmed = doc.findBlockByNumber(2);
+        QVERIFY(!dimmed.layout()->formats().isEmpty());
+        QColor markerColor;
+        QColor textColor;
+        for (const QTextLayout::FormatRange &range : dimmed.layout()->formats()) {
+            const QString run = dimmed.text().mid(range.start, range.length);
+            if (run == QStringLiteral("**"))
+                markerColor = range.format.foreground().color();
+            else if (run == QStringLiteral("bold"))
+                textColor = range.format.foreground().color();
+        }
+
+        QCOMPARE(markerColor, QColor(QStringLiteral("#101010")));
+        QVERIFY(textColor.isValid());
+        QVERIFY(textColor != markerColor);
+    }
+
+    void recentresOnlyWhenFocusModeMovesTheEditor() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QObject *viewport = editor->parent();
+        while (viewport && !viewport->property("contentY").isValid())
+            viewport = viewport->parent();
+        QVERIFY(viewport);
+
+        QString text;
+        for (int line = 0; line < 600; ++line)
+            text += QStringLiteral("line %1 of the document\n").arg(line);
+        editor->setProperty("text", text);
+        const int caretPosition = text.indexOf(QStringLiteral("line 150 "));
+        QVERIFY(caretPosition > 0);
+        editor->setProperty("cursorPosition", caretPosition);
+        QTest::qWait(50);
+
+        // Reading elsewhere, with the caret scrolled out of sight: resizing
+        // the window has to leave the page where the reader put it.
+        const qreal readingAt = editor->property("y").toReal()
+            + editor->property("cursorRectangle").toRectF().y()
+            + viewport->property("height").toReal() + 200;
+        viewport->setProperty("contentY", readingAt);
+        QCOMPARE(viewport->property("contentY").toReal(), readingAt);
+        const qreal viewportBefore = viewport->property("height").toReal();
+        window->setProperty("height", window->property("height").toReal() + 80);
+        QTest::qWait(50);
+        // A resize the layout never receives leaves the page in place for the
+        // wrong reason, and everything below it would then pass on anything.
+        QVERIFY2(qAbs(viewport->property("height").toReal() - (viewportBefore + 80)) <= 2,
+                 qPrintable(QStringLiteral("the resize never reached the editor: viewport %1, "
+                                           "expected %2. Run this through bin/test, which "
+                                           "forces QT_QPA_PLATFORM=offscreen.")
+                                .arg(viewport->property("height").toReal())
+                                .arg(viewportBefore + 80)));
+        const qreal stillReadingAt = viewport->property("contentY").toReal();
+        QVERIFY2(qAbs(stillReadingAt - readingAt) <= 2,
+                 qPrintable(QStringLiteral("the page moved from %1 to %2")
+                                .arg(readingAt)
+                                .arg(stillReadingAt)));
+
+        // Entering focus mode does have to move it: the caret line goes to
+        // the middle of the viewport straight away, not at the next keystroke.
+        backend.updateCursorPosition(caretPosition);
+        backend.toggleFocusMode();
+        QTest::qWait(50);
+        const QRectF caret = editor->property("cursorRectangle").toRectF();
+        const qreal viewportHeight = viewport->property("height").toReal();
+        const qreal caretCentre = editor->property("y").toReal() + caret.y()
+            + caret.height() / 2 - viewport->property("contentY").toReal();
+        QVERIFY2(qAbs(caretCentre - viewportHeight / 2) <= 2,
+                 qPrintable(QStringLiteral("caret centre %1 in a viewport of %2")
+                                .arg(caretCentre)
+                                .arg(viewportHeight)));
     }
 
 private:

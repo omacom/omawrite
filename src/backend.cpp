@@ -422,6 +422,18 @@ void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maxim
     settings.setValue(QStringLiteral("window/maximized"), maximized);
 }
 
+void Backend::toggleFocusMode() {
+    m_focusMode = !m_focusMode;
+    if (m_highlighter)
+        m_highlighter->setFocusMode(m_focusMode);
+    emit focusModeChanged();
+}
+
+void Backend::updateCursorPosition(int position) {
+    if (m_highlighter)
+        m_highlighter->setFocusCursorPosition(position);
+}
+
 void Backend::loadDocumentText(const QString &text) {
     if (!m_document) {
         setStatus(QStringLiteral("Could not attach the Markdown renderer."));

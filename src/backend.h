@@ -28,6 +28,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
+    Q_PROPERTY(bool focusMode READ focusMode NOTIFY focusModeChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -49,6 +50,7 @@ public:
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
+    bool focusMode() const { return m_focusMode; }
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
@@ -74,6 +76,8 @@ public:
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
+    Q_INVOKABLE void toggleFocusMode();
+    Q_INVOKABLE void updateCursorPosition(int position);
 
 signals:
     void fileUrlChanged();
@@ -88,6 +92,7 @@ signals:
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void focusModeChanged();
 
 private:
     void loadDocumentText(const QString &text);
@@ -134,6 +139,7 @@ private:
     bool m_hasKnownFileContents = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
+    bool m_focusMode = false;
 
     QString m_themeBackground;
     QString m_themeForeground;

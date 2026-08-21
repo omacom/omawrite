@@ -237,6 +237,15 @@ ApplicationWindow {
         onActivated: win.moveSearch(1)
     }
 
+    Shortcut {
+        sequence: "Ctrl+Shift+T"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            backend.updateCursorPosition(editor.cursorPosition);
+            backend.toggleFocusMode();
+        }
+    }
+
     Connections {
         target: backend
 
@@ -264,6 +273,10 @@ ApplicationWindow {
             externalChangeDialog.deleted = deleted;
             externalChangeDialog.locallyModified = locallyModified;
             externalChangeDialog.open();
+        }
+
+        function onFocusModeChanged() {
+            Qt.callLater(editorFlick.ensureCursorVisible);
         }
     }
 
@@ -329,9 +342,11 @@ ApplicationWindow {
         modal: true
         title: "Keyboard shortcuts"
         standardButtons: Dialog.Close
-        anchors.centerIn: parent
+        width: Math.min(win.scaledSize(380), win.width - 48)
+        x: Math.round((win.width - width) / 2)
+        y: Math.round((win.height - height) / 2)
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+Shift+T  Focus Mode\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -347,6 +362,7 @@ ApplicationWindow {
             clip: true
             contentWidth: width
             contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+                + (backend.focusMode ? Math.round(height / 2) : 0)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -518,6 +534,12 @@ ApplicationWindow {
             // Keep the editing caret within the viewport so writing past the
             // bottom edge scrolls the page along with the text.
             function ensureCursorVisible() {
+                if (backend.focusMode) {
+                    var cursorCenter = editor.y + editor.cursorRectangle.y
+                        + editor.cursorRectangle.height / 2;
+                    scrollTo(clampContentY(cursorCenter - height / 2));
+                    return;
+                }
                 var margin = win.editorFontPixelSize * 2;
                 var cursorTop = editor.y + editor.cursorRectangle.y;
                 var cursorBottom = cursorTop + editor.cursorRectangle.height;
@@ -533,7 +555,9 @@ ApplicationWindow {
                 id: editor
                 objectName: "sourceEditor"
                 x: Math.round((editorFlick.width - width) / 2)
-                y: Math.max(42, Math.round(win.height * 0.05))
+                y: backend.focusMode
+                    ? Math.round(editorFlick.height / 2)
+                    : Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
                 text: ""
@@ -559,6 +583,14 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                // Entering focus mode moves the editor to the middle of the
+                // viewport; y also tracks the window height outside it, where
+                // recentring would drag a reader back to the caret.
+                onYChanged: if (backend.focusMode) editorFlick.ensureCursorVisible()
+                onCursorPositionChanged: {
+                    if (backend.focusMode)
+                        backend.updateCursorPosition(cursorPosition);
+                }
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -796,6 +828,18 @@ ApplicationWindow {
             }
         }
 
+        MouseArea {
+            id: footerHoverArea
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: win.scaledSize(48)
+            hoverEnabled: true
+            acceptedButtons: Qt.NoButton
+            visible: backend.focusMode
+            z: 5
+        }
+
         Row {
             id: footerStatus
             anchors.left: parent.left
@@ -803,7 +847,10 @@ ApplicationWindow {
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
             spacing: 12
-            opacity: 0.55
+            opacity: backend.focusMode
+                ? (footerHoverArea.containsMouse ? 0.55 : 0)
+                : 0.55
+            Behavior on opacity { NumberAnimation { duration: 250 } }
 
             FooterIconButton {
                 objectName: "saveButton"
@@ -841,7 +888,10 @@ ApplicationWindow {
             anchors.bottomMargin: 10
             text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
             color: win.mutedColor
-            opacity: 0.75
+            opacity: backend.focusMode
+                ? (footerHoverArea.containsMouse ? 0.75 : 0)
+                : 0.75
+            Behavior on opacity { NumberAnimation { duration: 250 } }
             font.family: "iA Writer Mono S"
             font.pixelSize: win.scaledSize(11)
         }

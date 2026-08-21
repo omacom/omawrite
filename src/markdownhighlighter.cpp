@@ -40,6 +40,34 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
     rehighlight();
 }
 
+void MarkdownHighlighter::setFocusMode(bool enabled) {
+    if (m_focusMode == enabled)
+        return;
+    m_focusMode = enabled;
+    rehighlight();
+}
+
+void MarkdownHighlighter::setFocusCursorPosition(int position) {
+    if (position == m_focusCursorPosition)
+        return;
+    QTextDocument *doc = document();
+    if (!doc) {
+        m_focusCursorPosition = position;
+        return;
+    }
+    QTextBlock oldBlock = doc->findBlock(m_focusCursorPosition);
+    QTextBlock newBlock = doc->findBlock(position);
+    m_focusCursorPosition = position;
+    if (!m_focusMode)
+        return;
+    if (oldBlock != newBlock) {
+        if (oldBlock.isValid())
+            rehighlightBlock(oldBlock);
+        if (newBlock.isValid())
+            rehighlightBlock(newBlock);
+    }
+}
+
 void MarkdownHighlighter::rebuildFormats() {
     const QColor marker = m_darkMode ? QColor(QStringLiteral("#4f525a"))
                                      : QColor(QStringLiteral("#aeb1b5"));
@@ -101,6 +129,11 @@ void MarkdownHighlighter::rebuildFormats() {
     m_currentSearchFormat = QTextCharFormat();
     m_currentSearchFormat.setBackground(m_darkMode ? QColor(QStringLiteral("#b36b20"))
                                                    : QColor(QStringLiteral("#ffad42")));
+
+    m_dimmedColor = QColor();
+    m_dimmedColor.setRedF(background.redF() * 0.7 + text.redF() * 0.3);
+    m_dimmedColor.setGreenF(background.greenF() * 0.7 + text.greenF() * 0.3);
+    m_dimmedColor.setBlueF(background.blueF() * 0.7 + text.blueF() * 0.3);
 }
 
 void MarkdownHighlighter::highlightBlock(const QString &text) {
@@ -111,6 +144,7 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
             highlightInline(text);
         }
     }
+    applyFocusDimming(text);
     highlightSearch(text);
 }
 
@@ -243,4 +277,28 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     }
 
     return markup;
+}
+
+void MarkdownHighlighter::applyFocusDimming(const QString &text) {
+    if (!m_focusMode || text.isEmpty())
+        return;
+    const int blockStart = currentBlock().position();
+    if (m_focusCursorPosition >= blockStart
+        && m_focusCursorPosition < blockStart + currentBlock().length())
+        return;
+    const QColor hidden = m_hiddenMarkerFormat.foreground().color();
+    int pos = 0;
+    while (pos < text.length()) {
+        QTextCharFormat fmt = format(pos);
+        int run = 1;
+        while (pos + run < text.length() && format(pos + run) == fmt)
+            ++run;
+        // Inline markers are hidden by painting them in the background colour,
+        // so dimming them would make them reappear.
+        if (fmt.foreground().color() != hidden) {
+            fmt.setForeground(m_dimmedColor);
+            setFormat(pos, run, fmt);
+        }
+        pos += run;
+    }
 }
