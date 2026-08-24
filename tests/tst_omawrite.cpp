@@ -4,6 +4,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -190,6 +191,232 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void breaksLinesOnReturn() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QVERIFY(editor->property("activeFocus").toBool());
+
+        auto text = [&] { return editor->property("text").toString(); };
+        auto load = [&](const QString &content, int position) {
+            editor->setProperty("text", content);
+            editor->setProperty("cursorPosition", position);
+        };
+        auto returnKey = [&] { QTest::keyClick(window, Qt::Key_Return); };
+
+        // Ending a paragraph leaves the blank line that separates it from the
+        // next one.
+        load(QStringLiteral("one\n\ntwo"), 8);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo\n\n"));
+
+        // On a line that is already blank there is nothing to separate from,
+        // so Return is worth one line, not two.
+        load(QStringLiteral("one\n\ntwo"), 4);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\ntwo"));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\n\ntwo"));
+
+        // An empty document is a blank line too.
+        load(QString(), 0);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+
+        // Whitespace left behind on a line still reads as blank.
+        load(QStringLiteral("one\n  \ntwo"), 5);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n \n \ntwo"));
+
+        // A selection dragged right to left leaves the caret on the blank line
+        // it began on, but the break lands on the line it leaves behind.
+        load(QStringLiteral("one\n\ntwo"), 7);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 4));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\no"));
+
+        // A list carries its marker down, and an item left empty drops the
+        // marker to end the list.
+        load(QStringLiteral("- item"), 6);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- item\n- "));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- item\n\n"));
+
+        // Inside a code fence every line is its own, blank ones included.
+        load(QStringLiteral("```\ncode\n```"), 8);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("```\ncode\n\n```"));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("```\ncode\n\n\n```"));
+    }
+
+    void closesParagraphBreaksOnBackspace() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QVERIFY(editor->property("activeFocus").toBool());
+
+        auto text = [&] { return editor->property("text").toString(); };
+        auto caret = [&] { return editor->property("cursorPosition").toInt(); };
+        auto load = [&](const QString &content, int position) {
+            editor->setProperty("text", content);
+            editor->setProperty("cursorPosition", position);
+        };
+        auto returnKey = [&] { QTest::keyClick(window, Qt::Key_Return); };
+        auto backspaceKey = [&] { QTest::keyClick(window, Qt::Key_Backspace); };
+
+        // Backspace at the head of a paragraph closes the whole break above
+        // it, so the two paragraphs join in one press rather than two, and
+        // the caret lands where they meet.
+        load(QStringLiteral("one\n\ntwo"), 5);
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("onetwo"));
+        QCOMPARE(caret(), 3);
+
+        // Ending a paragraph writes both breaks at once, and one Backspace
+        // takes both back. A Return on the blank line of "one\n\n\ntwo" can
+        // leave this very document with the caret in this very place, so it
+        // is not provenance that decides here: it is that the gap is left
+        // standing either way, and this is much the commoner press.
+        load(QStringLiteral("one\n\ntwo"), 3);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\n\ntwo"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo"));
+        QCOMPARE(caret(), 3);
+
+        // Which is what a Return inside a wide gap costs: the same rule reads
+        // this as the paragraph-ending press it cannot be told apart from, so
+        // the writer gets back one blank line fewer than they had. The gap
+        // still separates the paragraphs, and one more Return returns it.
+        load(QStringLiteral("one\n\n\n\ntwo"), 4);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\n\n\ntwo"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\ntwo"));
+        QCOMPARE(caret(), 3);
+
+        // Return on a blank line writes a single break, so Backspace must
+        // take back a single break too. Closing the pair behind the caret
+        // would swallow the separator that was there beforehand and leave
+        // the two paragraphs with nothing between them.
+        load(QStringLiteral("one\n\ntwo"), 4);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\ntwo"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo"));
+
+        // The same holds however far the gap has grown: each Return is worth
+        // one Backspace.
+        load(QStringLiteral("one\n\ntwo"), 4);
+        returnKey();
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n\n\ntwo"));
+        backspaceKey();
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo"));
+
+        // A line with nothing but spaces on it is a blank line, and Return
+        // above one writes a single break there too.
+        load(QStringLiteral("one\n  \ntwo"), 4);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n  \ntwo"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n  \ntwo"));
+
+        // On the blank line a document ends with, the two Returns leave the
+        // same text behind and no reading of it says which was pressed.
+        // Backspace takes one break, because taking two would carry off the
+        // line the document already ended with.
+        load(QStringLiteral("one\n"), 4);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\n"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n"));
+
+        // Which costs the paragraph that ends a document a second press,
+        // and that is the whole of what it costs: nothing is lost on the
+        // way through.
+        load(QStringLiteral("one\n\ntwo"), 8);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo\n\n"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo\n"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n\ntwo"));
+
+        // An empty document is a blank line, so it takes two Returns to open
+        // a gap and two Backspaces to close it again.
+        load(QString(), 0);
+        returnKey();
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n\n"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+        backspaceKey();
+        QCOMPARE(text(), QString());
+
+        // A document holding nothing but spaces is a blank line as well, and
+        // the spaces are text: they must still be there at the end of it.
+        load(QStringLiteral("   "), 3);
+        returnKey();
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("   \n\n"));
+        backspaceKey();
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("   "));
+
+        // Return at the very head of a document writes both breaks, since
+        // the paragraph below it is not blank, and one Backspace takes them.
+        load(QStringLiteral("two"), 0);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n\ntwo"));
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("two"));
+        QCOMPARE(caret(), 0);
+
+        // Spaces left on the line above a break do not make the break any
+        // less of one: Return between them and the paragraph below wrote
+        // both of these, so Backspace still takes both.
+        load(QStringLiteral("one\n  \n\ntwo"), 8);
+        backspaceKey();
+        QCOMPARE(text(), QStringLiteral("one\n  two"));
+        QCOMPARE(caret(), 6);
     }
 
     void scalesTextWithDesktopTextSize() {

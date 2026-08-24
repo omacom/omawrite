@@ -624,6 +624,22 @@ ApplicationWindow {
                         }
                         return;
                     }
+                    // A new paragraph stands apart from the one above it by a
+                    // blank line, which is the second break here. A line that
+                    // is already blank has nothing to stand apart from, so
+                    // that break would only be a gap nobody asked for.
+                    // The break lands on what the selection leaves behind, which
+                    // is not the caret's line when it was dragged right to left.
+                    var start = Math.min(selectionStart, selectionEnd);
+                    var end = Math.max(selectionStart, selectionEnd);
+                    var head = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
+                    var lineEnd = text.indexOf("\n", end);
+                    var rest = lineEnd < 0 ? text.slice(end)
+                                           : text.slice(end, lineEnd);
+                    if (/^\s*$/.test(head) && /^\s*$/.test(rest)) {
+                        replaceSelectionWith("\n");
+                        return;
+                    }
                     replaceSelectionWith("\n\n");
                 }
 
@@ -726,6 +742,39 @@ ApplicationWindow {
                         return false;
 
                     var start = cursorPosition - 2;
+                    var lineEnd = text.indexOf("\n", cursorPosition);
+                    var line = lineEnd < 0 ? text.slice(cursorPosition)
+                                           : text.slice(cursorPosition, lineEnd);
+                    // Something on the caret's line and the pair above it is a
+                    // paragraph break and nothing else, either the one Return
+                    // wrote to end a paragraph or the one the writer is now
+                    // closing to join what it separates. Both breaks go.
+                    if (/^\s*$/.test(line)) {
+                        // On a blank line Return writes a single break, so up
+                        // here the pair may be that break and one that was
+                        // already in the document. Above a blank line Return
+                        // writes a single break too, and so wrote neither of
+                        // these.
+                        var above = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
+                        if (/^\s*$/.test(above))
+                            return false;
+                        // Past that the two Returns leave the same text and the
+                        // same caret, and no reading of either says which was
+                        // pressed. What decides instead is that the gap is left
+                        // standing: both breaks go only while a blank line of
+                        // it survives them. The end of the document below the
+                        // caret leaves it none...
+                        if (lineEnd < 0)
+                            return false;
+                        // ...and so does the next paragraph, which the pair
+                        // would otherwise be pulled up against.
+                        var belowEnd = text.indexOf("\n", lineEnd + 1);
+                        var below = belowEnd < 0 ? text.slice(lineEnd + 1)
+                                                 : text.slice(lineEnd + 1, belowEnd);
+                        if (!/^\s*$/.test(below))
+                            return false;
+                    }
+
                     remove(start, cursorPosition);
                     cursorPosition = start;
                     return true;
