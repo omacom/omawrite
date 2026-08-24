@@ -469,8 +469,8 @@ ApplicationWindow {
                     EditorMutations.replaceRange(editor, start, end, replacement);
                 }
 
-                function refreshCursorAfterHeading() {
-                    // Recalculate the cursor x-position after leaving a heading block.
+                function refreshCursorGeometry() {
+                    // Recalculate the cursor x-position after a block's indent changes.
                     var originalPosition = cursorPosition;
                     if (originalPosition > 0)
                         cursorPosition = originalPosition - 1;
@@ -516,7 +516,7 @@ ApplicationWindow {
                     if (softBreak) {
                         replaceSelectionWith("\n");
                         if (leavingHeading)
-                            refreshCursorAfterHeading();
+                            refreshCursorGeometry();
                         return;
                     }
                     var before = text.slice(0, cursorPosition);
@@ -540,7 +540,7 @@ ApplicationWindow {
                     }
                     replaceSelectionWith("\n\n");
                     if (leavingHeading)
-                        refreshCursorAfterHeading();
+                        refreshCursorGeometry();
                 }
 
                 function escapeMarkdownLinkText(linkText) {
@@ -635,15 +635,17 @@ ApplicationWindow {
                 }
 
                 function deleteParagraphBreakBehindCursor() {
-                    if (selectionStart !== selectionEnd || cursorPosition < 2)
+                    if (selectionStart !== selectionEnd || cursorPosition < 1
+                            || text[cursorPosition - 1] !== "\n")
                         return false;
 
-                    if (text.slice(cursorPosition - 2, cursorPosition) !== "\n\n")
-                        return false;
-
-                    var start = cursorPosition - 2;
+                    var breakLength = cursorPosition >= 2
+                            && text.slice(cursorPosition - 2, cursorPosition) === "\n\n"
+                        ? 2 : 1;
+                    var start = cursorPosition - breakLength;
                     remove(start, cursorPosition);
                     cursorPosition = start;
+                    refreshCursorGeometry();
                     return true;
                 }
 

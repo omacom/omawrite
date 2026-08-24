@@ -34,6 +34,7 @@
 #include "markdownhighlighter.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
+constexpr int headingGutterCells = 7;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
@@ -177,6 +178,8 @@ void Backend::attachDocument(QObject *textDocument) {
         delete m_highlighter.data();
 
     m_document = quickDocument->textDocument();
+    if (m_headingCellWidth > 0)
+        m_document->setIndentWidth(m_headingCellWidth);
     m_lastDocumentText = m_document->toPlainText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
@@ -199,8 +202,11 @@ QTextBlockFormat Backend::blockFormatWithTypography(const QTextBlock &block) con
         MarkdownHighlighter::headingMarkup(block.text());
     QTextBlockFormat format = block.blockFormat();
     format.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
-    format.setLeftMargin(m_headingCellWidth * 7);
-    format.setTextIndent(heading.isValid() ? -m_headingCellWidth * (heading.level + 1) : 0);
+    format.setLeftMargin(0);
+    format.setTextIndent(0);
+    format.setIndent(heading.isValid()
+                         ? headingGutterCells - (heading.level + 1)
+                         : headingGutterCells);
     return format;
 }
 
@@ -220,7 +226,8 @@ void Backend::setHeadingCellWidth(qreal width) {
         return;
 
     m_headingCellWidth = width;
-    applyDocumentTypography();
+    if (m_document)
+        m_document->setIndentWidth(width);
 }
 
 void Backend::openDialog() {
@@ -402,11 +409,17 @@ void Backend::replayHistory(QObject *editor, bool redo) {
     const QString previousText = currentDocumentText();
     const char *action = redo ? "redo" : "undo";
 
-    // Typography can occupy its own history entry. Consume those entries so
-    // each user action reaches one visible text edit with the right formatting.
+    // Block formatting may be stored separately from the text edit that caused
+    // it. Skip those internal steps so one shortcut still replays one text edit.
     while (redo ? m_document->isRedoAvailable() : m_document->isUndoAvailable()) {
+        const int undoSteps = m_document->availableUndoSteps();
+        const int redoSteps = m_document->availableRedoSteps();
         if (!QMetaObject::invokeMethod(editor, action, Qt::DirectConnection))
             return;
+        if (m_document->availableUndoSteps() == undoSteps
+                && m_document->availableRedoSteps() == redoSteps) {
+            return;
+        }
 
         const bool textChanged = currentDocumentText() != previousText;
         const bool typographyRestored = !redo || documentHasExpectedTypography();
@@ -776,9 +789,8 @@ void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
 
-    // Block typography is layout metadata, not a user edit. Keep it out of the
-    // undo stack. Qt clears both history branches when undo is disabled, which
-    // is intentional when a live text-size change requires a full reformat.
+    // A full pass is only used for freshly loaded or attached documents, where
+    // there is no user history to preserve.
     const bool undoEnabled = m_document->isUndoRedoEnabled();
     m_document->setUndoRedoEnabled(false);
 
