@@ -29,6 +29,8 @@ ApplicationWindow {
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
+    readonly property real headingCellWidth: writerFontMetrics.averageCharacterWidth
+    readonly property real headingGutterWidth: headingCellWidth * 7
     property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
@@ -42,6 +44,8 @@ ApplicationWindow {
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
+
+    onHeadingCellWidthChanged: backend.setHeadingCellWidth(headingCellWidth)
 
     onClosing: function(close) {
         if (closeConfirmed || !backend.modified)
@@ -211,13 +215,13 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Z"
         context: Qt.WindowShortcut
-        onActivated: editor.undo()
+        onActivated: editor.undoDocument()
     }
 
     Shortcut {
         sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
         context: Qt.WindowShortcut
-        onActivated: editor.redo()
+        onActivated: editor.redoDocument()
     }
 
     Shortcut {
@@ -532,9 +536,13 @@ ApplicationWindow {
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
-                x: Math.round((editorFlick.width - width) / 2)
+                readonly property real bodyWidth: Math.min(
+                    win.editorWidth, Math.max(1, editorFlick.width
+                                              - win.headingGutterWidth * 2))
+                x: Math.max(0, Math.round((editorFlick.width - bodyWidth) / 2)
+                            - win.headingGutterWidth)
                 y: Math.max(42, Math.round(win.height * 0.05))
-                width: win.editorWidth
+                width: bodyWidth + win.headingGutterWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
                 text: ""
                 textFormat: TextEdit.PlainText
@@ -560,10 +568,26 @@ ApplicationWindow {
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
 
+                function undoDocument() {
+                    backend.undo(editor);
+                }
+
+                function redoDocument() {
+                    backend.redo(editor);
+                }
+
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
                     var end = Math.max(selectionStart, selectionEnd);
                     EditorMutations.replaceRange(editor, start, end, replacement);
+                }
+
+                function refreshCursorGeometry() {
+                    // Recalculate the cursor x-position after a block's indent changes.
+                    var originalPosition = cursorPosition;
+                    if (originalPosition > 0)
+                        cursorPosition = originalPosition - 1;
+                    cursorPosition = originalPosition;
                 }
 
                 function wrapSelection(before, after) {
@@ -599,12 +623,15 @@ ApplicationWindow {
                 }
 
                 function smartReturn(softBreak) {
-                    if (softBreak) {
-                        replaceSelectionWith("\n");
-                        return;
-                    }
                     var lineStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
                     var line = text.slice(lineStart, cursorPosition);
+                    var leavingHeading = /^#{1,6}\s/.test(line);
+                    if (softBreak) {
+                        replaceSelectionWith("\n");
+                        if (leavingHeading)
+                            refreshCursorGeometry();
+                        return;
+                    }
                     var before = text.slice(0, cursorPosition);
                     var fences = (before.match(/^\s*```/gm) || []).length;
                     if ((fences % 2) === 1) {
@@ -625,6 +652,8 @@ ApplicationWindow {
                         return;
                     }
                     replaceSelectionWith("\n\n");
+                    if (leavingHeading)
+                        refreshCursorGeometry();
                 }
 
                 function escapeMarkdownLinkText(linkText) {
@@ -719,20 +748,33 @@ ApplicationWindow {
                 }
 
                 function deleteParagraphBreakBehindCursor() {
-                    if (selectionStart !== selectionEnd || cursorPosition < 2)
+                    if (selectionStart !== selectionEnd || cursorPosition < 1
+                            || text[cursorPosition - 1] !== "\n")
                         return false;
 
-                    if (text.slice(cursorPosition - 2, cursorPosition) !== "\n\n")
-                        return false;
-
-                    var start = cursorPosition - 2;
+                    var breakLength = cursorPosition >= 2
+                            && text.slice(cursorPosition - 2, cursorPosition) === "\n\n"
+                        ? 2 : 1;
+                    var start = cursorPosition - breakLength;
                     remove(start, cursorPosition);
                     cursorPosition = start;
+                    refreshCursorGeometry();
                     return true;
                 }
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
+                    if (event.matches(StandardKey.Undo)) {
+                        undoDocument();
+                        event.accepted = true;
+                        return;
+                    }
+                    if (event.matches(StandardKey.Redo)) {
+                        redoDocument();
+                        event.accepted = true;
+                        return;
+                    }
+
                     var pasteKey = (event.key === Qt.Key_V)
                         && (event.modifiers & Qt.ControlModifier)
                         && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier));
@@ -781,6 +823,7 @@ ApplicationWindow {
                 Text {
                     anchors.left: parent.left
                     anchors.top: parent.top
+                    anchors.leftMargin: win.headingGutterWidth - win.headingCellWidth * 2
                     text: "# Start writing"
                     visible: editor.text.length === 0 && !editor.activeFocus
                     color: win.mutedColor
@@ -790,6 +833,7 @@ ApplicationWindow {
                 }
 
                 Component.onCompleted: {
+                    backend.setHeadingCellWidth(win.headingCellWidth);
                     backend.attachDocument(textDocument);
                     forceActiveFocus();
                 }

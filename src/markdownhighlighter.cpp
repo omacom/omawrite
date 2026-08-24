@@ -131,6 +131,13 @@ void MarkdownHighlighter::highlightSearch(const QString &text) {
 }
 
 void MarkdownHighlighter::highlightMarkers(const QString &text) {
+    const HeadingMarkup heading = headingMarkup(text);
+    if (heading.isValid()) {
+        setFormat(0, heading.prefixLength, m_markerFormat);
+        setFormat(heading.prefixLength, text.length() - heading.prefixLength, m_headingFormat);
+        return;
+    }
+
     int first = 0;
     while (first < text.length() && text.at(first).isSpace())
         ++first;
@@ -138,18 +145,6 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
         return;
 
     const QChar firstChar = text.at(first);
-    if (first == 0 && firstChar == QLatin1Char('#')) {
-        static const QRegularExpression headingRe(QStringLiteral("^(#{1,6})(\\s+)(.*)$"));
-        const QRegularExpressionMatch heading = headingRe.match(text);
-        if (heading.hasMatch()) {
-            setFormat(0, heading.capturedLength(1) + heading.capturedLength(2),
-                      m_markerFormat);
-            setFormat(heading.capturedStart(3), heading.capturedLength(3),
-                      m_headingFormat);
-            return;
-        }
-    }
-
     if (firstChar == QLatin1Char('>')) {
         static const QRegularExpression quoteRe(QStringLiteral("^(\\s*>+\\s?)(.*)$"));
         const QRegularExpressionMatch quote = quoteRe.match(text);
@@ -175,6 +170,18 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
         if (rule.hasMatch())
             setFormat(0, text.length(), m_markerFormat);
     }
+}
+
+MarkdownHighlighter::HeadingMarkup MarkdownHighlighter::headingMarkup(const QString &text) {
+    if (!text.startsWith(QLatin1Char('#')))
+        return {};
+
+    static const QRegularExpression headingRe(QStringLiteral("^(#{1,6})(\\s+)(.*)$"));
+    const QRegularExpressionMatch heading = headingRe.match(text);
+    if (!heading.hasMatch())
+        return {};
+
+    return {int(heading.capturedLength(1)), int(heading.capturedStart(3))};
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {

@@ -20,6 +20,7 @@
 #include <QJsonObject>
 #include <QLockFile>
 #include <QSaveFile>
+#include <QScopedValueRollback>
 #include <QTextBlock>
 #include <QTextBlockFormat>
 #include <QTextCursor>
@@ -30,10 +31,10 @@
 #include <QWindow>
 
 #include <algorithm>
-
 #include "markdownhighlighter.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
+constexpr int headingGutterCells = 7;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
@@ -177,6 +178,8 @@ void Backend::attachDocument(QObject *textDocument) {
         delete m_highlighter.data();
 
     m_document = quickDocument->textDocument();
+    if (m_headingCellWidth > 0)
+        m_document->setIndentWidth(m_headingCellWidth);
     m_lastDocumentText = m_document->toPlainText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
@@ -192,6 +195,39 @@ void Backend::attachDocument(QObject *textDocument) {
 
     applyDocumentTypography();
     restoreRecovery();
+}
+
+QTextBlockFormat Backend::blockFormatWithTypography(const QTextBlock &block) const {
+    const MarkdownHighlighter::HeadingMarkup heading =
+        MarkdownHighlighter::headingMarkup(block.text());
+    QTextBlockFormat format = block.blockFormat();
+    format.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
+    format.setLeftMargin(0);
+    format.setTextIndent(0);
+    format.setIndent(heading.isValid()
+                         ? headingGutterCells - (heading.level + 1)
+                         : headingGutterCells);
+    return format;
+}
+
+bool Backend::documentHasExpectedTypography() const {
+    if (!m_document)
+        return true;
+
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next()) {
+        if (block.blockFormat() != blockFormatWithTypography(block))
+            return false;
+    }
+    return true;
+}
+
+void Backend::setHeadingCellWidth(qreal width) {
+    if (width == m_headingCellWidth)
+        return;
+
+    m_headingCellWidth = width;
+    if (m_document)
+        m_document->setIndentWidth(width);
 }
 
 void Backend::openDialog() {
@@ -347,18 +383,49 @@ bool Backend::editorTextChanged() {
         return false;
     m_lastDocumentText = text;
 
-    if (m_document) {
-        const int blockCount = m_document->blockCount();
-        if (blockCount > m_formattedBlockCount)
-            reapplyTypographyToChange();
-        m_formattedBlockCount = blockCount;
-    }
+    if (m_document && !m_historyChange)
+        reapplyTypographyToChange();
 
     scheduleWordCount();
     setModified(true);
     setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
     return true;
+}
+
+void Backend::undo(QObject *editor) {
+    replayHistory(editor, false);
+}
+
+void Backend::redo(QObject *editor) {
+    replayHistory(editor, true);
+}
+
+void Backend::replayHistory(QObject *editor, bool redo) {
+    if (!editor || !m_document)
+        return;
+
+    const QScopedValueRollback historyChange(m_historyChange, true);
+    const QString previousText = currentDocumentText();
+    const char *action = redo ? "redo" : "undo";
+
+    // Block formatting may be stored separately from the text edit that caused
+    // it. Skip those internal steps so one shortcut still replays one text edit.
+    while (redo ? m_document->isRedoAvailable() : m_document->isUndoAvailable()) {
+        const int undoSteps = m_document->availableUndoSteps();
+        const int redoSteps = m_document->availableRedoSteps();
+        if (!QMetaObject::invokeMethod(editor, action, Qt::DirectConnection))
+            return;
+        if (m_document->availableUndoSteps() == undoSteps
+                && m_document->availableRedoSteps() == redoSteps) {
+            return;
+        }
+
+        const bool textChanged = currentDocumentText() != previousText;
+        const bool typographyRestored = !redo || documentHasExpectedTypography();
+        if (textChanged && typographyRestored)
+            return;
+    }
 }
 
 QVariantList Backend::hiddenRangesAt(int position) const {
@@ -722,31 +789,32 @@ void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
 
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
-
-    // A full pass is only used for freshly loaded/attached documents, so it is
-    // safe to drop undo history here (re-enabling clears the stack anyway).
+    // A full pass is only used for freshly loaded or attached documents, where
+    // there is no user history to preserve.
     const bool undoEnabled = m_document->isUndoRedoEnabled();
     m_document->setUndoRedoEnabled(false);
 
-    m_formattingTypography = true;
-    QTextCursor cursor(m_document);
-    cursor.select(QTextCursor::Document);
-    cursor.mergeBlockFormat(blockFormat);
-    m_formattingTypography = false;
+    updateAllBlocksTypography();
 
     m_document->setUndoRedoEnabled(undoEnabled);
+}
 
-    m_formattedBlockCount = m_document->blockCount();
+void Backend::updateAllBlocksTypography() {
+    if (!m_document)
+        return;
+
+    m_formattingTypography = true;
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    for (QTextBlock block = m_document->begin(); block.isValid(); block = block.next())
+        updateBlockTypography(cursor, block);
+    cursor.endEditBlock();
+    m_formattingTypography = false;
 }
 
 void Backend::reapplyTypographyToChange() {
     if (!m_document)
         return;
-
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
 
     // Format only the block(s) touched by the last edit instead of the whole
     // document, and fold the change into the preceding edit command so a single
@@ -755,12 +823,27 @@ void Backend::reapplyTypographyToChange() {
     const int start = qBound(0, m_lastChangePos, maxPos);
     const int end = qBound(start, m_lastChangePos + m_lastChangeAdded, maxPos);
 
+    const QTextBlock firstBlock = m_document->findBlock(start);
+    const QTextBlock lastBlock = m_document->findBlock(end);
+
     m_formattingTypography = true;
     QTextCursor cursor(m_document);
     cursor.joinPreviousEditBlock();
-    cursor.setPosition(start);
-    cursor.setPosition(end, QTextCursor::KeepAnchor);
-    cursor.mergeBlockFormat(blockFormat);
+    for (QTextBlock block = firstBlock; block.isValid(); block = block.next()) {
+        updateBlockTypography(cursor, block);
+        if (block == lastBlock)
+            break;
+    }
     cursor.endEditBlock();
     m_formattingTypography = false;
+}
+
+void Backend::updateBlockTypography(QTextCursor &cursor, const QTextBlock &block) const {
+    const QTextBlockFormat current = block.blockFormat();
+    const QTextBlockFormat format = blockFormatWithTypography(block);
+    if (format == current)
+        return;
+
+    cursor.setPosition(block.position());
+    cursor.setBlockFormat(format);
 }

@@ -3,7 +3,12 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickWindow>
+#include <QQuickTextDocument>
 #include <QQuickStyle>
+#include <QTextBlock>
+#include <QTextDocument>
+#include <QTextLayout>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -52,6 +57,22 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void findsMarkdownHeadings() {
+        for (int level = 1; level <= 6; ++level) {
+            const QString prefix(level, QLatin1Char('#'));
+            const auto heading = MarkdownHighlighter::headingMarkup(
+                prefix + QStringLiteral(" Heading"));
+            QCOMPARE(heading.level, level);
+            QCOMPARE(heading.prefixLength, level + 1);
+        }
+
+        QVERIFY(!MarkdownHighlighter::headingMarkup(QStringLiteral("####### Heading")).isValid());
+        QVERIFY(!MarkdownHighlighter::headingMarkup(QStringLiteral("#Heading")).isValid());
+        QVERIFY(!MarkdownHighlighter::headingMarkup(QStringLiteral(" # Heading")).isValid());
+        const MarkdownHighlighter::HeadingMarkup invalidLevel{7, 8};
+        QVERIFY(!invalidLevel.isValid());
     }
 
     void loadsCurrentOmarchyTheme() {
@@ -207,15 +228,273 @@ private slots:
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QVERIFY(editor);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 20);
+        QVERIFY(!backend.modified());
 
         // `omarchy display text size 16` sets the GNOME factor to 16/12.
         backend.setTextScale(16.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 27);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 27);
+        QVERIFY(!backend.modified());
 
         backend.setTextScale(9.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+        QVERIFY(!backend.modified());
+    }
+
+    void laysOutAndEditsHeadings() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        QVERIFY(document);
+
+        editor->setProperty("text", QStringLiteral("Body\nBody"));
+        editor->setProperty("cursorPosition", 0);
+        QCoreApplication::processEvents();
+        const qreal bodyCursorX = editor->property("cursorRectangle").toRectF().x();
+
+        editor->setProperty("text", QStringLiteral("## Heading\nBody"));
+        const QTextBlock heading = document->begin();
+        const QTextBlock body = heading.next();
+        const qreal cellWidth = window->property("headingCellWidth").toReal();
+        QVERIFY(qAbs(document->indentWidth() - cellWidth) < 0.01);
+        QCOMPARE(heading.blockFormat().indent(), 4);
+        QCOMPARE(body.blockFormat().indent(), 7);
+        QCOMPARE(heading.blockFormat().leftMargin(), 0.0);
+        QCOMPARE(heading.blockFormat().textIndent(), 0.0);
+        QCOMPARE(body.blockFormat().leftMargin(), 0.0);
+        QCOMPARE(body.blockFormat().textIndent(), 0.0);
+
+        editor->setProperty("cursorPosition", 3);
+        QCoreApplication::processEvents();
+        QVERIFY(qAbs(editor->property("cursorRectangle").toRectF().x() - bodyCursorX) < 0.1);
+
+        editor->setProperty("text", QStringLiteral("Heading\nBody"));
+        QCOMPARE(document->begin().blockFormat().indent(), 7);
+        QCOMPARE(document->begin().blockFormat().textIndent(), 0.0);
+
+        editor->setProperty("text", QStringLiteral("### Heading"));
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "smartReturn",
+                                         Q_ARG(QVariant, QVariant(false))));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\n"));
+        QVERIFY(qAbs(editor->property("cursorRectangle").toRectF().x() - bodyCursorX) < 0.01);
+
+        editor->setProperty("text", QStringLiteral("### Heading"));
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QCoreApplication::processEvents();
+        const qreal headingEndX = editor->property("cursorRectangle").toRectF().x();
+        QVERIFY(QMetaObject::invokeMethod(editor, "smartReturn",
+                                         Q_ARG(QVariant, QVariant(true))));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n"));
+        QVERIFY(qAbs(editor->property("cursorRectangle").toRectF().x() - bodyCursorX) < 0.01);
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+        QTest::keyClick(quickWindow, Qt::Key_Backspace);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading"));
+        QVERIFY(qAbs(editor->property("cursorRectangle").toRectF().x() - headingEndX) < 0.01);
+
+        editor->setProperty("text", QStringLiteral("Body"));
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QCoreApplication::processEvents();
+        const qreal bodyEndX = editor->property("cursorRectangle").toRectF().x();
+        QVERIFY(QMetaObject::invokeMethod(editor, "smartReturn",
+                                         Q_ARG(QVariant, QVariant(true))));
+        QTest::keyClick(quickWindow, Qt::Key_Backspace);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("Body"));
+        QVERIFY(qAbs(editor->property("cursorRectangle").toRectF().x() - bodyEndX) < 0.01);
+
+        editor->setProperty("text", QStringLiteral("###### Heading"));
+        const qreal initialGutter = window->property("headingGutterWidth").toReal();
+        backend.setTextScale(3.0);
+        window->setProperty("width", 720);
+        QTRY_VERIFY(window->property("headingGutterWidth").toReal() > initialGutter);
+
+        const qreal scaledGutter = window->property("headingGutterWidth").toReal();
+        QTRY_VERIFY(qAbs(document->indentWidth()
+                         - window->property("headingCellWidth").toReal()) < 0.01);
+        QCOMPARE(document->begin().blockFormat().indent(), 0);
+        QVERIFY(editor->property("x").toReal() >= 0);
+        QObject *editorParent = editor->parent();
+        QVERIFY(editorParent);
+        QVERIFY(editor->property("x").toReal() + editor->property("width").toReal()
+                <= editorParent->property("width").toReal() + 0.01);
+
+        const qreal bodyLeft = editor->property("x").toReal() + scaledGutter;
+        const qreal bodyRight = bodyLeft + editor->property("bodyWidth").toReal();
+        const qreal rightSpace = editorParent->property("width").toReal() - bodyRight;
+        QVERIFY(qAbs(bodyLeft - rightSpace) < 1.0);
+
+        editor->setProperty(
+            "text",
+            QStringLiteral("### A deliberately long heading that wraps onto a second line "
+                           "so its continuation alignment remains explicit and tested\nBody"));
+        QCoreApplication::processEvents();
+        const QTextBlock wrappedHeading = document->begin();
+        const QTextBlock wrappedBody = wrappedHeading.next();
+        QVERIFY(wrappedHeading.layout());
+        QVERIFY(wrappedBody.layout());
+        QTRY_VERIFY(wrappedHeading.layout()->lineCount() > 1);
+        const QTextLine firstHeadingLine = wrappedHeading.layout()->lineAt(0);
+        const QTextLine secondHeadingLine = wrappedHeading.layout()->lineAt(1);
+        const QTextLine bodyLine = wrappedBody.layout()->lineAt(0);
+        QVERIFY(qAbs(firstHeadingLine.cursorToX(4) - bodyLine.x()) < 0.1);
+        QVERIFY(qAbs(secondHeadingLine.x() - firstHeadingLine.x()) < 0.01);
+        QVERIFY(secondHeadingLine.x() < bodyLine.x());
+    }
+
+    void undoingHeadingDoesNotExposeTypographyStep() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        QVERIFY(document);
+
+        editor->setProperty("cursorPosition", 0);
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert",
+                                         Q_ARG(int, 0),
+                                         Q_ARG(QString, QStringLiteral("### Heading"))));
+        QVERIFY(QMetaObject::invokeMethod(editor, "smartReturn",
+                                         Q_ARG(QVariant, QVariant(false))));
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("body")))));
+
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\n"));
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading"));
+        QCOMPARE(document->begin().blockFormat().indent(), 3);
+        QCOMPARE(document->begin().blockFormat().leftMargin(), 0.0);
+        QCOMPARE(document->begin().blockFormat().textIndent(), 0.0);
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QString());
+
+        for (int i = 0; i < 2; ++i) {
+            editor->setProperty("cursorPosition", editor->property("text").toString().size());
+            QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+            QCoreApplication::processEvents();
+            QCOMPARE(editor->property("text").toString(), QString());
+        }
+
+        QTest::keyClick(quickWindow, Qt::Key_Z,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading"));
+        QCOMPARE(document->begin().blockFormat().indent(), 3);
+    }
+
+    void changingTextScalePreservesHistory() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        QVERIFY(document);
+
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert",
+                                         Q_ARG(int, 0),
+                                         Q_ARG(QString, QStringLiteral("### Heading"))));
+        QVERIFY(QMetaObject::invokeMethod(editor, "smartReturn",
+                                         Q_ARG(QVariant, QVariant(false))));
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("body")))));
+
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\n"));
+        QVERIFY(document->isUndoAvailable());
+        QVERIFY(document->isRedoAvailable());
+
+        const qreal initialGutter = window->property("headingGutterWidth").toReal();
+        backend.setTextScale(2.0);
+        QTRY_VERIFY(window->property("headingGutterWidth").toReal() > initialGutter);
+
+        const QString textAfterScale = editor->property("text").toString();
+        QVERIFY(document->isUndoAvailable());
+        QVERIFY(document->isRedoAvailable());
+        QVERIFY(qAbs(document->indentWidth()
+                     - window->property("headingCellWidth").toReal()) < 0.01);
+        QCOMPARE(document->begin().blockFormat().indent(), 3);
+        QCOMPARE(document->begin().next().blockFormat().indent(), 7);
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
+            QCOMPARE(block.blockFormat().leftMargin(), 0.0);
+            QCOMPARE(block.blockFormat().textIndent(), 0.0);
+        }
+
+        QTest::keyClick(quickWindow, Qt::Key_Z,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\nbody"));
+        QCOMPARE(document->begin().blockFormat().indent(), 3);
+        QCOMPARE(document->begin().next().blockFormat().indent(), 7);
+
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), textAfterScale);
+        QCOMPARE(document->begin().blockFormat().indent(), 3);
+        QCOMPARE(document->begin().next().blockFormat().indent(), 7);
+
+        editor->setProperty("cursorPosition", editor->property("text").toString().size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("one")))));
+        editor->setProperty("cursorPosition", QStringLiteral("### Heading\n\n").size());
+        QVERIFY(QMetaObject::invokeMethod(editor, "replaceSelectionWith",
+                                         Q_ARG(QVariant, QVariant(QStringLiteral("two")))));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\ntwoone"));
+
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\none"));
+        QTest::keyClick(quickWindow, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(editor->property("text").toString(), textAfterScale);
+        QTest::keyClick(quickWindow, Qt::Key_Z,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("### Heading\n\none"));
     }
 
     void remembersLastSaveDirectory() {
