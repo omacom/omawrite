@@ -1,3 +1,5 @@
+!versionAtLeast(QT_VERSION, 6.5.0): error("Omawrite requires Qt 6.5 or newer (the QtCore Settings QML type)")
+
 QT += core gui widgets printsupport qml quick quickcontrols2 quickdialogs2 dbus
 
 CONFIG += c++17 release

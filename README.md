@@ -33,7 +33,7 @@ Omawrite at the size it is designed around; larger and smaller sizes scale from 
 
 ## Requirements
 
-- Qt 6: `qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`
+- Qt 6.5 or newer: `qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`
 - `xdg-desktop-portal` and a portal backend
 
 The iA Writer Mono font is bundled under the SIL Open Font License 1.1; see

@@ -8,8 +8,8 @@ arch=('x86_64')
 url='https://github.com/omacom-io/omawrite'
 license=('MIT')
 install='omawrite.install'
-depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
-makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
+depends=('qt6-base>=6.5' 'qt6-declarative>=6.5' 'xdg-desktop-portal')
+makedepends=('gcc' 'make' 'qt6-base>=6.5' 'qt6-declarative>=6.5')
 source=()
 sha256sums=()
 
