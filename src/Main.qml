@@ -1,3 +1,4 @@
+import QtCore
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
@@ -26,9 +27,13 @@ ApplicationWindow {
     // the app at the sizes it was designed around.
     readonly property real textScale: backend.textScale
     readonly property int editorFontPixelSize: scaledSize(20)
-    readonly property int editorWidth: Math.min(
-        Math.round(writerFontMetrics.averageCharacterWidth * 65),
-        Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
+    readonly property int availableEditorWidth:
+        Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20))
+    readonly property int editorWidth: layoutSettings.editorColumns > 0
+        ? Math.min(
+              Math.round(writerFontMetrics.averageCharacterWidth * Math.max(20, layoutSettings.editorColumns)),
+              availableEditorWidth)
+        : availableEditorWidth
     property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
@@ -42,6 +47,15 @@ ApplicationWindow {
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
+
+    // Editor measure in average character widths. 0 (the default) lets the
+    // text fill the window, keeping ten characters of margin on either side;
+    // a positive value gives a fixed measure — 65 is the app's classic look.
+    Settings {
+        id: layoutSettings
+        category: "layout"
+        property int editorColumns: 0
+    }
 
     onClosing: function(close) {
         if (closeConfirmed || !backend.modified)
