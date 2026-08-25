@@ -54,6 +54,15 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "vim") {
+                context.moveTo(8, 1.5);
+                context.lineTo(14.5, 8);
+                context.lineTo(8, 14.5);
+                context.lineTo(1.5, 8);
+                context.closePath();
+                context.moveTo(5.5, 5.5);
+                context.lineTo(8, 10.5);
+                context.lineTo(10.5, 5.5);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);

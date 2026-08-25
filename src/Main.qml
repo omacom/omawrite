@@ -5,6 +5,7 @@ import QtQuick.Dialogs as Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 import "EditorMutations.js" as EditorMutations
+import "Vim.js" as Vim
 
 ApplicationWindow {
     id: win
@@ -38,6 +39,10 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    readonly property bool vimMode: backend.vimMode
+    property string vimStatus: ""
+    property string vimMessage: ""
+    property bool commandOpen: false
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -135,6 +140,39 @@ ApplicationWindow {
         searchUpdating = false;
         replaceOpen = false;
         editor.forceActiveFocus();
+        editor.leaveDetour();
+    }
+
+    function openCommandLine(prefill) {
+        vimMessage = "";
+        commandField.text = prefill;
+        commandOpen = true;
+        commandField.forceActiveFocus();
+        commandField.cursorPosition = commandField.text.length;
+    }
+
+    function closeCommandLine() {
+        commandOpen = false;
+        commandField.text = "";
+        editor.forceActiveFocus();
+        editor.leaveDetour();
+    }
+
+    function runCommandLine() {
+        var typed = commandField.text;
+        closeCommandLine();
+        var result = Vim.runCommand(editor.vimState, editor.vimHost, typed);
+        editor.publishVimStatus();
+        vimMessage = result.message;
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Alt+V"
+        context: Qt.ApplicationShortcut
+        onActivated: {
+            backend.vimMode = !backend.vimMode;
+            editor.forceActiveFocus();
+        }
     }
 
     Shortcut {
@@ -211,13 +249,13 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Z"
         context: Qt.WindowShortcut
-        onActivated: editor.undo()
+        onActivated: editor.undoEdit()
     }
 
     Shortcut {
         sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
         context: Qt.WindowShortcut
-        onActivated: editor.redo()
+        onActivated: editor.redoEdit()
     }
 
     Shortcut {
@@ -260,11 +298,22 @@ ApplicationWindow {
                 win.completePendingAction();
         }
 
+        // Vim opens a file on its first line, so put the caret there instead of
+        // leaving it wherever replacing the text dropped it, which is the end
+        // of the document and reads as a caret adrift below the last line.
+        function onDocumentLoaded() {
+            if (!win.vimMode)
+                return;
+            editor.cursorPosition = 0;
+            editor.resetVim();
+        }
+
         function onExternalChangeDetected(deleted, locallyModified) {
             externalChangeDialog.deleted = deleted;
             externalChangeDialog.locallyModified = locallyModified;
             externalChangeDialog.open();
         }
+
     }
 
     Dialogs.FileDialog {
@@ -331,7 +380,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+Alt+V  Vim mode\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -554,11 +603,208 @@ ApplicationWindow {
                 // the compositor delivers the fractional scale after the
                 // first frame). Fall back to Qt's scalable renderer there.
                 renderType: Screen.devicePixelRatio % 1 === 0 ? TextEdit.NativeRendering : TextEdit.QtRendering
+                // Normal mode sits on a character rather than between two, so
+                // it gets the block caret vim writers read the mode from.
                 cursorDelegate: Rectangle {
-                    width: 1
+                    width: editor.vimNormalMode
+                        ? Math.max(2, Math.round(writerFontMetrics.averageCharacterWidth))
+                        : 1
                     color: win.strongTextColor
+                    opacity: editor.vimNormalMode ? 0.45 : 1
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+
+                property var vimState: Vim.createState()
+                // How many of the engine's edit blocks are open. While any is,
+                // the editor's own text property lags the document, so both
+                // the engine and EditorMutations have to ask the document.
+                property int vimEditDepth: 0
+
+                function liveLength() {
+                    return vimEditDepth > 0 ? backend.documentText().length : text.length;
+                }
+
+                property var vimHost: Vim.createHost(editor, {
+                    text: function() {
+                        return editor.vimEditDepth > 0 ? backend.documentText() : editor.text;
+                    },
+                    beginChange: function() {
+                        editor.vimEditDepth++;
+                        backend.beginEditBlock();
+                    },
+                    endChange: function() {
+                        backend.endEditBlock();
+                        editor.vimEditDepth = Math.max(0, editor.vimEditDepth - 1);
+                    },
+                    settle: function(position, direction) {
+                        return direction >= 0
+                            ? editor.skipHiddenForward(position)
+                            : editor.skipHiddenBackward(position);
+                    },
+                    openLine: function(below) {
+                        return editor.openLineForVim(below);
+                    },
+                    linkPaste: function(start, end, payload, register) {
+                        editor.select(start, end);
+                        // "+ and "* ask the clipboard they name, which carries
+                        // a uri-list its plain text does not. Every other
+                        // register hands its own contents over.
+                        var systemRegister = register === "+" || register === "*";
+                        var wrapped = editor.pasteUrlAsMarkdownLink(
+                            systemRegister ? undefined : payload, register === "*");
+                        if (!wrapped) {
+                            editor.deselect();
+                            return false;
+                        }
+                        // The replacement leaves the caret past the link, and
+                        // normal mode sits on a character rather than after it.
+                        editor.cursorPosition = Math.max(start, editor.cursorPosition - 1);
+                        return true;
+                    },
+                    clipboard: function(selection) {
+                        return backend.clipboardText(selection);
+                    },
+                    setClipboard: function(text, selection) {
+                        backend.setClipboardText(text, selection);
+                    },
+                    page: function(direction) { editor.movePage(direction, false); },
+                    search: function() {
+                        win.searchOpen = true;
+                        searchField.forceActiveFocus();
+                        searchField.selectAll();
+                    },
+                    searchNext: function(direction) {
+                        win.moveSearch(direction);
+                        if (win.searchMatchIndex >= 0) {
+                            editor.deselect();
+                            editor.cursorPosition = win.searchMatches[win.searchMatchIndex];
+                        }
+                    },
+                    commandLine: function(prefill) { win.openCommandLine(prefill); },
+                    save: function() { backend.save(); },
+                    saveAs: function(path) { backend.saveAs(backend.resolvePath(path)); },
+                    saveAndQuit: function() { backend.saveForClose(); },
+                    quit: function(force) {
+                        if (force) {
+                            backend.discardRecovery();
+                            win.closeConfirmed = true;
+                        }
+                        win.close();
+                    },
+                    open: function(path, force) {
+                        if (path === "") {
+                            if (force)
+                                backend.reloadFromDisk();
+                            else
+                                backend.openDialog();
+                            return;
+                        }
+                        var url = backend.resolvePath(path);
+                        if (force)
+                            backend.open(url);
+                        else
+                            win.requestOpen(url);
+                    },
+                    clearSearch: function() {
+                        win.searchUpdating = true;
+                        backend.setSearchHighlight("", -1);
+                        win.searchUpdating = false;
+                    }
+                })
+                readonly property bool vimNormalMode: win.vimMode && vimState.mode !== "insert"
+
+                function resetVim() {
+                    vimState = Vim.createState();
+                    win.vimMessage = "";
+                    if (win.commandOpen)
+                        win.closeCommandLine();
+                    deselect();
+                    if (win.vimMode)
+                        cursorPosition = Vim.clampNormal(text, cursorPosition);
+                    publishVimStatus();
+                }
+
+                // Back from the search bar or the command line. Unlike
+                // resetVim this keeps the registers, the last change and the
+                // last search, none of which the detour invalidated.
+                function leaveDetour() {
+                    Vim.returnToNormal(vimState);
+                    win.vimMessage = "";
+                    deselect();
+                    if (win.vimMode)
+                        cursorPosition = Vim.clampNormal(text, cursorPosition);
+                    publishVimStatus();
+                }
+
+                function publishVimStatus() {
+                    win.vimStatus = win.vimMode ? Vim.statusText(vimState) : "";
+                    // vimState is mutated in place, so nudge the bindings that
+                    // read the mode off it.
+                    vimStateChanged();
+                }
+
+                // Qt key events, named the way the vim engine expects.
+                function vimKeyName(event) {
+                    switch (event.key) {
+                    case Qt.Key_Escape: return "Escape";
+                    case Qt.Key_Return:
+                    case Qt.Key_Enter: return "Return";
+                    case Qt.Key_Backspace: return "Backspace";
+                    case Qt.Key_Delete: return "Delete";
+                    case Qt.Key_Left: return "Left";
+                    case Qt.Key_Right: return "Right";
+                    case Qt.Key_Up: return "Up";
+                    case Qt.Key_Down: return "Down";
+                    case Qt.Key_Home: return "Home";
+                    case Qt.Key_End: return "End";
+                    case Qt.Key_PageUp: return "PageUp";
+                    case Qt.Key_PageDown: return "PageDown";
+                    case Qt.Key_Space: return " ";
+                    case Qt.Key_Tab: return "Tab";
+                    }
+
+                    if (event.modifiers & (Qt.ControlModifier | Qt.MetaModifier | Qt.AltModifier)) {
+                        var controlOnly = (event.modifiers & Qt.ControlModifier)
+                            && !(event.modifiers & (Qt.MetaModifier | Qt.AltModifier));
+                        if (controlOnly && event.key >= Qt.Key_A && event.key <= Qt.Key_Z)
+                            return "C-" + String.fromCharCode(event.key).toLowerCase();
+                        // Ctrl+[ is the other Escape, and it is not a letter.
+                        if (controlOnly && event.key === Qt.Key_BracketLeft)
+                            return "C-[";
+                        return "";
+                    }
+
+                    return event.text.length === 1 && event.text.charCodeAt(0) >= 0x20
+                        ? event.text
+                        : "";
+                }
+
+                // The backend ends an undo run by re-applying formatting the
+                // text already has, which keeps undo word-sized but leaves
+                // steps that change nothing on screen. Walk past those so every
+                // press moves the writing, not just the undo stack.
+                //
+                // The document is asked rather than the text property, which
+                // stands still inside an open edit block: vim runs u inside
+                // one, and a caller reading its own text there would see no
+                // change and undo the whole stack away.
+                function undoEdit() {
+                    backend.beginHistoryNavigation();
+                    var before = backend.documentText();
+                    do {
+                        undo();
+                    } while (canUndo && backend.documentText() === before);
+                    backend.endHistoryNavigation();
+                }
+
+                function redoEdit() {
+                    backend.beginHistoryNavigation();
+                    var before = backend.documentText();
+                    do {
+                        redo();
+                    } while (canRedo && backend.documentText() === before);
+                    backend.endHistoryNavigation();
+                }
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -611,20 +857,52 @@ ApplicationWindow {
                         replaceSelectionWith("\n");
                         return;
                     }
-                    var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
+                    var match = line.match(listMarkerPattern);
                     if (match) {
-                        if (match[3].length === 0) {
+                        if (match[3].length === 0)
                             EditorMutations.replaceRange(editor, lineStart,
                                                          cursorPosition, "\n");
-                        } else {
-                            var marker = match[2];
-                            if (/^\d/.test(marker))
-                                marker = (parseInt(marker) + 1) + marker.slice(-1);
-                            replaceSelectionWith("\n" + match[1] + marker + " ");
-                        }
+                        else
+                            replaceSelectionWith("\n" + continuationMarker(line, true));
                         return;
                     }
                     replaceSelectionWith("\n\n");
+                }
+
+                readonly property var listMarkerPattern: /^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/
+
+                // The bullet, number or quote a new line beside this one should
+                // carry, so the list keeps going. Numbers count on downwards,
+                // but a line opened above keeps the number that was there.
+                function continuationMarker(line, advance) {
+                    var match = line.match(listMarkerPattern);
+                    if (!match || match[3].length === 0)
+                        return "";
+
+                    var marker = match[2];
+                    if (advance && /^\d/.test(marker))
+                        marker = (parseInt(marker) + 1) + marker.slice(-1);
+                    return match[1] + marker + " ";
+                }
+
+                // Where vim's o and O go through the editor's own idea of a new
+                // line, so a list item or a quote carries its marker the way it
+                // does when you press Return. Returns where insert should start.
+                function openLineForVim(below) {
+                    var start = text.lastIndexOf("\n", cursorPosition - 1) + 1;
+                    var end = text.indexOf("\n", cursorPosition);
+                    if (end < 0)
+                        end = text.length;
+
+                    if (below) {
+                        cursorPosition = end;
+                        smartReturn(false);
+                        return cursorPosition;
+                    }
+
+                    var marker = continuationMarker(text.slice(start, end), false);
+                    EditorMutations.replaceRange(editor, start, start, marker + "\n");
+                    return start + marker.length;
                 }
 
                 function escapeMarkdownLinkText(linkText) {
@@ -640,12 +918,21 @@ ApplicationWindow {
                 }
 
                 function pasteClipboardUrlAsMarkdownLink() {
+                    return pasteUrlAsMarkdownLink(undefined);
+                }
+
+                // Wrap the selection as a Markdown link. With no payload the
+                // URL comes from the clipboard, which carries a uri-list its
+                // plain text does not; vim's registers hand theirs over.
+                function pasteUrlAsMarkdownLink(payload, fromSelection) {
                     var start = Math.min(selectionStart, selectionEnd);
                     var end = Math.max(selectionStart, selectionEnd);
                     if (start === end)
                         return false;
 
-                    var url = backend.clipboardUrl();
+                    var url = payload === undefined
+                        ? backend.clipboardUrl(fromSelection === true)
+                        : backend.normalizedLinkUrl(payload);
                     if (url === "")
                         return false;
 
@@ -733,6 +1020,18 @@ ApplicationWindow {
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
+                    // Mid-composition the keys belong to the input method, not
+                    // to vim, or a dead key would run a command.
+                    if (win.vimMode && !editor.inputMethodComposing) {
+                        win.vimMessage = "";
+                        var consumed = Vim.handleKey(vimState, vimHost, vimKeyName(event));
+                        publishVimStatus();
+                        if (consumed) {
+                            event.accepted = true;
+                            return;
+                        }
+                    }
+
                     var pasteKey = (event.key === Qt.Key_V)
                         && (event.modifiers & Qt.ControlModifier)
                         && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier));
@@ -742,6 +1041,27 @@ ApplicationWindow {
                     if (pasteKey || shiftInsert) {
                         if (!pasteClipboardUrlAsMarkdownLink())
                             pasteClipboardAsPlainText();
+                        event.accepted = true;
+                        return;
+                    }
+
+                    // TextEdit claims the undo and redo keys as built-in text
+                    // editing shortcuts, so the Shortcut items above never see
+                    // them while the editor has focus. Take them here instead,
+                    // where they can go through undoEdit()/redoEdit().
+                    var undoModifier = (event.modifiers & Qt.ControlModifier)
+                        && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier));
+                    if (undoModifier && event.key === Qt.Key_Z) {
+                        if (event.modifiers & Qt.ShiftModifier)
+                            redoEdit();
+                        else
+                            undoEdit();
+                        event.accepted = true;
+                        return;
+                    }
+                    if (undoModifier && !(event.modifiers & Qt.ShiftModifier)
+                        && event.key === Qt.Key_Y) {
+                        redoEdit();
                         event.accepted = true;
                         return;
                     }
@@ -773,7 +1093,15 @@ ApplicationWindow {
                 onTextChanged: {
                     if (win.searchUpdating)
                         return;
+                    // Closing one of vim's edit blocks makes the document
+                    // announce itself whether or not anything changed, so
+                    // every keystroke arrives here. Only a real edit counts.
                     var contentChanged = backend.editorTextChanged();
+                    // An edit from outside the engine, like the formatting
+                    // shortcuts, leaves a visual selection's anchors pointing
+                    // at text that has since moved.
+                    if (contentChanged && win.vimMode && Vim.cancelVisual(vimState))
+                        publishVimStatus();
                     if (win.searchOpen && contentChanged)
                         win.updateSearch();
                 }
@@ -789,9 +1117,15 @@ ApplicationWindow {
                     font.weight: editor.font.weight
                 }
 
+                Connections {
+                    target: win
+                    function onVimModeChanged() { editor.resetVim(); }
+                }
+
                 Component.onCompleted: {
                     backend.attachDocument(textDocument);
                     forceActiveFocus();
+                    resetVim();
                 }
             }
         }
@@ -821,6 +1155,38 @@ ApplicationWindow {
                 onClicked: backend.openDialog()
             }
 
+            FooterIconButton {
+                objectName: "vimButton"
+                iconName: "vim"
+                iconColor: backend.vimMode ? backend.themeAccent : win.mutedColor
+                tooltip: backend.vimMode ? "Vim mode on" : "Vim mode off"
+                onClicked: backend.vimMode = !backend.vimMode
+            }
+
+            Label {
+                objectName: "vimStatus"
+                text: win.vimStatus
+                visible: win.vimMode
+                color: win.mutedColor
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.scaledSize(11)
+                height: win.scaledSize(16)
+                verticalAlignment: Text.AlignVCenter
+            }
+
+            Label {
+                objectName: "vimMessage"
+                text: win.vimMessage
+                visible: text !== ""
+                color: win.mutedColor
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.scaledSize(11)
+                height: win.scaledSize(16)
+                elide: Text.ElideRight
+                width: Math.min(420, win.width / 3)
+                verticalAlignment: Text.AlignVCenter
+            }
+
             Label {
                 text: backend.status
                 color: win.mutedColor
@@ -846,6 +1212,66 @@ ApplicationWindow {
             font.pixelSize: win.scaledSize(11)
         }
 
+
+        // The : command line, along the bottom edge over the footer strip.
+        Rectangle {
+            objectName: "commandLine"
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
+            height: win.scaledSize(30)
+            visible: win.commandOpen
+            z: 10
+            color: win.pageColor
+
+            Row {
+                anchors.fill: parent
+                anchors.leftMargin: 12
+                anchors.rightMargin: 12
+                spacing: 0
+
+                Label {
+                    text: ":"
+                    color: win.textColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(15)
+                    height: parent.height
+                    verticalAlignment: Text.AlignVCenter
+                }
+
+                TextInput {
+                    id: commandField
+                    objectName: "commandField"
+                    width: parent.width - win.scaledSize(15)
+                    height: parent.height
+                    verticalAlignment: TextInput.AlignVCenter
+                    selectByMouse: true
+                    color: win.textColor
+                    selectionColor: win.selectionFill
+                    selectedTextColor: win.strongTextColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(15)
+                    clip: true
+
+                    Keys.onReturnPressed: function(event) {
+                        win.runCommandLine();
+                        event.accepted = true;
+                    }
+                    Keys.onEscapePressed: function(event) {
+                        win.closeCommandLine();
+                        event.accepted = true;
+                    }
+                    // Rubbing out the last character leaves the command line,
+                    // the way backspacing past the : does in vim.
+                    Keys.onPressed: function(event) {
+                        if (event.key === Qt.Key_Backspace && text.length === 0) {
+                            win.closeCommandLine();
+                            event.accepted = true;
+                        }
+                    }
+                }
+            }
+        }
 
         Pane {
             anchors.top: parent.top

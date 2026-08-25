@@ -5,6 +5,7 @@
 #include <QByteArray>
 #include <QFileSystemWatcher>
 #include <QString>
+#include <QTextCursor>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -24,6 +25,7 @@ class Backend : public QObject {
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(qreal textScale READ textScale WRITE setTextScale NOTIFY textScaleChanged)
+    Q_PROPERTY(bool vimMode READ vimMode WRITE setVimMode NOTIFY vimModeChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
@@ -45,12 +47,14 @@ public:
     void setDarkMode(bool darkMode);
     qreal textScale() const { return m_textScale; }
     void setTextScale(qreal textScale);
+    bool vimMode() const { return m_vimMode; }
+    void setVimMode(bool vimMode);
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
     static int countWords(const QString &text);
-    static QString normalizedLinkUrl(const QString &clipboardText);
+    Q_INVOKABLE static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
@@ -66,12 +70,22 @@ public:
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void printDocument();
     Q_INVOKABLE void newWindow();
-    Q_INVOKABLE QString clipboardUrl() const;
-    Q_INVOKABLE QString clipboardText() const;
+    Q_INVOKABLE QString clipboardUrl(bool selection = false) const;
+    Q_INVOKABLE QString clipboardText(bool selection = false) const;
+    Q_INVOKABLE void setClipboardText(const QString &text, bool selection = false) const;
     Q_INVOKABLE bool editorTextChanged();
+    Q_INVOKABLE void beginHistoryNavigation();
+    Q_INVOKABLE void endHistoryNavigation();
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
+    Q_INVOKABLE QUrl resolvePath(const QString &path) const;
+    Q_INVOKABLE void beginEditBlock();
+    Q_INVOKABLE void endEditBlock();
+    // The document as it stands this instant. TextEdit caches its text and
+    // refreshes it when the document emits a change, which an open edit block
+    // holds back, so a command partway through its own edits must ask here.
+    Q_INVOKABLE QString documentText() const { return currentDocumentText(); }
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
 
@@ -82,11 +96,13 @@ signals:
     void wordCountChanged();
     void darkModeChanged();
     void textScaleChanged();
+    void vimModeChanged();
     void themeColorsChanged();
     void closeAfterSave();
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
+    void documentLoaded();
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
@@ -101,7 +117,11 @@ private:
     void refreshWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
+    void joinTypographyEdit(int start, int end);
     void reapplyTypographyToChange();
+    int lastChangeEdge() const;
+    bool lastChangeEndedAWord() const;
+    void endUndoRun();
     void scheduleRecovery();
     void writeRecovery();
     void restoreRecovery();
@@ -117,9 +137,13 @@ private:
     int m_wordCount = 0;
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
+    bool m_vimMode = false;
+    int m_editBlockDepth = 0;
+    QTextCursor m_editBlockCursor;
     bool m_loading = false;
     bool m_closeAfterSave = false;
     bool m_formattingTypography = false;
+    bool m_navigatingHistory = false;
     int m_formattedBlockCount = 0;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;

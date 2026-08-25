@@ -35,6 +35,7 @@
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString vimModeSetting = QStringLiteral("editor/vimMode");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -117,6 +118,8 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                 emit externalChangeDetected(deleted, m_modified);
             });
 
+    m_vimMode = QSettings().value(vimModeSetting, false).toBool();
+
     loadOmarchyTheme();
     watchOmarchyTheme();
     connect(&m_themeWatcher, &QFileSystemWatcher::fileChanged, this, [this]() {
@@ -164,6 +167,56 @@ void Backend::setTextScale(qreal textScale) {
 
     m_textScale = textScale;
     emit textScaleChanged();
+}
+
+void Backend::setVimMode(bool vimMode) {
+    if (m_vimMode == vimMode)
+        return;
+
+    m_vimMode = vimMode;
+    QSettings().setValue(vimModeSetting, vimMode);
+    emit vimModeChanged();
+}
+
+// A path typed on the : command line, read the way a shell would: ~ is home,
+// and a relative path hangs off the open document's directory.
+QUrl Backend::resolvePath(const QString &path) const {
+    QString candidate = path.trimmed();
+    if (candidate.isEmpty())
+        return {};
+
+    if (candidate == QStringLiteral("~") || candidate.startsWith(QStringLiteral("~/")))
+        candidate.replace(0, 1, QDir::homePath());
+
+    QFileInfo info(candidate);
+    if (info.isRelative()) {
+        const QString base = m_fileUrl.isLocalFile()
+            ? QFileInfo(m_fileUrl.toLocalFile()).absolutePath()
+            : QDir::homePath();
+        info.setFile(QDir(base), candidate);
+    }
+    return QUrl::fromLocalFile(info.absoluteFilePath());
+}
+
+// Vim commands are single edits as far as the writer is concerned, so group
+// the document changes each one makes: u then undoes the command, not the
+// remove-and-insert pair that carried it out.
+void Backend::beginEditBlock() {
+    if (!m_document)
+        return;
+
+    if (m_editBlockDepth++ == 0) {
+        m_editBlockCursor = QTextCursor(m_document);
+        m_editBlockCursor.beginEditBlock();
+    }
+}
+
+void Backend::endEditBlock() {
+    if (!m_document || m_editBlockDepth == 0)
+        return;
+
+    if (--m_editBlockDepth == 0)
+        m_editBlockCursor.endEditBlock();
 }
 
 void Backend::attachDocument(QObject *textDocument) {
@@ -305,12 +358,20 @@ void Backend::newWindow() {
         setStatus(QStringLiteral("Could not open a new window."));
 }
 
-QString Backend::clipboardUrl() const {
+// The "* register is the primary selection, where a middle click pastes from.
+// Desktops without one fall back to the clipboard, so "* still does something
+// rather than nothing.
+static QClipboard::Mode clipboardMode(const QClipboard *clipboard, bool selection) {
+    return selection && clipboard->supportsSelection() ? QClipboard::Selection
+                                                       : QClipboard::Clipboard;
+}
+
+QString Backend::clipboardUrl(bool selection) const {
     const QClipboard *clipboard = QGuiApplication::clipboard();
     if (!clipboard)
         return {};
 
-    const QMimeData *mimeData = clipboard->mimeData();
+    const QMimeData *mimeData = clipboard->mimeData(clipboardMode(clipboard, selection));
     if (!mimeData)
         return {};
 
@@ -329,13 +390,18 @@ QString Backend::clipboardUrl() const {
     return normalizedLinkUrl(mimeData->text());
 }
 
-QString Backend::clipboardText() const {
+QString Backend::clipboardText(bool selection) const {
     const QClipboard *clipboard = QGuiApplication::clipboard();
     if (!clipboard)
         return {};
 
-    const QMimeData *mimeData = clipboard->mimeData();
+    const QMimeData *mimeData = clipboard->mimeData(clipboardMode(clipboard, selection));
     return mimeData && mimeData->hasText() ? mimeData->text() : QString();
+}
+
+void Backend::setClipboardText(const QString &text, bool selection) const {
+    if (QClipboard *clipboard = QGuiApplication::clipboard())
+        clipboard->setText(text, clipboardMode(clipboard, selection));
 }
 
 bool Backend::editorTextChanged() {
@@ -349,8 +415,18 @@ bool Backend::editorTextChanged() {
 
     if (m_document) {
         const int blockCount = m_document->blockCount();
-        if (blockCount > m_formattedBlockCount)
-            reapplyTypographyToChange();
+        // Undo and redo replay commands that already carry their formatting, and
+        // appending to the stack from here would throw the redo half of it away.
+        if (!m_navigatingHistory) {
+            if (blockCount > m_formattedBlockCount)
+                reapplyTypographyToChange();
+            // Vim groups its own undo steps -- one per command, one per insert
+            // session -- and that grouping is what u is expected to step back
+            // through. Ending runs by the word underneath it would break a
+            // session into pieces vim never made.
+            else if (!m_vimMode && lastChangeEndedAWord())
+                endUndoRun();
+        }
         m_formattedBlockCount = blockCount;
     }
 
@@ -436,6 +512,9 @@ void Backend::loadDocumentText(const QString &text) {
     applyDocumentTypography();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
+    // Replacing the document leaves the editor's caret wherever the new text
+    // ends; tell the interface so it can decide where the caret belongs.
+    emit documentLoaded();
 }
 
 void Backend::setFileUrl(const QUrl &url) {
@@ -741,26 +820,80 @@ void Backend::applyDocumentTypography() {
     m_formattedBlockCount = m_document->blockCount();
 }
 
-void Backend::reapplyTypographyToChange() {
-    if (!m_document)
-        return;
-
+void Backend::joinTypographyEdit(int start, int end) {
     QTextBlockFormat blockFormat;
     blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
 
-    // Format only the block(s) touched by the last edit instead of the whole
-    // document, and fold the change into the preceding edit command so a single
-    // undo reverts both the text and its formatting.
     const int maxPos = m_document->characterCount() - 1;
-    const int start = qBound(0, m_lastChangePos, maxPos);
-    const int end = qBound(start, m_lastChangePos + m_lastChangeAdded, maxPos);
+    const int from = qBound(0, start, maxPos);
+    const int to = qBound(from, end, maxPos);
 
     m_formattingTypography = true;
     QTextCursor cursor(m_document);
     cursor.joinPreviousEditBlock();
-    cursor.setPosition(start);
-    cursor.setPosition(end, QTextCursor::KeepAnchor);
+    cursor.setPosition(from);
+    cursor.setPosition(to, QTextCursor::KeepAnchor);
     cursor.mergeBlockFormat(blockFormat);
     cursor.endEditBlock();
     m_formattingTypography = false;
+}
+
+void Backend::reapplyTypographyToChange() {
+    if (!m_document)
+        return;
+
+    // Format only the block(s) touched by the last edit instead of the whole
+    // document, and fold the change into the preceding edit command so a single
+    // undo reverts both the text and its formatting.
+    joinTypographyEdit(m_lastChangePos, m_lastChangePos + m_lastChangeAdded);
+}
+
+int Backend::lastChangeEdge() const {
+    // Insertions leave the caret after the typed text; deletions leave it where
+    // the removed text was.
+    return m_lastChangeAdded > 0 ? m_lastChangePos + m_lastChangeAdded : m_lastChangePos;
+}
+
+bool Backend::lastChangeEndedAWord() const {
+    // The character in front of the caret is the one that says whether the
+    // writer just finished a word, whether they typed it or backspaced onto it.
+    const int edge = lastChangeEdge();
+    return edge > 0 && m_document->characterAt(edge - 1).isSpace();
+}
+
+void Backend::endUndoRun() {
+    if (!m_document)
+        return;
+
+    // Qt folds consecutive keystrokes into one undo command with no upper bound,
+    // so a single Ctrl+Z can swallow everything typed since the document was
+    // opened and leave the caret at the top of it. Re-applying the line height a
+    // block already carries appends a formatting-only command that ends the run,
+    // so the next keystroke starts a fresh one and undo steps back a word at a
+    // time. The marker changes no text of its own; Main.qml steps past it.
+    //
+    // It stands in an edit block of its own rather than joining the command it
+    // follows: joining reopens that command's block, and a marker after a
+    // grouped edit -- a vim command, say -- would chain the group to whatever
+    // preceded it, so one undo unwound both.
+    QTextBlockFormat blockFormat;
+    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
+
+    const int edge = qBound(0, lastChangeEdge(), m_document->characterCount() - 1);
+
+    m_formattingTypography = true;
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    cursor.setPosition(edge);
+    cursor.mergeBlockFormat(blockFormat);
+    cursor.endEditBlock();
+    m_formattingTypography = false;
+}
+
+void Backend::beginHistoryNavigation() {
+    m_navigatingHistory = true;
+}
+
+void Backend::endHistoryNavigation() {
+    m_navigatingHistory = false;
 }
