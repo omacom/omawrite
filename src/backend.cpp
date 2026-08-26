@@ -7,6 +7,7 @@
 #include <QFile>
 #include <QFileInfo>
 #include <QDesktopServices>
+#include <QFont>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QProcess>
@@ -24,6 +25,7 @@
 #include <QTextBlockFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextFormat>
 #include <QTextStream>
 #include <QUrl>
 #include <QVariantMap>
@@ -192,6 +194,72 @@ void Backend::attachDocument(QObject *textDocument) {
 
     applyDocumentTypography();
     restoreRecovery();
+}
+
+QString Backend::renderMarkdown(const QString &markdown,
+                                const QString &background,
+                                const QString &foreground,
+                                int fontPixelSize) const {
+    QTextDocument rendered;
+    QFont readerFont(QStringLiteral("iA Writer Mono S"));
+    readerFont.setPixelSize(qMax(1, fontPixelSize));
+    rendered.setDefaultFont(readerFont);
+    QTextDocument::MarkdownFeatures markdownFeatures(
+        QTextDocument::MarkdownDialectGitHub);
+    markdownFeatures |= QTextDocument::MarkdownNoHTML;
+    rendered.setMarkdown(markdown, markdownFeatures);
+
+    const QColor codeBackground =
+        MarkdownHighlighter::codeBackgroundColor(background, foreground);
+    const auto isCodeBlock = [](const QTextBlock &block) {
+        if (!block.isValid())
+            return false;
+        const QTextBlockFormat format = block.blockFormat();
+        return format.hasProperty(QTextFormat::BlockCodeFence)
+            || format.hasProperty(QTextFormat::BlockCodeLanguage);
+    };
+
+    const qreal paragraphSpacing = qMax(1, qRound(fontPixelSize * 0.7));
+    const qreal headingTopSpacing = qMax(1, qRound(fontPixelSize * 1.2));
+    const qreal headingBottomSpacing = qMax(1, qRound(fontPixelSize * 0.45));
+    const qreal codeSpacing = qMax(1, qRound(fontPixelSize * 0.4));
+
+    for (QTextBlock block = rendered.begin(); block.isValid(); block = block.next()) {
+        QTextBlockFormat format = block.blockFormat();
+        format.setLineHeight(typoraLineHeightPercent,
+                             QTextBlockFormat::ProportionalHeight);
+
+        if (isCodeBlock(block)) {
+            format.setBackground(codeBackground);
+            format.setNonBreakableLines(false);
+            format.setLeftMargin(12);
+            format.setRightMargin(12);
+            format.setTopMargin(isCodeBlock(block.previous()) ? 0 : codeSpacing);
+            format.setBottomMargin(isCodeBlock(block.next()) ? 0 : codeSpacing);
+        } else if (format.headingLevel() > 0) {
+            format.setTopMargin(block == rendered.begin() ? 0 : headingTopSpacing);
+            format.setBottomMargin(headingBottomSpacing);
+        } else if (block.textList()) {
+            format.setTopMargin(0);
+            format.setBottomMargin(block.next().textList() ? 0 : paragraphSpacing);
+        } else if (format.hasProperty(QTextFormat::BlockTrailingHorizontalRulerWidth)) {
+            format.setTopMargin(paragraphSpacing);
+            format.setBottomMargin(paragraphSpacing);
+        } else {
+            format.setTopMargin(0);
+            format.setBottomMargin(block.text().isEmpty() ? 0 : paragraphSpacing);
+        }
+
+        QTextCursor(block).setBlockFormat(format);
+    }
+
+    QString html = rendered.toHtml();
+    static const QRegularExpression remoteImage(
+        QStringLiteral("<img\\b[^>]*\\bsrc\\s*=\\s*[\"']\\s*"
+                       "(?:https?|ftp):[^>]*>"),
+        QRegularExpression::CaseInsensitiveOption);
+    html.remove(remoteImage);
+    return html;
 }
 
 void Backend::openDialog() {
@@ -369,6 +437,10 @@ QVariantList Backend::hiddenRangesAt(int position) const {
     const QTextBlock block =
         m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
     if (!block.isValid())
+        return ranges;
+
+    // The highlighter leaves fenced code alone, so it hides nothing there.
+    if (block.userState() == MarkdownHighlighter::InsideFence)
         return ranges;
 
     const int lineStart = block.position();

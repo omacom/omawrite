@@ -1,6 +1,14 @@
 #include <QtTest>
+#include <QClipboard>
+#include <QColor>
 #include <QFont>
+#include <QGuiApplication>
+#include <QMimeData>
+#include <QTextDocument>
+#include <QTextLayout>
 #include <QQmlComponent>
+#include <QQuickTextDocument>
+#include <QQuickWindow>
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
@@ -35,6 +43,68 @@ private slots:
         QVERIFY(Backend::normalizedLinkUrl(QStringLiteral("file:///tmp/private")).isEmpty());
     }
 
+    void sanitizesAndSeparatesRenderedMarkdown() {
+        Backend backend;
+        const QString markdown = QStringLiteral(
+            "<script>alert('no')</script>\n\n"
+            "![tracker](https://tracker.invalid/pixel.png)\n\n"
+            "```cpp\nint first = 1;\n```\n\n"
+            "```cpp\nint second = 2;\n```\n");
+        const QString html = backend.renderMarkdown(
+            markdown, QStringLiteral("#ffffff"), QStringLiteral("#222324"), 20);
+
+        QVERIFY(!html.contains(QStringLiteral("<script"), Qt::CaseInsensitive));
+        QVERIFY(!html.contains(QStringLiteral("tracker.invalid"), Qt::CaseInsensitive));
+
+        QTextDocument document;
+        document.setHtml(html);
+        QTextBlock first = document.begin();
+        while (first.isValid() && !first.text().contains(QStringLiteral("int first")))
+            first = first.next();
+        QTextBlock second = first.next();
+        while (second.isValid() && !second.text().contains(QStringLiteral("int second")))
+            second = second.next();
+
+        QVERIFY(first.isValid());
+        QVERIFY(second.isValid());
+        QVERIFY(first.blockFormat().background().style() != Qt::NoBrush);
+        QVERIFY(second.blockFormat().background().style() != Qt::NoBrush);
+        QVERIFY(!first.blockFormat().nonBreakableLines());
+        QCOMPARE(first.blockFormat().background().color(),
+                 second.blockFormat().background().color());
+        QVERIFY(first.blockFormat().background().color() != QColor(QStringLiteral("#ffffff")));
+    }
+
+    void spacesRenderedMarkdownForReading() {
+        Backend backend;
+        const QString html = backend.renderMarkdown(
+            QStringLiteral("# Title\n\n## Section\n\nFirst paragraph.\n\n"
+                           "Second paragraph.\n\n- First item\n- Second item\n"),
+            QStringLiteral("#ffffff"), QStringLiteral("#222324"), 20);
+
+        QTextDocument document;
+        document.setHtml(html);
+        QTextBlock title = document.begin();
+        QTextBlock section = title.next();
+        QTextBlock firstParagraph = section.next();
+        QTextBlock secondParagraph = firstParagraph.next();
+        QTextBlock firstItem = secondParagraph.next();
+        QTextBlock secondItem = firstItem.next();
+
+        QCOMPARE(title.blockFormat().headingLevel(), 1);
+        QCOMPARE(section.blockFormat().headingLevel(), 2);
+        QCOMPARE(firstParagraph.blockFormat().lineHeightType(),
+                 int(QTextBlockFormat::ProportionalHeight));
+        QCOMPARE(firstParagraph.blockFormat().lineHeight(), qreal(140));
+        QVERIFY(title.blockFormat().bottomMargin() > 0);
+        QVERIFY(section.blockFormat().topMargin()
+                > section.blockFormat().bottomMargin());
+        QVERIFY(firstParagraph.blockFormat().bottomMargin() > 0);
+        QVERIFY(secondParagraph.blockFormat().bottomMargin() > 0);
+        QCOMPARE(firstItem.blockFormat().bottomMargin(), qreal(0));
+        QVERIFY(secondItem.blockFormat().bottomMargin() > 0);
+    }
+
     void suggestsSafeNames() {
         QCOMPARE(Backend::suggestedFileName(QStringLiteral("My first draft\nBody")),
                  QStringLiteral("My first draft.md"));
@@ -52,6 +122,57 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void leavesFencedCodeLiteral() {
+        QTextDocument document;
+        document.setPlainText(QStringLiteral("prose _italic_\n"
+                                            "```ruby\n"
+                                            "snake_case_name = *value*\n"
+                                            "# not a heading\n"
+                                            "```\n"
+                                            "after _italic_\n"));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.rehighlight();
+
+        const auto stateOf = [&document](int blockNumber) {
+            return document.findBlockByNumber(blockNumber).userState();
+        };
+        QCOMPARE(stateOf(0), int(MarkdownHighlighter::Prose));
+        QCOMPARE(stateOf(1), int(MarkdownHighlighter::InsideFence));
+        QCOMPARE(stateOf(2), int(MarkdownHighlighter::InsideFence));
+        QCOMPARE(stateOf(3), int(MarkdownHighlighter::InsideFence));
+        QCOMPARE(stateOf(4), int(MarkdownHighlighter::Prose));
+        QCOMPARE(stateOf(5), int(MarkdownHighlighter::Prose));
+
+        const auto formatsOf = [&document](int blockNumber) {
+            return document.findBlockByNumber(blockNumber).layout()->formats();
+        };
+
+        const QList<QTextLayout::FormatRange> fenced = formatsOf(2);
+        QCOMPARE(fenced.size(), 1);
+        QCOMPARE(fenced.constFirst().length, document.findBlockByNumber(2).text().length());
+        QVERIFY(fenced.constFirst().format.background().style() != Qt::NoBrush);
+        for (const QTextLayout::FormatRange &range : fenced) {
+            QVERIFY(!range.format.fontItalic());
+            QVERIFY(range.format.fontWeight() != QFont::Bold);
+            QVERIFY(range.format.foreground().color() != range.format.background().color());
+        }
+
+        const QList<QTextLayout::FormatRange> comment = formatsOf(3);
+        QCOMPARE(comment.size(), 1);
+        QVERIFY(comment.constFirst().format.background().style() != Qt::NoBrush);
+        QVERIFY(comment.constFirst().format.fontWeight() != QFont::Bold);
+
+        const QList<QTextLayout::FormatRange> fence = formatsOf(1);
+        QCOMPARE(fence.size(), 1);
+        QVERIFY(fence.constFirst().format.background().style() != Qt::NoBrush);
+
+        const QList<QTextLayout::FormatRange> prose = formatsOf(5);
+        QVERIFY(std::any_of(prose.cbegin(), prose.cend(),
+                            [](const QTextLayout::FormatRange &range) {
+                                return range.format.fontItalic();
+                            }));
     }
 
     void loadsCurrentOmarchyTheme() {
@@ -175,8 +296,8 @@ private slots:
         QVERIFY2(window, qPrintable(component.errorString()));
 
         QVERIFY(window->findChild<QObject *>(QStringLiteral("sourceEditor")));
-        QVERIFY(!window->findChild<QObject *>(QStringLiteral("renderedPreview")));
-        QVERIFY(!window->findChild<QObject *>(QStringLiteral("modeToggle")));
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("renderedPreview")));
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("modeToggle")));
 
         QObject *saveButton = window->findChild<QObject *>(QStringLiteral("saveButton"));
         QObject *openButton = window->findChild<QObject *>(QStringLiteral("openButton"));
@@ -190,6 +311,133 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void switchesToCopyableReaderAndScalesDocumentText() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *reader = window->findChild<QObject *>(QStringLiteral("renderedPreview"));
+        QObject *modeToggle = window->findChild<QObject *>(QStringLiteral("modeToggle"));
+        QVERIFY(editor);
+        QVERIFY(reader);
+        QVERIFY(modeToggle);
+
+        const QString markdown = QStringLiteral(
+            "# Reader heading\n\nA **formatted** paragraph.\n\n```cpp\nint answer = 42;\n```\n");
+        editor->setProperty("text", markdown);
+
+        QVERIFY(editor->property("visible").toBool());
+        QVERIFY(!reader->property("visible").toBool());
+        QVERIFY(window->property("readerHtml").toString().isEmpty());
+        QVERIFY(QMetaObject::invokeMethod(modeToggle, "clicked"));
+        QVERIFY(window->property("readerMode").toBool());
+        QVERIFY(!editor->property("visible").toBool());
+        QVERIFY(reader->property("visible").toBool());
+        QVERIFY(reader->property("readOnly").toBool());
+        QVERIFY(reader->property("selectByMouse").toBool());
+        QVERIFY(reader->property("persistentSelection").toBool());
+        QVERIFY(reader->property("textFormat").toInt() != 0); // Not PlainText.
+
+        QVERIFY(QMetaObject::invokeMethod(reader, "selectAll"));
+        QVERIFY(QMetaObject::invokeMethod(reader, "copy"));
+        const QMimeData *copied = QGuiApplication::clipboard()->mimeData();
+        QVERIFY(copied);
+        QVERIFY(copied->hasText());
+        QVERIFY(copied->hasHtml());
+        QVERIFY(copied->text().contains(QStringLiteral("Reader heading")));
+
+        auto *quickDocument = qobject_cast<QQuickTextDocument *>(
+            reader->property("textDocument").value<QObject *>());
+        QVERIFY(quickDocument);
+        QTextBlock codeBlock = quickDocument->textDocument()->findBlockByNumber(2);
+        while (codeBlock.isValid() && !codeBlock.text().contains(QStringLiteral("int answer")))
+            codeBlock = codeBlock.next();
+        QVERIFY(codeBlock.isValid());
+        QVERIFY(codeBlock.blockFormat().background().style() != Qt::NoBrush);
+        QCOMPARE(codeBlock.blockFormat().background().color().toRgb().rgba(),
+                 MarkdownHighlighter::codeBackgroundColor(
+                     backend.themeBackground(), backend.themeForeground()).toRgb().rgba());
+        QTextBlock proseBlock = quickDocument->textDocument()->begin();
+        while (proseBlock.isValid()
+                && !proseBlock.text().contains(QStringLiteral("formatted paragraph")))
+            proseBlock = proseBlock.next();
+        QVERIFY(proseBlock.isValid());
+        QVERIFY(proseBlock.blockFormat().background().style() == Qt::NoBrush);
+        QVERIFY(copied->html().contains(QStringLiteral("int answer = 42")));
+
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+
+        const int defaultSize = editor->property("font").value<QFont>().pixelSize();
+        QTest::keyClick(quickWindow, Qt::Key_Plus, Qt::ControlModifier);
+        QVERIFY(editor->property("font").value<QFont>().pixelSize() > defaultSize);
+        QCOMPARE(reader->property("font").value<QFont>().pixelSize(),
+                 editor->property("font").value<QFont>().pixelSize());
+        QTest::keyClick(quickWindow, Qt::Key_Minus, Qt::ControlModifier);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), defaultSize);
+
+        QTest::keyClick(quickWindow, Qt::Key_R,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(!window->property("readerMode").toBool());
+
+        for (int i = 0; i < 12; ++i)
+            QTest::keyClick(quickWindow, Qt::Key_Minus, Qt::ControlModifier);
+        QVERIFY(editor->property("font").value<QFont>().pixelSize() > 0);
+        for (int i = 0; i < 9; ++i)
+            QTest::keyClick(quickWindow, Qt::Key_Plus, Qt::ControlModifier);
+        QCOMPARE(editor->property("font").value<QFont>().pixelSize(), defaultSize);
+
+        // Exercise the Reader shortcut in the entry direction too.
+        QTest::keyClick(quickWindow, Qt::Key_R,
+                        Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(window->property("readerMode").toBool());
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openSearch",
+                                          Q_ARG(QVariant, false)));
+        QVERIFY(!window->property("readerMode").toBool());
+        QVERIFY(window->property("searchOpen").toBool());
+    }
+
+    void readerKeyboardNavigationFollowsCursor() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *reader = window->findChild<QObject *>(QStringLiteral("renderedPreview"));
+        QObject *modeToggle = window->findChild<QObject *>(QStringLiteral("modeToggle"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("documentFlick"));
+        QVERIFY(editor);
+        QVERIFY(reader);
+        QVERIFY(modeToggle);
+        QVERIFY(flick);
+
+        QStringList lines;
+        for (int i = 0; i < 100; ++i)
+            lines.append(QStringLiteral("Reader line %1").arg(i));
+        editor->setProperty("text", lines.join(QStringLiteral("\n\n")));
+        QVERIFY(QMetaObject::invokeMethod(modeToggle, "clicked"));
+        auto *quickWindow = qobject_cast<QQuickWindow *>(window.data());
+        QVERIFY(quickWindow);
+        QTRY_VERIFY(reader->property("activeFocus").toBool());
+        QTest::keyClick(quickWindow, Qt::Key_End, Qt::ControlModifier);
+        QTRY_VERIFY(flick->property("contentY").toReal() > 0);
     }
 
     void scalesTextWithDesktopTextSize() {

@@ -54,6 +54,10 @@ public:
     static QString suggestedFileName(const QString &text);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
+    Q_INVOKABLE QString renderMarkdown(const QString &markdown,
+                                       const QString &background,
+                                       const QString &foreground,
+                                       int fontPixelSize) const;
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();

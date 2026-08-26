@@ -1,5 +1,6 @@
 #pragma once
 
+#include <QColor>
 #include <QRegularExpression>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
@@ -21,6 +22,10 @@ public:
 
     enum class InlineKind { Bold, Italic, Link };
 
+    // Carried from block to block so a fenced run of code knows it is inside
+    // one. Stored on the block, which is where Backend::hiddenRangesAt reads it.
+    enum BlockState { Prose = 0, InsideFence = 1 };
+
     struct InlineMarkup {
         InlineKind kind;
         Span content;
@@ -31,12 +36,15 @@ public:
     // to style content and hide markers, and the editor uses it (via
     // Backend::hiddenRangesAt) to skip the caret over the hidden markers.
     static QList<InlineMarkup> inlineMarkup(const QString &text);
+    static QColor codeBackgroundColor(const QString &background,
+                                      const QString &foreground);
 
 protected:
     void highlightBlock(const QString &text) override;
 
 private:
     void rebuildFormats();
+    static bool isFence(const QString &text);
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
@@ -51,6 +59,7 @@ private:
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;
     QTextCharFormat m_codeFormat;
+    QTextCharFormat m_fenceFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
     QString m_searchQuery;
