@@ -25,11 +25,18 @@ ApplicationWindow {
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around.
     readonly property real textScale: backend.textScale
-    readonly property int editorFontPixelSize: scaledSize(20)
+    property int documentSizeAdjustment: 0
+    readonly property int editorFontPixelSize: scaledSize(
+        Math.max(1, 20 + documentSizeAdjustment))
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
     property bool closeConfirmed: false
+    property bool readerMode: false
+    property string readerHtml: ""
+    property bool readerDirty: true
+    property real editorScrollPosition: 0
+    property real readerScrollPosition: 0
     property bool searchOpen: false
     property bool searchUpdating: false
     property var searchMatches: []
@@ -42,6 +49,21 @@ ApplicationWindow {
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
+
+    onPageColorChanged: {
+        readerDirty = true;
+        refreshReader();
+    }
+
+    onTextColorChanged: {
+        readerDirty = true;
+        refreshReader();
+    }
+
+    onEditorFontPixelSizeChanged: {
+        readerDirty = true;
+        refreshReader();
+    }
 
     onClosing: function(close) {
         if (closeConfirmed || !backend.modified)
@@ -89,6 +111,60 @@ ApplicationWindow {
         win.visibility = win.visibility === Window.FullScreen
             ? Window.Windowed
             : Window.FullScreen;
+    }
+
+    function increaseTextSize() {
+        documentSizeAdjustment += 2;
+    }
+
+    function decreaseTextSize() {
+        // Keep a positive TextEdit pixel size and stay on the two-pixel ladder
+        // so increasing after the floor can return to the 20px default.
+        documentSizeAdjustment = Math.max(-18, documentSizeAdjustment - 2);
+    }
+
+    function refreshReader() {
+        if (!readerMode || !readerDirty)
+            return;
+
+        readerHtml = backend.renderMarkdown(editor.text, pageColor, textColor,
+                                            editorFontPixelSize);
+        readerDirty = false;
+    }
+
+    function toggleReaderView() {
+        if (readerMode) {
+            readerScrollPosition = editorFlick.contentY;
+            readerMode = false;
+            Qt.callLater(function() {
+                editorFlick.scrollTo(
+                    editorFlick.clampContentY(editorScrollPosition));
+                editor.forceActiveFocus();
+            });
+            return;
+        }
+
+        if (searchOpen)
+            closeSearch();
+        editorScrollPosition = editorFlick.contentY;
+        readerMode = true;
+        refreshReader();
+        Qt.callLater(function() {
+            editorFlick.scrollTo(
+                editorFlick.clampContentY(readerScrollPosition));
+            reader.forceActiveFocus();
+        });
+    }
+
+    function openSearch(withReplace) {
+        if (readerMode)
+            toggleReaderView();
+        searchOpen = true;
+        replaceOpen = withReplace;
+        Qt.callLater(function() {
+            searchField.forceActiveFocus();
+            searchField.selectAll();
+        });
     }
 
     function updateSearch() {
@@ -144,31 +220,49 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequences: ["Ctrl++", "Ctrl+="]
+        context: Qt.ApplicationShortcut
+        autoRepeat: false
+        onActivated: increaseTextSize()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+-"
+        context: Qt.ApplicationShortcut
+        autoRepeat: false
+        onActivated: decreaseTextSize()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+R"
+        context: Qt.ApplicationShortcut
+        onActivated: toggleReaderView()
+    }
+
+    Shortcut {
         sequence: "Ctrl+H"
         context: Qt.ApplicationShortcut
-        onActivated: {
-            searchOpen = true;
-            replaceOpen = true;
-            searchField.forceActiveFocus();
-            searchField.selectAll();
-        }
+        onActivated: openSearch(true)
     }
 
     Shortcut {
         sequence: "Ctrl+B"
         context: Qt.WindowShortcut
+        enabled: !win.readerMode
         onActivated: editor.wrapSelection("**", "**")
     }
 
     Shortcut {
         sequence: "Ctrl+I"
         context: Qt.WindowShortcut
+        enabled: !win.readerMode
         onActivated: editor.wrapSelection("*", "*")
     }
 
     Shortcut {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
+        enabled: !win.readerMode
         onActivated: editor.insertLink()
     }
 
@@ -211,23 +305,21 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+Z"
         context: Qt.WindowShortcut
+        enabled: !win.readerMode
         onActivated: editor.undo()
     }
 
     Shortcut {
         sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
         context: Qt.WindowShortcut
+        enabled: !win.readerMode
         onActivated: editor.redo()
     }
 
     Shortcut {
         sequence: "Ctrl+F"
         context: Qt.ApplicationShortcut
-        onActivated: {
-            searchOpen = true;
-            searchField.forceActiveFocus();
-            searchField.selectAll();
-        }
+        onActivated: openSearch(false)
     }
 
     Shortcut {
@@ -331,7 +423,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl++ / Ctrl+-  Text size\nCtrl+Shift+R  Reader / Edit\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -341,12 +433,16 @@ ApplicationWindow {
 
         Flickable {
             id: editorFlick
+            objectName: "documentFlick"
             anchors.fill: parent
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(
+                height,
+                (win.readerMode ? reader.y + reader.implicitHeight
+                                : editor.y + editor.implicitHeight) + 220)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -473,6 +569,11 @@ ApplicationWindow {
             }
 
             onMovementStarted: wheelScroll.stop()
+            onContentHeightChanged: {
+                var clamped = clampContentY(contentY);
+                if (clamped !== contentY)
+                    scrollTo(clamped);
+            }
 
             function scrollByWheel(wheel) {
                 // High-resolution wheels report fractional notches; feed
@@ -515,18 +616,31 @@ ApplicationWindow {
                 contentY = snapToPixel(y);
             }
 
-            // Keep the editing caret within the viewport so writing past the
-            // bottom edge scrolls the page along with the text.
+            // Keep the active view's caret within the viewport for typing,
+            // selection, and keyboard navigation in both Edit and Reader.
             function ensureCursorVisible() {
+                var documentItem = win.readerMode ? reader : editor;
                 var margin = win.editorFontPixelSize * 2;
-                var cursorTop = editor.y + editor.cursorRectangle.y;
-                var cursorBottom = cursorTop + editor.cursorRectangle.height;
+                var cursorTop = documentItem.y + documentItem.cursorRectangle.y;
+                var cursorBottom = cursorTop + documentItem.cursorRectangle.height;
                 var maxContentY = Math.max(0, contentHeight - height);
 
                 if (cursorBottom + margin > contentY + height)
                     scrollTo(Math.min(maxContentY, cursorBottom + margin - height));
                 else if (cursorTop - margin < contentY)
                     scrollTo(Math.max(0, cursorTop - margin));
+            }
+
+            function moveDocumentPage(documentItem, direction, extendSelection) {
+                var pageStep = Math.max(win.editorFontPixelSize,
+                                        height - win.editorFontPixelSize * 2);
+                var rect = documentItem.cursorRectangle;
+                var targetY = rect.y + rect.height / 2 + direction * pageStep;
+                var target = documentItem.positionAt(rect.x, Math.max(0, targetY));
+                if (extendSelection)
+                    documentItem.moveCursorSelection(target, TextEdit.SelectCharacters);
+                else
+                    documentItem.cursorPosition = target;
             }
 
             TextEdit {
@@ -536,6 +650,7 @@ ApplicationWindow {
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+                visible: !win.readerMode
                 text: ""
                 textFormat: TextEdit.PlainText
                 wrapMode: TextEdit.Wrap
@@ -706,18 +821,6 @@ ApplicationWindow {
                         : skipHiddenBackward(pos);
                 }
 
-                function movePage(direction, extendSelection) {
-                    var pageStep = Math.max(win.editorFontPixelSize,
-                                            editorFlick.height - win.editorFontPixelSize * 2);
-                    var rect = cursorRectangle;
-                    var targetY = rect.y + rect.height / 2 + direction * pageStep;
-                    var target = positionAt(rect.x, Math.max(0, targetY));
-                    if (extendSelection)
-                        moveCursorSelection(target, TextEdit.SelectCharacters);
-                    else
-                        cursorPosition = target;
-                }
-
                 function deleteParagraphBreakBehindCursor() {
                     if (selectionStart !== selectionEnd || cursorPosition < 2)
                         return false;
@@ -764,13 +867,16 @@ ApplicationWindow {
                         event.accepted = true;
                     } else if (!commandModifier
                                && (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)) {
-                        movePage(event.key === Qt.Key_PageDown ? 1 : -1,
-                                 event.modifiers & Qt.ShiftModifier);
+                        editorFlick.moveDocumentPage(
+                            editor, event.key === Qt.Key_PageDown ? 1 : -1,
+                            event.modifiers & Qt.ShiftModifier);
                         event.accepted = true;
                     }
                 }
 
                 onTextChanged: {
+                    win.readerDirty = true;
+                    win.refreshReader();
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
@@ -794,6 +900,62 @@ ApplicationWindow {
                     forceActiveFocus();
                 }
             }
+
+            TextEdit {
+                id: reader
+                objectName: "renderedPreview"
+                x: Math.round((editorFlick.width - width) / 2)
+                y: Math.max(42, Math.round(win.height * 0.05))
+                width: win.editorWidth
+                height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+                visible: win.readerMode
+                text: win.readerHtml
+                textFormat: TextEdit.RichText
+                readOnly: true
+                wrapMode: TextEdit.Wrap
+                selectByMouse: true
+                selectByKeyboard: true
+                persistentSelection: true
+                activeFocusOnPress: true
+                Accessible.name: "Rendered Markdown"
+                Accessible.role: Accessible.StaticText
+                color: win.textColor
+                selectedTextColor: win.strongTextColor
+                selectionColor: win.selectionFill
+                font.family: "iA Writer Mono S"
+                font.pixelSize: win.editorFontPixelSize
+                renderType: Screen.devicePixelRatio % 1 === 0
+                    ? TextEdit.NativeRendering
+                    : TextEdit.QtRendering
+                onLinkActivated: function(link) {
+                    backend.openExternalUrl(link);
+                }
+                onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                    var commandModifier = event.modifiers
+                        & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier);
+                    if (!commandModifier
+                            && (event.key === Qt.Key_PageDown
+                                || event.key === Qt.Key_PageUp)) {
+                        editorFlick.moveDocumentPage(
+                            reader, event.key === Qt.Key_PageDown ? 1 : -1,
+                            event.modifiers & Qt.ShiftModifier);
+                        event.accepted = true;
+                    }
+                }
+
+                Text {
+                    anchors.left: parent.left
+                    anchors.top: parent.top
+                    text: "Nothing to read yet."
+                    visible: editor.text.length === 0
+                    color: win.mutedColor
+                    font.family: reader.font.family
+                    font.pixelSize: reader.font.pixelSize
+                }
+            }
         }
 
         Row {
@@ -803,10 +965,11 @@ ApplicationWindow {
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
             spacing: 12
-            opacity: 0.55
 
             FooterIconButton {
                 objectName: "saveButton"
+                anchors.verticalCenter: parent.verticalCenter
+                opacity: 0.55
                 iconName: "save"
                 iconColor: win.mutedColor
                 tooltip: "Save"
@@ -815,15 +978,55 @@ ApplicationWindow {
 
             FooterIconButton {
                 objectName: "openButton"
+                anchors.verticalCenter: parent.verticalCenter
+                opacity: 0.55
                 iconName: "open"
                 iconColor: win.mutedColor
                 tooltip: "Open"
                 onClicked: backend.openDialog()
             }
 
+            Button {
+                id: modeToggle
+                objectName: "modeToggle"
+                text: win.readerMode ? "Edit" : "Reader"
+                flat: true
+                activeFocusOnTab: true
+                implicitWidth: modeLabel.implicitWidth + win.scaledSize(16)
+                implicitHeight: win.scaledSize(24)
+                padding: 0
+                Accessible.name: text + " view"
+                ToolTip.visible: hovered
+                ToolTip.text: win.readerMode
+                    ? "Return to the Markdown editor (Ctrl+Shift+R)"
+                    : "Read formatted Markdown (Ctrl+Shift+R)"
+                onClicked: win.toggleReaderView()
+
+                background: Rectangle {
+                    radius: 4
+                    color: modeToggle.hovered || modeToggle.activeFocus
+                        ? (win.darkMode ? "#2b2b29" : "#eeeeea")
+                        : "transparent"
+                    border.width: modeToggle.activeFocus ? 1 : 0
+                    border.color: win.textColor
+                }
+
+                contentItem: Label {
+                    id: modeLabel
+                    text: modeToggle.text
+                    color: win.textColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(11)
+                    horizontalAlignment: Text.AlignHCenter
+                    verticalAlignment: Text.AlignVCenter
+                }
+            }
+
             Label {
+                anchors.verticalCenter: parent.verticalCenter
                 text: backend.status
                 color: win.mutedColor
+                opacity: 0.55
                 font.family: "iA Writer Mono S"
                 font.pixelSize: win.scaledSize(11)
                 visible: text !== ""
