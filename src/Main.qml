@@ -16,6 +16,7 @@ ApplicationWindow {
     title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
 
     readonly property bool darkMode: backend.darkMode
+    readonly property bool macOs: Qt.platform.os === "osx" || Qt.platform.os === "macos"
     readonly property color pageColor: backend.themeBackground
     readonly property color textColor: backend.themeForeground
     readonly property color strongTextColor: backend.themeForeground
@@ -42,6 +43,79 @@ ApplicationWindow {
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
+
+    menuBar: macOs ? macMenuBar : null
+
+    property MenuBar macMenuBar: MenuBar {
+        Menu {
+            title: "File"
+            Action {
+                text: "New Window"
+                onTriggered: backend.newWindow()
+            }
+            Action {
+                text: "Open"
+                onTriggered: backend.openDialog()
+            }
+            Action {
+                text: "Save"
+                onTriggered: backend.save()
+            }
+            Action {
+                text: "Save As"
+                onTriggered: backend.saveAsDialog()
+            }
+            Action {
+                text: "Print"
+                onTriggered: backend.printDocument()
+            }
+            Action {
+                text: "Close"
+                onTriggered: win.close()
+            }
+        }
+
+        Menu {
+            title: "Edit"
+            Action {
+                text: "Undo"
+                onTriggered: editor.undo()
+            }
+            Action {
+                text: "Redo"
+                onTriggered: editor.redo()
+            }
+            Action {
+                text: "Find"
+                onTriggered: {
+                    searchOpen = true;
+                    searchField.forceActiveFocus();
+                    searchField.selectAll();
+                }
+            }
+            Action {
+                text: "Find and Replace"
+                onTriggered: {
+                    searchOpen = true;
+                    replaceOpen = true;
+                    searchField.forceActiveFocus();
+                    searchField.selectAll();
+                }
+            }
+            Action {
+                text: "Bold"
+                onTriggered: editor.wrapSelection("**", "**")
+            }
+            Action {
+                text: "Italic"
+                onTriggered: editor.wrapSelection("*", "*")
+            }
+            Action {
+                text: "Link"
+                onTriggered: editor.insertLink()
+            }
+        }
+    }
 
     onClosing: function(close) {
         if (closeConfirmed || !backend.modified)
@@ -138,13 +212,13 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+S"
+        sequences: [StandardKey.Save]
         context: Qt.ApplicationShortcut
         onActivated: backend.save()
     }
 
     Shortcut {
-        sequence: "Ctrl+H"
+        sequence: macOs ? "Ctrl+Alt+F" : "Ctrl+H"
         context: Qt.ApplicationShortcut
         onActivated: {
             searchOpen = true;
@@ -155,13 +229,13 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+B"
+        sequences: [StandardKey.Bold]
         context: Qt.WindowShortcut
         onActivated: editor.wrapSelection("**", "**")
     }
 
     Shortcut {
-        sequence: "Ctrl+I"
+        sequences: [StandardKey.Italic]
         context: Qt.WindowShortcut
         onActivated: editor.wrapSelection("*", "*")
     }
@@ -179,49 +253,49 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+O"
+        sequences: [StandardKey.Open]
         context: Qt.ApplicationShortcut
         onActivated: backend.openDialog()
     }
 
     Shortcut {
-        sequence: "Ctrl+N"
+        sequences: [StandardKey.New]
         context: Qt.ApplicationShortcut
         onActivated: backend.newWindow()
     }
 
     Shortcut {
-        sequence: "Ctrl+Shift+S"
+        sequences: [StandardKey.SaveAs, "Ctrl+Shift+S"]
         context: Qt.ApplicationShortcut
         onActivated: backend.saveAsDialog()
     }
 
     Shortcut {
-        sequence: "Ctrl+P"
+        sequences: [StandardKey.Print]
         context: Qt.ApplicationShortcut
         onActivated: backend.printDocument()
     }
 
     Shortcut {
-        sequences: ["Meta+F", "F11"]
+        sequences: macOs ? [StandardKey.FullScreen] : [StandardKey.FullScreen, "Meta+F"]
         context: Qt.ApplicationShortcut
         onActivated: toggleFullScreen()
     }
 
     Shortcut {
-        sequence: "Ctrl+Z"
+        sequences: [StandardKey.Undo]
         context: Qt.WindowShortcut
         onActivated: editor.undo()
     }
 
     Shortcut {
-        sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
+        sequences: [StandardKey.Redo, "Ctrl+Y"]
         context: Qt.WindowShortcut
         onActivated: editor.redo()
     }
 
     Shortcut {
-        sequence: "Ctrl+F"
+        sequences: [StandardKey.Find]
         context: Qt.ApplicationShortcut
         onActivated: {
             searchOpen = true;
@@ -231,7 +305,7 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+G"
+        sequences: [StandardKey.FindNext]
         context: Qt.ApplicationShortcut
         enabled: win.searchOpen
         onActivated: win.moveSearch(1)
@@ -331,7 +405,9 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: macOs
+                ? "Cmd+S  Save\nCmd+Shift+S  Save As\nCmd+O  Open\nCmd+N  New Window\nCmd+F  Find\nCmd+Option+F  Find and Replace\nCmd+B  Bold\nCmd+I  Italic\nCmd+K  Link\nCmd+P  Print\nControl+Command+F  Fullscreen\nCmd+?  Shortcuts"
+                : "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
