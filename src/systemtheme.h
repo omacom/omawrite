@@ -2,7 +2,9 @@
 
 #include <QObject>
 
+#if defined(Q_OS_LINUX)
 class QDBusVariant;
+#endif
 
 class SystemTheme : public QObject {
     Q_OBJECT
@@ -20,13 +22,17 @@ signals:
 public slots:
     void refresh();
 
+#if defined(Q_OS_LINUX)
 private slots:
     void handlePortalSettingChanged(const QString &nameSpace, const QString &key,
                                     const QDBusVariant &value);
+#endif
 
 private:
     bool detectDarkMode() const;
+#if defined(Q_OS_LINUX)
     bool portalDarkMode(bool *known) const;
+#endif
     bool qtDarkMode(bool *known) const;
     void setDarkMode(bool darkMode);
     qreal detectTextScale() const;
