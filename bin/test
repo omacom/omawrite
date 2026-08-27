@@ -6,12 +6,33 @@ BUILD_DIR="$ROOT/build-tests"
 
 if command -v qmake6 >/dev/null 2>&1; then
   QMAKE=qmake6
-else
+elif command -v qmake >/dev/null 2>&1; then
   QMAKE=qmake
+else
+  echo "qmake6 or qmake is required to test omawrite." >&2
+  exit 1
+fi
+
+if command -v nproc >/dev/null 2>&1; then
+  JOBS="$(nproc)"
+elif command -v sysctl >/dev/null 2>&1; then
+  JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+else
+  JOBS=1
 fi
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/tests/tests.pro"
-make -j"$(nproc 2>/dev/null || echo 1)"
-QT_QPA_PLATFORM=offscreen ./tst_omawrite
+make -j"$JOBS"
+
+if [ -x "$BUILD_DIR/tst_omawrite" ]; then
+  TEST_BIN="$BUILD_DIR/tst_omawrite"
+elif [ -x "$BUILD_DIR/tst_omawrite.app/Contents/MacOS/tst_omawrite" ]; then
+  TEST_BIN="$BUILD_DIR/tst_omawrite.app/Contents/MacOS/tst_omawrite"
+else
+  echo "Tests finished building, but tst_omawrite was not found in $BUILD_DIR." >&2
+  exit 1
+fi
+
+QT_QPA_PLATFORM=offscreen "$TEST_BIN"

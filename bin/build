@@ -13,7 +13,13 @@ else
   exit 1
 fi
 
-JOBS="$(nproc 2>/dev/null || echo 1)"
+if command -v nproc >/dev/null 2>&1; then
+  JOBS="$(nproc)"
+elif command -v sysctl >/dev/null 2>&1; then
+  JOBS="$(sysctl -n hw.ncpu 2>/dev/null || echo 1)"
+else
+  JOBS=1
+fi
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
@@ -21,4 +27,11 @@ cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/omawrite.pro"
 make -j"$JOBS"
 
-echo "Built $BUILD_DIR/omawrite"
+if [ -x "$BUILD_DIR/omawrite.app/Contents/MacOS/omawrite" ]; then
+  echo "Built $BUILD_DIR/omawrite.app"
+elif [ -x "$BUILD_DIR/omawrite" ]; then
+  echo "Built $BUILD_DIR/omawrite"
+else
+  echo "Build finished, but omawrite was not found in $BUILD_DIR." >&2
+  exit 1
+fi
