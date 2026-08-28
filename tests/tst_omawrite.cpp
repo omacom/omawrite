@@ -4,6 +4,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickWindow>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -113,16 +114,9 @@ private slots:
     }
 
     void keepsCursorAndSelectionStableAcrossInsertions() {
-        const QString mutationsPath = QFINDTESTDATA("../src/EditorMutations.js");
-        QVERIFY(!mutationsPath.isEmpty());
-
         QQmlEngine engine;
         QQmlComponent component(&engine);
-        const QByteArray harness = R"QML(
-            import QtQuick
-            import "EditorMutations.js" as EditorMutations
-
-            TextEdit {
+        QScopedPointer<QObject> editor(createJsHarness(component, R"QML(
                 property string insertionText
                 property int insertionCursor
                 property string wrappedText
@@ -144,13 +138,7 @@ private slots:
                     wrappedSelectionStart = selectionStart;
                     wrappedSelectionEnd = selectionEnd;
                 }
-            }
-        )QML";
-        const QUrl harnessUrl = QUrl::fromLocalFile(
-            QFileInfo(mutationsPath).absolutePath() + QStringLiteral("/MutationHarness.qml"));
-        component.setData(harness, harnessUrl);
-        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
-        QScopedPointer<QObject> editor(component.create());
+        )QML", QStringLiteral("MutationHarness")));
         QVERIFY2(editor, qPrintable(component.errorString()));
 
         QCOMPARE(editor->property("insertionText").toString(),
@@ -162,16 +150,130 @@ private slots:
         QCOMPARE(editor->property("wrappedSelectionEnd").toInt(), 12);
     }
 
-    void savesAndOpensFromFooterButtons() {
-        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
-        QVERIFY(!mainQmlPath.isEmpty());
+    void nestsListItemsWithTab() {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        QScopedPointer<QObject> editor(createListEditor(component));
+        QVERIFY2(editor, qPrintable(component.errorString()));
 
+        const auto indent = [&](const QString &source, int from, int to, int direction) {
+            QVariant handled;
+            QMetaObject::invokeMethod(editor.data(), "indent", Q_RETURN_ARG(QVariant, handled),
+                                      Q_ARG(QVariant, source), Q_ARG(QVariant, from),
+                                      Q_ARG(QVariant, to), Q_ARG(QVariant, direction));
+            return handled.toBool();
+        };
+        const auto result = [&] { return editor->property("resultText").toString(); };
+        const auto caret = [&] { return editor->property("resultCursor").toInt(); };
+
+        // A bullet nests under the item above it, and the caret rides along.
+        QVERIFY(indent(QStringLiteral("- one\n- two"), 11, 11, 1));
+        QCOMPARE(result(), QStringLiteral("- one\n  - two"));
+        QCOMPARE(caret(), 13);
+
+        // Numbers hang off the wider `1. ` marker and renumber around the move.
+        QVERIFY(indent(QStringLiteral("1. one\n2. two\n3. three"), 12, 12, 1));
+        QCOMPARE(result(), QStringLiteral("1. one\n   1. two\n2. three"));
+
+        // Shift+Tab puts it back beside the item it hung under.
+        QVERIFY(indent(QStringLiteral("1. one\n   1. two\n2. three"), 15, 15, -1));
+        QCOMPARE(result(), QStringLiteral("1. one\n2. two\n3. three"));
+
+        // Nesting goes as deep as the list does.
+        QVERIFY(indent(QStringLiteral("- one\n  - two\n  - three\n- four"), 22, 22, 1));
+        QCOMPARE(result(), QStringLiteral("- one\n  - two\n    - three\n- four"));
+
+        // Children follow the item they hang under.
+        QVERIFY(indent(QStringLiteral("- one\n  - two\n    - deep\n- four"), 12, 12, -1));
+        QCOMPARE(result(), QStringLiteral("- one\n- two\n  - deep\n- four"));
+
+        // A selection nests every item it touches, keeping their relative depth.
+        QVERIFY(indent(QStringLiteral("- one\n- two\n- three"), 8, 18, 1));
+        QCOMPARE(result(), QStringLiteral("- one\n  - two\n  - three"));
+
+        // A list that deliberately starts at 3 keeps its numbering.
+        QVERIFY(indent(QStringLiteral("3. a\n4. b\n5. c"), 8, 8, 1));
+        QCOMPARE(result(), QStringLiteral("3. a\n   1. b\n4. c"));
+
+        // Nothing to nest under, nothing to lift out of, and no lists inside a
+        // fence: Tab is left to whatever it did before.
+        QVERIFY(!indent(QStringLiteral("- one"), 5, 5, 1));
+        QVERIFY(!indent(QStringLiteral("- one\n- two"), 11, 11, -1));
+        QVERIFY(!indent(QStringLiteral("just text"), 4, 4, 1));
+        QVERIFY(!indent(QStringLiteral("```\n- one\n- two\n"), 15, 15, 1));
+    }
+
+    void continuesListsAcrossReturn() {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        QScopedPointer<QObject> editor(createListEditor(component));
+        QVERIFY2(editor, qPrintable(component.errorString()));
+
+        const auto pressReturn = [&](const QString &source, int cursor) {
+            QVariant handled;
+            QMetaObject::invokeMethod(editor.data(), "pressReturn",
+                                      Q_RETURN_ARG(QVariant, handled),
+                                      Q_ARG(QVariant, source), Q_ARG(QVariant, cursor));
+            return handled.toBool();
+        };
+        const auto result = [&] { return editor->property("resultText").toString(); };
+        const auto caret = [&] { return editor->property("resultCursor").toInt(); };
+
+        // A new item keeps the depth of the one it follows.
+        QVERIFY(pressReturn(QStringLiteral("- one\n  - two"), 13));
+        QCOMPARE(result(), QStringLiteral("- one\n  - two\n  - "));
+        QCOMPARE(caret(), 18);
+
+        // Inserting into an ordered list renumbers what follows.
+        QVERIFY(pressReturn(QStringLiteral("1. one\n2. two\n3. three"), 6));
+        QCOMPARE(result(), QStringLiteral("1. one\n2. \n3. two\n4. three"));
+        QCOMPARE(caret(), 10);
+
+        // Return on an empty nested item lifts it a level instead of ending the
+        // list; the outermost level is left to drop out of the list entirely.
+        QVERIFY(pressReturn(QStringLiteral("- one\n  - "), 10));
+        QCOMPARE(result(), QStringLiteral("- one\n- "));
+        QCOMPARE(caret(), 8);
+        QVERIFY(pressReturn(QStringLiteral("- one\n- "), 8));
+        QCOMPARE(result(), QStringLiteral("- one\n\n"));
+
+        // Blockquotes carry their marker over too, but never renumber.
+        QVERIFY(pressReturn(QStringLiteral("> quoted"), 8));
+        QCOMPARE(result(), QStringLiteral("> quoted\n> "));
+
+        // Ordinary prose has no marker to carry, so Return is left alone.
+        QVERIFY(!pressReturn(QStringLiteral("just text"), 9));
+    }
+
+    void indentsListsFromTheEditorKeys() {
         Backend backend;
         QQmlEngine engine;
-        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
-        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
-        QScopedPointer<QObject> window(component.create());
+        QQmlComponent component(&engine);
+        QScopedPointer<QObject> created(createMainWindow(engine, component, backend));
+        QVERIFY2(created, qPrintable(component.errorString()));
+
+        QQuickWindow *window = qobject_cast<QQuickWindow *>(created.data());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("- one\n- two"));
+        editor->setProperty("cursorPosition", 11);
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+
+        QTest::keyClick(window, Qt::Key_Tab);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("- one\n  - two"));
+
+        QTest::keyClick(window, Qt::Key_Backtab, Qt::ShiftModifier);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("- one\n- two"));
+    }
+
+    void savesAndOpensFromFooterButtons() {
+        Backend backend;
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        QScopedPointer<QObject> window(createMainWindow(engine, component, backend));
         QVERIFY2(window, qPrintable(component.errorString()));
 
         QVERIFY(window->findChild<QObject *>(QStringLiteral("sourceEditor")));
@@ -193,15 +295,10 @@ private slots:
     }
 
     void scalesTextWithDesktopTextSize() {
-        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
-        QVERIFY(!mainQmlPath.isEmpty());
-
         Backend backend;
         QQmlEngine engine;
-        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
-        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
-        QScopedPointer<QObject> window(component.create());
+        QQmlComponent component(&engine);
+        QScopedPointer<QObject> window(createMainWindow(engine, component, backend));
         QVERIFY2(window, qPrintable(component.errorString()));
 
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
@@ -247,6 +344,75 @@ private slots:
     }
 
 private:
+    // Load EditorMutations.js into a throwaway TextEdit, so the library can be
+    // driven the way Main.qml drives it.
+    QObject *createJsHarness(QQmlComponent &component, const QByteArray &body,
+                             const QString &name) {
+        const QString mutationsPath = QFINDTESTDATA("../src/EditorMutations.js");
+        if (mutationsPath.isEmpty())
+            return nullptr;
+
+        const QByteArray harness = "import QtQuick\n"
+                                   "import \"EditorMutations.js\" as EditorMutations\n"
+                                   "TextEdit {\n" + body + "\n}\n";
+        component.setData(harness, QUrl::fromLocalFile(
+            QFileInfo(mutationsPath).absolutePath() + "/" + name + QStringLiteral(".qml")));
+        if (!component.isReady())
+            return nullptr;
+        return component.create();
+    }
+
+    // A TextEdit that applies plans the way Main.qml's applyPlan() does.
+    QObject *createListEditor(QQmlComponent &component) {
+        return createJsHarness(component, R"QML(
+                property string resultText
+                property int resultCursor
+
+                function apply(plan) {
+                    EditorMutations.replaceRange(this, plan.start, plan.end, plan.replacement,
+                                                 plan.selectionStartOffset,
+                                                 plan.selectionEndOffset);
+                    resultText = text;
+                    resultCursor = cursorPosition;
+                }
+
+                function edit(plan, source, from) {
+                    resultText = source;
+                    resultCursor = from;
+                    if (!plan)
+                        return false;
+                    apply(plan);
+                    return true;
+                }
+
+                function indent(source, from, to, direction) {
+                    text = source;
+                    select(from, to);
+                    return edit(EditorMutations.listIndentPlan(source, from, to, direction),
+                                source, from);
+                }
+
+                function pressReturn(source, cursor) {
+                    text = source;
+                    cursorPosition = cursor;
+                    return edit(EditorMutations.returnPlan(source, cursor, cursor),
+                                source, cursor);
+                }
+        )QML", QStringLiteral("ListHarness"));
+    }
+
+    QObject *createMainWindow(QQmlEngine &engine, QQmlComponent &component, Backend &backend) {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        if (mainQmlPath.isEmpty())
+            return nullptr;
+
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        component.loadUrl(QUrl::fromLocalFile(mainQmlPath));
+        if (!component.isReady())
+            return nullptr;
+        return component.create();
+    }
+
     QTemporaryDir m_settingsDirectory;
 };
 

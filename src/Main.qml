@@ -331,7 +331,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nTab / Shift+Tab  Nest list item\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -598,33 +598,37 @@ ApplicationWindow {
                     }
                 }
 
+                function applyPlan(plan) {
+                    EditorMutations.replaceRange(editor, plan.start, plan.end,
+                                                 plan.replacement,
+                                                 plan.selectionStartOffset,
+                                                 plan.selectionEndOffset);
+                }
+
+                // Tab nests the list items the cursor or selection touches
+                // under the item above them; Shift+Tab lifts them back out.
+                // Outside a list Tab is left alone.
+                function indentList(direction) {
+                    var plan = EditorMutations.listIndentPlan(text, selectionStart,
+                                                              selectionEnd, direction);
+                    if (!plan)
+                        return false;
+                    applyPlan(plan);
+                    return true;
+                }
+
                 function smartReturn(softBreak) {
                     if (softBreak) {
                         replaceSelectionWith("\n");
                         return;
                     }
-                    var lineStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
-                    var line = text.slice(lineStart, cursorPosition);
-                    var before = text.slice(0, cursorPosition);
-                    var fences = (before.match(/^\s*```/gm) || []).length;
-                    if ((fences % 2) === 1) {
-                        replaceSelectionWith("\n");
-                        return;
-                    }
-                    var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
-                    if (match) {
-                        if (match[3].length === 0) {
-                            EditorMutations.replaceRange(editor, lineStart,
-                                                         cursorPosition, "\n");
-                        } else {
-                            var marker = match[2];
-                            if (/^\d/.test(marker))
-                                marker = (parseInt(marker) + 1) + marker.slice(-1);
-                            replaceSelectionWith("\n" + match[1] + marker + " ");
-                        }
-                        return;
-                    }
-                    replaceSelectionWith("\n\n");
+                    // Lists and quotes carry themselves onto the next line;
+                    // anywhere else Return starts a fresh paragraph.
+                    var plan = EditorMutations.returnPlan(text, selectionStart, selectionEnd);
+                    if (plan)
+                        applyPlan(plan);
+                    else
+                        replaceSelectionWith("\n\n");
                 }
 
                 function escapeMarkdownLinkText(linkText) {
@@ -762,6 +766,12 @@ ApplicationWindow {
                                && event.key === Qt.Key_Left) {
                         moveCursorVisibly(-1);
                         event.accepted = true;
+                    } else if (!commandModifier
+                               && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)) {
+                        var outdent = event.key === Qt.Key_Backtab
+                            || (event.modifiers & Qt.ShiftModifier);
+                        if (indentList(outdent ? -1 : 1))
+                            event.accepted = true;
                     } else if (!commandModifier
                                && (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)) {
                         movePage(event.key === Qt.Key_PageDown ? 1 : -1,
