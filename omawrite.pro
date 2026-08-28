@@ -16,3 +16,7 @@ SOURCES += \
     src/systemtheme.cpp
 
 RESOURCES += src/resources.qrc
+
+macx {
+    ICON = pkgbuild/omawrite.icns
+}
