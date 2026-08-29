@@ -10,6 +10,16 @@ A dead-simple Markdown writing app built with Qt Quick and C++ that automaticall
 
 Install via the Omarchy Package Repository via the `omawrite` package. It's installed by default in new installations of Omarchy (from Quattro forward).
 
+## Command line
+
+`omawrite` opens an empty document, and `omawrite FILE` opens a Markdown file.
+`omawrite --help` prints that usage without opening a window.
+
+That last one is mostly for coding agents. Ask one to open a file in Omawrite
+and it runs `omawrite --help` first to work out how, so the help has to answer
+in the terminal, and it has to say that the process stays up until the window
+is closed.
+
 ## Shortcuts
 
 - `Ctrl+S` saves. Unsaved documents use the XDG desktop portal file picker.

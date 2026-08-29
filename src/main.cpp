@@ -11,9 +11,15 @@
 #include <QFile>
 
 #include "backend.h"
+#include "cli.h"
 #include "systemtheme.h"
 
 int main(int argc, char *argv[]) {
+    // Answer --help before Qt claims the terminal, so the usage prints even
+    // without a desktop session to open a window in.
+    if (const std::optional<int> exitCode = Cli::handleArguments(argc, argv))
+        return *exitCode;
+
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("omawrite"));
     app.setDesktopFileName(QStringLiteral("omawrite"));

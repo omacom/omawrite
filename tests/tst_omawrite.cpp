@@ -6,6 +6,7 @@
 #include <QQuickStyle>
 
 #include "backend.h"
+#include "cli.h"
 #include "markdownhighlighter.h"
 
 class OmawriteTest : public QObject {
@@ -42,6 +43,22 @@ private slots:
         QCOMPARE(Backend::suggestedFileName(QString()), QStringLiteral("Untitled.md"));
         QCOMPARE(Backend::suggestedFileName(QStringLiteral("Already.md")),
                  QStringLiteral("Already.md"));
+    }
+
+    void answersHelpBeforeOpeningAWindow() {
+        const QString usage = Cli::usage();
+        QVERIFY(usage.contains(QStringLiteral("omawrite [FILE]")));
+        QVERIFY(usage.contains(QStringLiteral("-h, --help")));
+
+        QCOMPARE(Cli::handleArguments({QStringLiteral("omawrite"), QStringLiteral("--help")}),
+                 std::optional<int>(0));
+        QCOMPARE(Cli::handleArguments({QStringLiteral("omawrite"), QStringLiteral("-h")}),
+                 std::optional<int>(0));
+        QCOMPARE(Cli::handleArguments({QStringLiteral("omawrite"), QStringLiteral("--nope")}),
+                 std::optional<int>(1));
+        QCOMPARE(Cli::handleArguments({QStringLiteral("omawrite")}), std::nullopt);
+        QCOMPARE(Cli::handleArguments({QStringLiteral("omawrite"), QStringLiteral("draft.md")}),
+                 std::nullopt);
     }
 
     void findsInlineMarkdownRanges() {
