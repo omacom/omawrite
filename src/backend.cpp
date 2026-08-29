@@ -163,7 +163,7 @@ void Backend::setTextScale(qreal textScale) {
         return;
 
     m_textScale = textScale;
-    emit textScaleChanged();
+    emit textScaleChanged(m_textScale);
 }
 
 void Backend::attachDocument(QObject *textDocument) {
@@ -181,6 +181,7 @@ void Backend::attachDocument(QObject *textDocument) {
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
     m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
+    m_highlighter->setTextScale(m_textScale);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {
@@ -192,6 +193,9 @@ void Backend::attachDocument(QObject *textDocument) {
 
     applyDocumentTypography();
     restoreRecovery();
+
+    connect(this, &Backend::textScaleChanged, m_highlighter,
+            &MarkdownHighlighter::setTextScale);
 }
 
 void Backend::openDialog() {

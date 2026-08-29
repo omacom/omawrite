@@ -13,6 +13,7 @@ public:
     void setDarkMode(bool darkMode);
     void setColors(const QString &background, const QString &foreground, const QString &accent);
     void setSearch(const QString &query, int currentMatchStart);
+    void setTextScale(qreal textScale);
 
     struct Span {
         int start;
@@ -55,6 +56,8 @@ private:
     QTextCharFormat m_linkFormat;
     QString m_searchQuery;
     int m_currentMatchStart = -1;
+    qreal m_textScale = 1.0;
+    qreal m_headingSizes[6];
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };

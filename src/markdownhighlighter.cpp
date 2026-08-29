@@ -40,6 +40,14 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
     rehighlight();
 }
 
+void MarkdownHighlighter::setTextScale(qreal textScale) {
+    if (qFuzzyCompare(m_textScale, textScale))
+        return;
+    m_textScale = textScale;
+    rebuildFormats();
+    rehighlight();
+}
+
 void MarkdownHighlighter::rebuildFormats() {
     const QColor marker = m_darkMode ? QColor(QStringLiteral("#4f525a"))
                                      : QColor(QStringLiteral("#aeb1b5"));
@@ -74,6 +82,13 @@ void MarkdownHighlighter::rebuildFormats() {
     m_headingFormat = QTextCharFormat();
     m_headingFormat.setForeground(text);
     m_headingFormat.setFontWeight(QFont::Bold);
+
+    // Heading sizes are relative to the base font size (20px) scaled by textScale.
+    // Multipliers: H1=2.3, H2=2.1, H3=1.9, H4=1.7, H5=1.5, H6=1.3
+    static const qreal headingSizeMultipliers[] = {2.3, 2.1, 1.9, 1.7, 1.5, 1.3};
+    const qreal baseFontSize = 20.0;
+    for (int i = 0; i < 6; ++i)
+        m_headingSizes[i] = baseFontSize * headingSizeMultipliers[i] * m_textScale;
 
     m_boldFormat = QTextCharFormat();
     m_boldFormat.setFontWeight(QFont::Bold);
@@ -142,11 +157,19 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
         static const QRegularExpression headingRe(QStringLiteral("^(#{1,6})(\\s+)(.*)$"));
         const QRegularExpressionMatch heading = headingRe.match(text);
         if (heading.hasMatch()) {
-            setFormat(0, heading.capturedLength(1) + heading.capturedLength(2),
-                      m_markerFormat);
-            setFormat(heading.capturedStart(3), heading.capturedLength(3),
-                      m_headingFormat);
-            return;
+            int headingLevel = heading.capturedLength(1);
+            if (headingLevel > 0) {
+                // Use QTextCharFormat on the entire block to apply the format in one call,
+                // eliminating the need for invisible marker characters and multiple setFormat() calls.
+                QTextCharFormat blockFormat = m_headingFormat;
+                blockFormat.setFontPointSize(m_headingSizes[headingLevel - 1]);
+                setFormat(heading.capturedStart(3), heading.capturedLength(3), blockFormat);
+
+                QTextCharFormat markerBlockFormat = m_markerFormat;
+                markerBlockFormat.setFontPointSize(m_headingSizes[headingLevel - 1]);
+                setFormat(0, heading.capturedLength(1) + heading.capturedLength(2), markerBlockFormat);
+                return;
+            }
         }
     }
 

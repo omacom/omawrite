@@ -81,7 +81,7 @@ signals:
     void statusChanged();
     void wordCountChanged();
     void darkModeChanged();
-    void textScaleChanged();
+    void textScaleChanged(qreal textScale);
     void themeColorsChanged();
     void closeAfterSave();
     void openDialogRequested();
