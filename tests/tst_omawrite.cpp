@@ -228,6 +228,8 @@ private slots:
 
         const QString html = CodeBlockHighlighter::html(
             QStringLiteral("# Title\n\n"
+                           "## Section\n\n"
+                           "### Detail\n\n"
                            "<script>alert(1)</script>\n\n"
                            "Use `inline` here.\n\n"
                            "```javascript\n"
@@ -248,7 +250,15 @@ private slots:
                            "[bad](javascript:alert(1))\n"),
             QStringLiteral("Draft.md"), palette);
 
+        QVERIFY(html.contains(QStringLiteral("<h1>")));
+        QVERIFY(html.contains(QStringLiteral("<h2>")));
+        QVERIFY(html.contains(QStringLiteral("<h3>")));
+        QVERIFY(html.contains(QStringLiteral("h1 { font-size: 1.75em;")));
+        QVERIFY(html.contains(QStringLiteral("h2 { font-size: 1.4em;")));
+        QVERIFY(html.contains(QStringLiteral("h3 { font-size: 1.2em;")));
         QVERIFY(html.contains(QStringLiteral("Title")));
+        QVERIFY(html.contains(QStringLiteral("Section")));
+        QVERIFY(html.contains(QStringLiteral("Detail")));
         QVERIFY(html.contains(QStringLiteral("const")));
         QVERIFY(html.contains(QStringLiteral("omawrite")));
         QVERIFY(html.contains(QStringLiteral("<code>inline</code>")));
