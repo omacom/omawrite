@@ -107,7 +107,8 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
     if (!text.isEmpty()) {
         highlightMarkers(text);
         if (text.contains(QLatin1Char('`')) || text.contains(QLatin1Char('*'))
-            || text.contains(QLatin1Char('_')) || text.contains(QLatin1Char('['))) {
+            || text.contains(QLatin1Char('_')) || text.contains(QLatin1Char('['))
+            || text.contains(QLatin1Char('<')) || text.contains(QLatin1String("http"))) {
             highlightInline(text);
         }
     }
@@ -197,12 +198,51 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
     }
+
+    // Bare URLs are not in inlineMarkup; paint those without touching hidden
+    // markers. Markup links already have content styled above. Clickable spans
+    // cover the whole [[...]] / []() so hit-testing includes collapsed markers.
+    for (const Clickable &item : clickableSpans(text)) {
+        if (item.kind != InlineKind::Link || item.span.length != item.target.length())
+            continue;
+        setFormat(item.span.start, item.span.length, m_linkFormat);
+    }
+}
+
+static bool insideCodeSpan(const QString &text, int start, int length) {
+    static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+    QRegularExpressionMatchIterator matches = codeRe.globalMatch(text);
+    const int end = start + length;
+    while (matches.hasNext()) {
+        const QRegularExpressionMatch match = matches.next();
+        if (start >= match.capturedStart(0) && end <= match.capturedEnd(0))
+            return true;
+    }
+    return false;
+}
+
+static bool overlaps(MarkdownHighlighter::Span a, int start, int length) {
+    const int aEnd = a.start + a.length;
+    const int bEnd = start + length;
+    return start < aEnd && a.start < bEnd;
+}
+
+static MarkdownHighlighter::Span fullSpan(const MarkdownHighlighter::InlineMarkup &item) {
+    int start = item.content.start;
+    int end = item.content.start + item.content.length;
+    for (const MarkdownHighlighter::Span &marker : item.markers) {
+        if (marker.length <= 0)
+            continue;
+        start = qMin(start, marker.start);
+        end = qMax(end, marker.start + marker.length);
+    }
+    return {start, end - start};
 }
 
 QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const QString &text) {
     QList<InlineMarkup> markup;
     if (!text.contains(QLatin1Char('*')) && !text.contains(QLatin1Char('_'))
-            && !text.contains(QLatin1Char('['))) {
+            && !text.contains(QLatin1Char('[')) && !text.contains(QLatin1Char('<'))) {
         return markup;
     }
 
@@ -215,7 +255,7 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     while (boldMatches.hasNext()) {
         const QRegularExpressionMatch match = boldMatches.next();
         markup.append({InlineKind::Bold, span(match, 2),
-                       {span(match, 1), span(match, 3)}});
+                       {span(match, 1), span(match, 3)}, {}});
     }
 
     static const QRegularExpression italicRe(
@@ -226,7 +266,27 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         const Span whole = span(match, 0);
         const int contentIndex = match.capturedStart(1) >= 0 ? 1 : 2;
         markup.append({InlineKind::Italic, span(match, contentIndex),
-                       {{whole.start, 1}, {whole.start + whole.length - 1, 1}}});
+                       {{whole.start, 1}, {whole.start + whole.length - 1, 1}}, {}});
+    }
+
+    static const QRegularExpression wikiRe(
+        QStringLiteral("\\[\\[([^\\]|#]+)(?:#[^\\]|]*)?(?:\\|([^\\]]+))?\\]\\]"));
+    QRegularExpressionMatchIterator wikiMatches = wikiRe.globalMatch(text);
+    while (wikiMatches.hasNext()) {
+        const QRegularExpressionMatch match = wikiMatches.next();
+        if (insideCodeSpan(text, match.capturedStart(0), match.capturedLength(0)))
+            continue;
+        const Span whole = span(match, 0);
+        const QString target = match.captured(1).trimmed();
+        const bool hasAlias = match.lastCapturedIndex() >= 2 && match.capturedStart(2) >= 0
+            && !match.captured(2).isEmpty();
+        const Span content = hasAlias ? span(match, 2) : span(match, 1);
+        const int prefixLen = content.start - whole.start;
+        const int suffixStart = content.start + content.length;
+        markup.append({InlineKind::WikiLink, content,
+                       {{whole.start, prefixLen},
+                        {suffixStart, whole.start + whole.length - suffixStart}},
+                       target});
     }
 
     static const QRegularExpression linkRe(
@@ -234,13 +294,72 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     QRegularExpressionMatchIterator linkMatches = linkRe.globalMatch(text);
     while (linkMatches.hasNext()) {
         const QRegularExpressionMatch match = linkMatches.next();
+        if (insideCodeSpan(text, match.capturedStart(0), match.capturedLength(0)))
+            continue;
         const Span whole = span(match, 0);
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;
+        QString destination = match.captured(2);
+        destination.replace(QStringLiteral("\\("), QStringLiteral("("));
+        destination.replace(QStringLiteral("\\)"), QStringLiteral(")"));
+        destination.replace(QStringLiteral("\\\\"), QStringLiteral("\\"));
         markup.append({InlineKind::Link, content,
                        {{whole.start, 1},
-                        {contentEnd, whole.start + whole.length - contentEnd}}});
+                        {contentEnd, whole.start + whole.length - contentEnd}},
+                       destination});
+    }
+
+    static const QRegularExpression autoRe(
+        QStringLiteral("<(https?://[^>\\s]+)>"));
+    QRegularExpressionMatchIterator autoMatches = autoRe.globalMatch(text);
+    while (autoMatches.hasNext()) {
+        const QRegularExpressionMatch match = autoMatches.next();
+        if (insideCodeSpan(text, match.capturedStart(0), match.capturedLength(0)))
+            continue;
+        const Span whole = span(match, 0);
+        markup.append({InlineKind::Link, span(match, 1),
+                       {{whole.start, 1}, {whole.start + whole.length - 1, 1}},
+                       match.captured(1)});
     }
 
     return markup;
+}
+
+QList<MarkdownHighlighter::Clickable> MarkdownHighlighter::clickableSpans(const QString &text) {
+    QList<Clickable> spans;
+    const QList<InlineMarkup> markup = inlineMarkup(text);
+    QList<Span> taken;
+    for (const InlineMarkup &item : markup) {
+        if (item.kind != InlineKind::Link && item.kind != InlineKind::WikiLink)
+            continue;
+        const Span whole = fullSpan(item);
+        spans.append({item.kind, whole, item.target});
+        taken.append(whole);
+    }
+
+    static const QRegularExpression bareRe(
+        QStringLiteral("\\bhttps?://[^\\s<>\\]\\)]+"));
+    QRegularExpressionMatchIterator bareMatches = bareRe.globalMatch(text);
+    while (bareMatches.hasNext()) {
+        const QRegularExpressionMatch match = bareMatches.next();
+        const int start = int(match.capturedStart(0));
+        const int length = int(match.capturedLength(0));
+        if (insideCodeSpan(text, start, length))
+            continue;
+        bool covered = false;
+        for (const Span &span : taken) {
+            if (overlaps(span, start, length)) {
+                covered = true;
+                break;
+            }
+        }
+        if (covered)
+            continue;
+        QString url = match.captured(0);
+        while (url.endsWith(QLatin1Char('.')) || url.endsWith(QLatin1Char(','))
+               || url.endsWith(QLatin1Char(';')) || url.endsWith(QLatin1Char(':')))
+            url.chop(1);
+        spans.append({InlineKind::Link, {start, int(url.length())}, url});
+    }
+    return spans;
 }

@@ -4,6 +4,7 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDirIterator>
 #include <QFile>
 #include <QFileInfo>
 #include <QDesktopServices>
@@ -398,8 +399,145 @@ void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
 void Backend::openExternalUrl(const QUrl &url) {
     const QString scheme = url.scheme().toLower();
     if (scheme == QStringLiteral("http") || scheme == QStringLiteral("https")
-            || scheme == QStringLiteral("mailto"))
+            || scheme == QStringLiteral("mailto") || scheme == QStringLiteral("file"))
         QDesktopServices::openUrl(url);
+}
+
+static QString vaultRootFor(const QString &filePath) {
+    if (!filePath.isEmpty()) {
+        QDir dir = QFileInfo(filePath).absoluteDir();
+        while (true) {
+            if (QDir(dir.filePath(QStringLiteral(".obsidian"))).exists())
+                return dir.absolutePath();
+            const QString current = dir.absolutePath();
+            if (!dir.cdUp() || dir.absolutePath() == current)
+                break;
+        }
+        if (!filePath.isEmpty())
+            return QFileInfo(filePath).absolutePath();
+    }
+    const QString notes = QDir::home().filePath(QStringLiteral("Notes"));
+    if (QDir(notes).exists())
+        return notes;
+    return {};
+}
+
+QString Backend::resolveWikilinkPath(const QString &currentFile, const QString &rawTarget) {
+    QString target = rawTarget.trimmed();
+    if (target.isEmpty() || target.contains(QStringLiteral("..")))
+        return {};
+
+    if (target.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
+        target.chop(3);
+
+    const QString withMd = target + QStringLiteral(".md");
+    const QString currentDir = currentFile.isEmpty()
+        ? vaultRootFor({})
+        : QFileInfo(currentFile).absolutePath();
+    if (!currentDir.isEmpty()) {
+        const QFileInfo beside(QDir(currentDir).filePath(withMd));
+        if (beside.exists() && beside.isFile())
+            return beside.canonicalFilePath();
+    }
+
+    const QString vault = vaultRootFor(currentFile);
+    if (vault.isEmpty())
+        return {};
+
+    const QFileInfo nested(QDir(vault).filePath(withMd));
+    if (nested.exists() && nested.isFile())
+        return nested.canonicalFilePath();
+
+    const QString needle = QFileInfo(withMd).fileName();
+    QString match;
+    QDirIterator it(vault, QStringList{QStringLiteral("*.md")}, QDir::Files,
+                    QDirIterator::Subdirectories);
+    while (it.hasNext()) {
+        it.next();
+        if (it.fileName().compare(needle, Qt::CaseInsensitive) != 0)
+            continue;
+        if (!match.isEmpty() && match != it.fileInfo().canonicalFilePath())
+            return {};
+        match = it.fileInfo().canonicalFilePath();
+    }
+    return match;
+}
+
+void Backend::notifyMissingNote(const QString &target) {
+    setStatus(QStringLiteral("No note named %1").arg(target));
+}
+
+QVariantMap Backend::linkAt(int position) const {
+    QVariantMap none{{QStringLiteral("kind"), QStringLiteral("none")}};
+    if (!m_document)
+        return none;
+
+    const int clamped = qBound(0, position, qMax(0, m_document->characterCount() - 1));
+    const QTextBlock block = m_document->findBlock(clamped);
+    if (!block.isValid())
+        return none;
+
+    const int relative = clamped - block.position();
+    const QList<MarkdownHighlighter::Clickable> spans =
+        MarkdownHighlighter::clickableSpans(block.text());
+    for (const MarkdownHighlighter::Clickable &item : spans) {
+        if (relative < item.span.start || relative >= item.span.start + item.span.length)
+            continue;
+
+        if (item.kind == MarkdownHighlighter::InlineKind::WikiLink) {
+            const QString path = resolveWikilinkPath(m_fileUrl.toLocalFile(), item.target);
+            if (path.isEmpty()) {
+                return {{QStringLiteral("kind"), QStringLiteral("missing")},
+                        {QStringLiteral("target"), item.target}};
+            }
+            return {{QStringLiteral("kind"), QStringLiteral("file")},
+                    {QStringLiteral("url"), QUrl::fromLocalFile(path)},
+                    {QStringLiteral("target"), item.target}};
+        }
+
+        const QString destination = item.target.trimmed();
+        if (destination.isEmpty())
+            return none;
+
+        QUrl url(destination);
+        if (url.isRelative() || url.scheme().isEmpty()) {
+            const QString currentDir = m_fileUrl.isLocalFile()
+                ? QFileInfo(m_fileUrl.toLocalFile()).absolutePath()
+                : vaultRootFor({});
+            const QString localPath = QDir(currentDir).filePath(destination);
+            const QFileInfo info(localPath);
+            if (info.exists()) {
+                const QString suffix = info.suffix().toLower();
+                if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown")
+                        || suffix == QStringLiteral("txt")) {
+                    return {{QStringLiteral("kind"), QStringLiteral("file")},
+                            {QStringLiteral("url"), QUrl::fromLocalFile(info.canonicalFilePath())}};
+                }
+                return {{QStringLiteral("kind"), QStringLiteral("url")},
+                        {QStringLiteral("url"), QUrl::fromLocalFile(info.canonicalFilePath())}};
+            }
+            url = QUrl::fromUserInput(destination);
+        }
+
+        const QString scheme = url.scheme().toLower();
+        if (scheme == QStringLiteral("http") || scheme == QStringLiteral("https")
+                || scheme == QStringLiteral("mailto")) {
+            return {{QStringLiteral("kind"), QStringLiteral("url")},
+                    {QStringLiteral("url"), url}};
+        }
+        if (scheme == QStringLiteral("file") && url.isLocalFile()) {
+            const QFileInfo info(url.toLocalFile());
+            const QString suffix = info.suffix().toLower();
+            if (suffix == QStringLiteral("md") || suffix == QStringLiteral("markdown")
+                    || suffix == QStringLiteral("txt")) {
+                return {{QStringLiteral("kind"), QStringLiteral("file")},
+                        {QStringLiteral("url"), url}};
+            }
+            return {{QStringLiteral("kind"), QStringLiteral("url")}, {QStringLiteral("url"), url}};
+        }
+        return none;
+    }
+    return none;
 }
 
 QVariantMap Backend::windowGeometry() const {

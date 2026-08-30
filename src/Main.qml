@@ -85,6 +85,23 @@ ApplicationWindow {
         return Math.max(1, Math.round(pixels * win.textScale));
     }
 
+    function followLinkAt(position) {
+        var link = backend.linkAt(position)
+        if (link.kind === "url") {
+            backend.openExternalUrl(link.url)
+            return true
+        }
+        if (link.kind === "file") {
+            requestOpen(link.url)
+            return true
+        }
+        if (link.kind === "missing") {
+            backend.notifyMissingNote(link.target)
+            return false
+        }
+        return false
+    }
+
     function toggleFullScreen() {
         win.visibility = win.visibility === Window.FullScreen
             ? Window.Windowed
@@ -170,6 +187,12 @@ ApplicationWindow {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
+    }
+
+    Shortcut {
+        sequences: ["Ctrl+Return", "Ctrl+Enter"]
+        context: Qt.WindowShortcut
+        onActivated: followLinkAt(editor.cursorPosition)
     }
 
     Shortcut {
@@ -331,7 +354,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+Click / Ctrl+Enter  Follow link or wikilink\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -548,6 +571,7 @@ ApplicationWindow {
                 font.family: "iA Writer Mono S"
                 font.pixelSize: win.editorFontPixelSize
                 font.weight: Font.Normal
+                property bool hoveringLink: false
                 // Native rendering hints glyphs to the pixel grid, which is
                 // crispest at whole scale factors but misplaces and unevenly
                 // rasterizes glyphs at fractional ones (and goes stale when
@@ -559,6 +583,42 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+
+                // TextEdit steals the pointer grab for selection, so TapHandler
+                // never sees Ctrl+click. MouseArea can consume the press when it
+                // hits a link and otherwise pass it through for caret/selection.
+                MouseArea {
+                    anchors.fill: parent
+                    acceptedButtons: Qt.LeftButton
+                    hoverEnabled: true
+                    propagateComposedEvents: true
+                    preventStealing: true
+                    cursorShape: editor.hoveringLink ? Qt.PointingHandCursor : Qt.IBeamCursor
+
+                    function documentPosition(mx, my) {
+                        return editor.positionAt(mx, my)
+                    }
+
+                    function updateHover(mx, my, modifiers) {
+                        editor.hoveringLink = (modifiers & Qt.ControlModifier)
+                            && backend.linkAt(documentPosition(mx, my)).kind !== "none"
+                    }
+
+                    onPositionChanged: function(mouse) {
+                        updateHover(mouse.x, mouse.y, mouse.modifiers)
+                    }
+
+                    onExited: editor.hoveringLink = false
+
+                    onPressed: function(mouse) {
+                        if ((mouse.modifiers & Qt.ControlModifier)
+                                && followLinkAt(documentPosition(mouse.x, mouse.y))) {
+                            mouse.accepted = true
+                            return
+                        }
+                        mouse.accepted = false
+                    }
+                }
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);

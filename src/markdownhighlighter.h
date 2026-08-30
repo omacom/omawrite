@@ -19,13 +19,22 @@ public:
         int length;
     };
 
-    enum class InlineKind { Bold, Italic, Link };
+    enum class InlineKind { Bold, Italic, Link, WikiLink };
 
     struct InlineMarkup {
         InlineKind kind;
         Span content;
         Span markers[2];
+        QString target;
     };
+
+    struct Clickable {
+        InlineKind kind;
+        Span span;
+        QString target;
+    };
+
+    static QList<Clickable> clickableSpans(const QString &text);
 
     // Single source of truth for inline markdown spans: the highlighter uses it
     // to style content and hide markers, and the editor uses it (via

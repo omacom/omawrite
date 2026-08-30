@@ -52,6 +52,66 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+        QCOMPARE(markup.at(2).target, QStringLiteral("https://example.com"));
+    }
+
+    void findsWikilinks() {
+        const auto markup = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("See [[other-note|the class]] and [[John 3:16]]."));
+        QCOMPARE(markup.size(), 2);
+        QCOMPARE(markup.at(0).kind, MarkdownHighlighter::InlineKind::WikiLink);
+        QCOMPARE(markup.at(0).target, QStringLiteral("other-note"));
+        QCOMPARE(markup.at(0).content.length, QStringLiteral("the class").size());
+        QCOMPARE(markup.at(1).target, QStringLiteral("John 3:16"));
+    }
+
+    void ignoresWikilinksInCode() {
+        const auto markup = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("Use `[[not-a-link]]` in code"));
+        QCOMPARE(markup.size(), 0);
+    }
+
+    void clickableSpansCoverWholeMarkup() {
+        const QString text = QStringLiteral(
+            "See [[Note|alias]] and [site](https://example.com) "
+            "plus https://bare.example and <https://auto.example>");
+        const auto spans = MarkdownHighlighter::clickableSpans(text);
+        QCOMPARE(spans.size(), 4);
+
+        const QString wiki = QStringLiteral("[[Note|alias]]");
+        QCOMPARE(spans.at(0).span.start, text.indexOf(wiki));
+        QCOMPARE(spans.at(0).span.length, wiki.size());
+        QCOMPARE(spans.at(0).target, QStringLiteral("Note"));
+
+        const QString md = QStringLiteral("[site](https://example.com)");
+        QCOMPARE(spans.at(1).span.start, text.indexOf(md));
+        QCOMPARE(spans.at(1).span.length, md.size());
+        QCOMPARE(spans.at(1).target, QStringLiteral("https://example.com"));
+
+        const QString autolink = QStringLiteral("<https://auto.example>");
+        QCOMPARE(spans.at(2).span.start, text.indexOf(autolink));
+        QCOMPARE(spans.at(2).span.length, autolink.size());
+        QCOMPARE(spans.at(2).target, QStringLiteral("https://auto.example"));
+
+        const QString bare = QStringLiteral("https://bare.example");
+        QCOMPARE(spans.at(3).span.start, text.indexOf(bare));
+        QCOMPARE(spans.at(3).span.length, bare.size());
+        QCOMPARE(spans.at(3).target, bare);
+    }
+
+    void resolvesWikilinksNextToTheFile() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString current = dir.filePath(QStringLiteral("current.md"));
+        const QString target = dir.filePath(QStringLiteral("other-note.md"));
+        QVERIFY(QFile(current).open(QIODevice::WriteOnly));
+        QFile out(target);
+        QVERIFY(out.open(QIODevice::WriteOnly | QIODevice::Text));
+        out.write("# Other\n");
+        out.close();
+        QCOMPARE(Backend::resolveWikilinkPath(current, QStringLiteral("other-note")),
+                 QFileInfo(target).canonicalFilePath());
+        QVERIFY(Backend::resolveWikilinkPath(current, QStringLiteral("missing-note")).isEmpty());
     }
 
     void loadsCurrentOmarchyTheme() {
