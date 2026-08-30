@@ -31,6 +31,7 @@
 
 #include <algorithm>
 
+#include "codeblockhighlighter.h"
 #include "markdownhighlighter.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
@@ -296,6 +297,78 @@ void Backend::printDocument() {
         rendered.setMarkdown(currentDocumentText());
         rendered.print(&printer);
     }
+}
+
+void Backend::previewInBrowser() {
+    PreviewPalette palette = PreviewPalette::fallback(m_darkMode);
+    palette.darkMode = m_darkMode;
+    palette.background = m_themeBackground;
+    palette.foreground = m_themeForeground;
+    palette.accent = m_themeAccent;
+    palette.selection = m_themeSelection;
+    const auto take = [this](const char *key) {
+        return m_themeTokens.value(QLatin1String(key));
+    };
+    const auto apply = [&](QString &field, const char *key) {
+        const QString value = take(key);
+        if (!value.isEmpty())
+            field = value;
+    };
+    apply(palette.muted, "muted");
+    apply(palette.lighterBackground, "lighter_background");
+    apply(palette.darkForeground, "dark_foreground");
+    apply(palette.lightForeground, "light_foreground");
+    apply(palette.red, "red");
+    apply(palette.yellow, "yellow");
+    apply(palette.orange, "orange");
+    apply(palette.green, "green");
+    apply(palette.cyan, "cyan");
+    apply(palette.blue, "blue");
+    apply(palette.magenta, "magenta");
+    apply(palette.brightYellow, "bright_yellow");
+    apply(palette.brightBlue, "bright_blue");
+    palette.fontPixelSize = qMax(1, qRound(20.0 * m_textScale));
+
+    const QString directory =
+        QStandardPaths::writableLocation(QStandardPaths::CacheLocation);
+    if (directory.isEmpty() || !QDir().mkpath(directory)) {
+        setStatus(QStringLiteral("Could not create the preview."));
+        return;
+    }
+
+    const QStringList fontFiles{
+        QStringLiteral("iAWriterMonoS-Regular.ttf"),
+        QStringLiteral("iAWriterMonoS-Italic.ttf"),
+        QStringLiteral("iAWriterMonoS-Bold.ttf"),
+        QStringLiteral("iAWriterMonoS-BoldItalic.ttf"),
+    };
+    for (const QString &fontFile : fontFiles) {
+        const QString destination = directory + QLatin1Char('/') + fontFile;
+        if (QFile::exists(destination))
+            continue;
+        QFile::copy(QStringLiteral(":/fonts/") + fontFile, destination);
+    }
+
+    const QString html = CodeBlockHighlighter::html(
+        currentDocumentText(), fileName(), palette, m_fileUrl);
+
+    const QString path = directory
+        + QStringLiteral("/preview-%1.html").arg(quintptr(this));
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
+        setStatus(QStringLiteral("Could not write the preview."));
+        return;
+    }
+    file.write(html.toUtf8());
+    if (!file.commit()) {
+        setStatus(QStringLiteral("Could not write the preview."));
+        return;
+    }
+
+    if (!QDesktopServices::openUrl(QUrl::fromLocalFile(path)))
+        setStatus(QStringLiteral("Could not open the preview."));
+    else
+        setStatus(QStringLiteral("Opened preview"));
 }
 
 void Backend::newWindow() {
@@ -574,6 +647,7 @@ void Backend::watchCurrentFile() {
 }
 
 void Backend::loadOmarchyTheme() {
+    m_themeTokens.clear();
     m_themeBackground = m_darkMode ? QStringLiteral("#101010") : QStringLiteral("#ffffff");
     m_themeForeground = m_darkMode ? QStringLiteral("#eeeeee") : QStringLiteral("#222324");
     m_themeAccent = m_darkMode ? QStringLiteral("#5584aa") : QStringLiteral("#2077b2");
@@ -601,6 +675,7 @@ void Backend::loadOmarchyTheme() {
                         || (value.front() == QLatin1Char('\'') && value.back() == QLatin1Char('\''))))
                 value = value.mid(1, value.size() - 2);
 
+            m_themeTokens.insert(key, value);
             if (key == QStringLiteral("mode"))
                 themeMode = value;
             else if (key == QStringLiteral("background"))

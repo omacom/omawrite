@@ -7,6 +7,7 @@
 #include <QString>
 #include <QTimer>
 #include <QUrl>
+#include <QHash>
 #include <QVariantList>
 #include <memory>
 
@@ -65,6 +66,7 @@ public:
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void printDocument();
+    Q_INVOKABLE void previewInBrowser();
     Q_INVOKABLE void newWindow();
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
@@ -139,5 +141,6 @@ private:
     QString m_themeForeground;
     QString m_themeAccent;
     QString m_themeSelection;
+    QHash<QString, QString> m_themeTokens;
     QFileSystemWatcher m_themeWatcher;
 };
