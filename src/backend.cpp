@@ -35,6 +35,10 @@
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString editorFontSizeSetting = QStringLiteral("editor/fontSize");
+constexpr int defaultEditorFontSize = 20;
+constexpr int minimumEditorFontSize = 10;
+constexpr int maximumEditorFontSize = 48;
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -72,6 +76,11 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
 }
 
 Backend::Backend(QObject *parent) : QObject(parent) {
+    m_editorFontSize = qBound(minimumEditorFontSize,
+                              QSettings().value(editorFontSizeSetting,
+                                                defaultEditorFontSize).toInt(),
+                              maximumEditorFontSize);
+
     const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(stateDirectory);
     // Claim an orphaned snapshot before taking an empty slot. This ensures a
@@ -164,6 +173,21 @@ void Backend::setTextScale(qreal textScale) {
 
     m_textScale = textScale;
     emit textScaleChanged();
+}
+
+void Backend::setEditorFontSize(int editorFontSize) {
+    const int boundedSize = qBound(minimumEditorFontSize, editorFontSize,
+                                   maximumEditorFontSize);
+    if (m_editorFontSize == boundedSize)
+        return;
+
+    m_editorFontSize = boundedSize;
+    QSettings().setValue(editorFontSizeSetting, m_editorFontSize);
+    emit editorFontSizeChanged();
+}
+
+void Backend::resetEditorFontSize() {
+    setEditorFontSize(defaultEditorFontSize);
 }
 
 void Backend::attachDocument(QObject *textDocument) {

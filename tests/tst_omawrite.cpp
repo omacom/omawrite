@@ -3,6 +3,7 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickWindow>
 #include <QQuickStyle>
 
 #include "backend.h"
@@ -18,6 +19,10 @@ private slots:
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
+    }
+
+    void init() {
+        QSettings().clear();
     }
 
     void countsWords() {
@@ -216,6 +221,55 @@ private slots:
         backend.setTextScale(9.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+    }
+
+    void dispatchesEditorFontSizeShortcuts() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->requestActivate();
+        QTRY_VERIFY(window->isActive());
+
+        QCOMPARE(backend.editorFontSize(), 20);
+        QTest::keyClick(window, Qt::Key_Equal, Qt::ControlModifier);
+        QCOMPARE(backend.editorFontSize(), 22);
+        QTest::keyClick(window, Qt::Key_Plus, Qt::ControlModifier);
+        QCOMPARE(backend.editorFontSize(), 24);
+        QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
+        QCOMPARE(backend.editorFontSize(), 22);
+        QTest::keyClick(window, Qt::Key_0, Qt::ControlModifier);
+        QCOMPARE(backend.editorFontSize(), 20);
+        QCOMPARE(QSettings().value(QStringLiteral("editor/fontSize")).toInt(), 20);
+    }
+
+    void persistsEditorFontSizeAcrossBackendInstances() {
+        {
+            Backend backend;
+            QCOMPARE(backend.editorFontSize(), 20);
+
+            QSignalSpy changedSpy(&backend, &Backend::editorFontSizeChanged);
+            backend.setEditorFontSize(28);
+            QCOMPARE(changedSpy.count(), 1);
+            QCOMPARE(QSettings().value(QStringLiteral("editor/fontSize")).toInt(), 28);
+        }
+
+        Backend restoredBackend;
+        QCOMPARE(restoredBackend.editorFontSize(), 28);
+
+        restoredBackend.setEditorFontSize(100);
+        QCOMPARE(restoredBackend.editorFontSize(), 48);
+        restoredBackend.setEditorFontSize(0);
+        QCOMPARE(restoredBackend.editorFontSize(), 10);
     }
 
     void remembersLastSaveDirectory() {
