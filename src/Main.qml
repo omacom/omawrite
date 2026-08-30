@@ -269,16 +269,20 @@ ApplicationWindow {
 
     Dialogs.FileDialog {
         id: openFileDialog
+        objectName: "openFileDialog"
         title: "Open File"
         fileMode: Dialogs.FileDialog.OpenFile
+        options: Dialogs.FileDialog.DontUseNativeDialog
         nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
         onAccepted: win.requestOpen(selectedFile)
     }
 
     Dialogs.FileDialog {
         id: saveFileDialog
+        objectName: "saveFileDialog"
         title: "Save File"
         fileMode: Dialogs.FileDialog.SaveFile
+        options: Dialogs.FileDialog.DontUseNativeDialog
         nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
         onAccepted: backend.saveAs(selectedFile)
         onRejected: {

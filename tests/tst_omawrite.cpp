@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QFont>
+#include <QFileDialog>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -190,6 +191,27 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void usesQuickFileDialogs() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        const auto dontUseNativeDialog = int(QFileDialog::DontUseNativeDialog);
+        for (const QString &name : {QStringLiteral("openFileDialog"),
+                                    QStringLiteral("saveFileDialog")}) {
+            QObject *dialog = window->findChild<QObject *>(name);
+            QVERIFY(dialog);
+            QVERIFY(dialog->property("options").toInt() & dontUseNativeDialog);
+        }
     }
 
     void scalesTextWithDesktopTextSize() {
