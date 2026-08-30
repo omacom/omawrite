@@ -4,8 +4,11 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QTextBlock>
+#include <QTextDocument>
 
 #include "backend.h"
+#include "codeblockhighlighter.h"
 #include "markdownhighlighter.h"
 
 class OmawriteTest : public QObject {
@@ -190,6 +193,96 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void previewHtmlRendersFencedCodeAndDropsRawHtml() {
+        QTextDocument document;
+        document.setMarkdown(
+            QStringLiteral("# Heading\n\n"
+                           "```Python {linenos}\n"
+                           "def hello():\n"
+                           "    return 42\n"
+                           "```\n"),
+            QTextDocument::MarkdownNoHTML);
+
+        QStringList languages;
+        QStringList codeLines;
+        for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+            if (!CodeBlockHighlighter::isCodeBlock(block))
+                continue;
+            languages.append(CodeBlockHighlighter::codeLanguage(block));
+            if (!block.text().isEmpty())
+                codeLines.append(block.text());
+        }
+
+        QVERIFY(languages.contains(QStringLiteral("python")));
+        QVERIFY(codeLines.contains(QStringLiteral("def hello():")));
+        QVERIFY(codeLines.contains(QStringLiteral("    return 42")));
+
+        PreviewPalette palette = PreviewPalette::fallback(true);
+        palette.accent = QStringLiteral("#7aa2f7");
+        palette.green = QStringLiteral("#9ece6a");
+        palette.lighterBackground = QStringLiteral("#24283b");
+        palette.foreground = QStringLiteral("#a9b1d6");
+        palette.background = QStringLiteral("#1a1b26");
+
+        const QString html = CodeBlockHighlighter::html(
+            QStringLiteral("# Title\n\n"
+                           "## Section\n\n"
+                           "### Detail\n\n"
+                           "<script>alert(1)</script>\n\n"
+                           "Use `inline` here.\n\n"
+                           "```javascript\n"
+                           "const name = \"omawrite\";\n"
+                           "```\n\n"
+                           "```ruby\n"
+                           "def greet(name)\n"
+                           "  \"hello #{name}\"\n"
+                           "end\n"
+                           "```\n\n"
+                           "```css\n"
+                           "pre { color: #fff; }\n"
+                           "```\n\n"
+                           "```html\n"
+                           "<section class=\"note\"><p>Hello</p></section>\n"
+                           "```\n"
+                           "\n[ok](https://example.com)\n"
+                           "[bad](javascript:alert(1))\n"),
+            QStringLiteral("Draft.md"), palette);
+
+        QVERIFY(html.contains(QStringLiteral("<h1>")));
+        QVERIFY(html.contains(QStringLiteral("<h2>")));
+        QVERIFY(html.contains(QStringLiteral("<h3>")));
+        QVERIFY(html.contains(QStringLiteral("h1 { font-size: 1.75em;")));
+        QVERIFY(html.contains(QStringLiteral("h2 { font-size: 1.4em;")));
+        QVERIFY(html.contains(QStringLiteral("h3 { font-size: 1.2em;")));
+        QVERIFY(html.contains(QStringLiteral("Title")));
+        QVERIFY(html.contains(QStringLiteral("Section")));
+        QVERIFY(html.contains(QStringLiteral("Detail")));
+        QVERIFY(html.contains(QStringLiteral("const")));
+        QVERIFY(html.contains(QStringLiteral("omawrite")));
+        QVERIFY(html.contains(QStringLiteral("<code>inline</code>")));
+        QVERIFY(html.contains(QStringLiteral("language-javascript")));
+        QVERIFY(html.contains(QStringLiteral("language-ruby")));
+        QVERIFY(html.contains(QStringLiteral("language-css")));
+        QVERIFY(html.contains(QStringLiteral("language-html")));
+        QCOMPARE(html.count(QStringLiteral("<pre"), Qt::CaseInsensitive), 4);
+        QVERIFY(html.contains(QStringLiteral("greet")));
+        QVERIFY(html.contains(QStringLiteral("Hello")));
+        QVERIFY(html.contains(QStringLiteral("color")));
+        QVERIFY(!html.contains(QStringLiteral("```")));
+        QVERIFY(!html.contains(QStringLiteral("<script>alert(1)</script>")));
+        QVERIFY(html.contains(QStringLiteral("https://example.com")));
+        QVERIFY(!html.contains(QStringLiteral("javascript:alert(1)")));
+        QVERIFY(CodeBlockHighlighter::highlightAvailable());
+        QVERIFY(html.contains(QStringLiteral("<span")));
+        QVERIFY(html.contains(QStringLiteral("#7aa2f7")));
+        QVERIFY(html.contains(QStringLiteral("#9ece6a")));
+        QVERIFY(html.contains(QStringLiteral("#1c1a1a")));
+        QVERIFY(html.contains(QStringLiteral("65ch")));
+        QVERIFY(html.contains(QStringLiteral("font-size: 20px")));
+        QVERIFY(!html.contains(QStringLiteral("xx-large")));
+        QVERIFY(!html.contains(QStringLiteral("#308cc6")));
     }
 
     void scalesTextWithDesktopTextSize() {

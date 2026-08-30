@@ -9,6 +9,7 @@ url='https://github.com/omacom-io/omawrite'
 license=('MIT')
 install='omawrite.install'
 depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
+optdepends=('highlight: syntax highlighting in the browser preview')
 makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
 source=()
 sha256sums=()
