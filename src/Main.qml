@@ -341,7 +341,11 @@ ApplicationWindow {
 
         Flickable {
             id: editorFlick
-            anchors.fill: parent
+            objectName: "editorViewport"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: footer.top
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
@@ -354,12 +358,6 @@ ApplicationWindow {
                 // flicking the Flickable, so the bar has to be told about
                 // that activity; linger briefly after the last event.
                 active: hovered || pressed || wheelScroll.running || scrollLinger.running
-                // Stop above the footer strip so the bar doesn't overlap
-                // the word count in the bottom-right corner. Padding and
-                // inset, not anchors: the attached-ScrollBar layout overrides
-                // anchors. Padding stops the thumb, the inset the track.
-                bottomPadding: win.scaledSize(32)
-                bottomInset: win.scaledSize(32)
             }
 
             Timer {
@@ -796,56 +794,65 @@ ApplicationWindow {
             }
         }
 
-        Row {
-            id: footerStatus
+        Rectangle {
+            id: footer
+            objectName: "footer"
             anchors.left: parent.left
+            anchors.right: parent.right
             anchors.bottom: parent.bottom
-            anchors.leftMargin: 12
-            anchors.bottomMargin: 10
-            spacing: 12
-            opacity: 0.55
+            height: Math.max(36, win.scaledSize(36))
+            color: win.pageColor
 
-            FooterIconButton {
-                objectName: "saveButton"
-                iconName: "save"
-                iconColor: win.mutedColor
-                tooltip: "Save"
-                onClicked: backend.save()
-            }
+            Row {
+                id: footerStatus
+                anchors.left: parent.left
+                anchors.bottom: parent.bottom
+                anchors.leftMargin: 12
+                anchors.bottomMargin: 10
+                spacing: 12
+                opacity: 0.55
 
-            FooterIconButton {
-                objectName: "openButton"
-                iconName: "open"
-                iconColor: win.mutedColor
-                tooltip: "Open"
-                onClicked: backend.openDialog()
+                FooterIconButton {
+                    objectName: "saveButton"
+                    iconName: "save"
+                    iconColor: win.mutedColor
+                    tooltip: "Save"
+                    onClicked: backend.save()
+                }
+
+                FooterIconButton {
+                    objectName: "openButton"
+                    iconName: "open"
+                    iconColor: win.mutedColor
+                    tooltip: "Open"
+                    onClicked: backend.openDialog()
+                }
+
+                Label {
+                    text: backend.status
+                    color: win.mutedColor
+                    font.family: "iA Writer Mono S"
+                    font.pixelSize: win.scaledSize(11)
+                    visible: text !== ""
+                    elide: Text.ElideRight
+                    width: Math.min(360, win.width / 3)
+                    height: win.scaledSize(16)
+                    verticalAlignment: Text.AlignVCenter
+                }
             }
 
             Label {
-                text: backend.status
+                anchors.right: parent.right
+                anchors.bottom: parent.bottom
+                anchors.rightMargin: 12
+                anchors.bottomMargin: 10
+                text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
                 color: win.mutedColor
+                opacity: 0.75
                 font.family: "iA Writer Mono S"
                 font.pixelSize: win.scaledSize(11)
-                visible: text !== ""
-                elide: Text.ElideRight
-                width: Math.min(360, win.width / 3)
-                height: win.scaledSize(16)
-                verticalAlignment: Text.AlignVCenter
             }
         }
-
-        Label {
-            anchors.right: parent.right
-            anchors.bottom: parent.bottom
-            anchors.rightMargin: 12
-            anchors.bottomMargin: 10
-            text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
-            color: win.mutedColor
-            opacity: 0.75
-            font.family: "iA Writer Mono S"
-            font.pixelSize: win.scaledSize(11)
-        }
-
 
         Pane {
             anchors.top: parent.top
