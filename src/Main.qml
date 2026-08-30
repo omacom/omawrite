@@ -341,6 +341,7 @@ ApplicationWindow {
 
         Flickable {
             id: editorFlick
+            objectName: "editorFlick"
             anchors.fill: parent
             anchors.leftMargin: 24
             anchors.rightMargin: 24
@@ -353,7 +354,8 @@ ApplicationWindow {
                 // Wheel scrolling moves contentY directly rather than
                 // flicking the Flickable, so the bar has to be told about
                 // that activity; linger briefly after the last event.
-                active: hovered || pressed || wheelScroll.running || scrollLinger.running
+                active: hovered || pressed || wheelScroll.running
+                    || touchpadMomentum.running || scrollLinger.running
                 // Stop above the footer strip so the bar doesn't overlap
                 // the word count in the bottom-right corner. Padding and
                 // inset, not anchors: the attached-ScrollBar layout overrides
@@ -375,6 +377,72 @@ ApplicationWindow {
             // notch landing mid-animation carries the current velocity into
             // the new curve, so sustained spinning keeps picking up speed.
             readonly property real wheelStep: win.scaledSize(120)
+
+            // Pixel-precise touchpad deltas follow the fingers directly at a
+            // larger scale. Recent deltas provide the velocity for a short,
+            // frame-rate-independent coast when the gesture ends.
+            readonly property real touchpadScale: 2.0
+            readonly property int touchpadEventGapMs: 80
+            readonly property real touchpadVelocityBlend: 0.35
+            readonly property real touchpadMomentumDecay: 0.90
+            readonly property real touchpadMinVelocity: 20
+            readonly property real touchpadMaxVelocity: 2400
+            property bool touchpadGestureActive: false
+            property bool platformMomentumActive: false
+            property real touchpadVelocity: 0
+            property double touchpadLastEventTime: 0
+
+            Timer {
+                id: touchpadEventGap
+                interval: editorFlick.touchpadEventGapMs
+                onTriggered: {
+                    if (editorFlick.platformMomentumActive) {
+                        // Some platforms omit ScrollEnd after their momentum
+                        // phase. Do not let that suppress the next gesture.
+                        editorFlick.platformMomentumActive = false;
+                    } else {
+                        editorFlick.finishTouchpadGesture();
+                    }
+                }
+            }
+
+            FrameAnimation {
+                id: touchpadMomentum
+                running: false
+
+                property real velocity: 0
+                property real previousElapsedTime: 0
+
+                onTriggered: {
+                    var dt = elapsedTime - previousElapsedTime;
+                    previousElapsedTime = elapsedTime;
+                    if (dt <= 0)
+                        return;
+
+                    var maxY = Math.max(0, editorFlick.contentHeight - editorFlick.height);
+                    var nextY = editorFlick.clampContentY(editorFlick.contentY + velocity * dt);
+                    if ((velocity < 0 && nextY <= 0)
+                            || (velocity > 0 && nextY >= maxY)) {
+                        editorFlick.contentY = nextY;
+                        stop();
+                        return;
+                    }
+
+                    editorFlick.contentY = editorFlick.snapToPixel(nextY);
+                    velocity *= Math.pow(editorFlick.touchpadMomentumDecay, dt * 60);
+                    if (Math.abs(velocity) < editorFlick.touchpadMinVelocity)
+                        stop();
+                }
+
+                function begin(initialVelocity) {
+                    velocity = Math.max(-editorFlick.touchpadMaxVelocity,
+                                        Math.min(editorFlick.touchpadMaxVelocity,
+                                                 initialVelocity));
+                    previousElapsedTime = 0;
+                    if (Math.abs(velocity) >= editorFlick.touchpadMinVelocity)
+                        restart();
+                }
+            }
 
             FrameAnimation {
                 id: wheelScroll
@@ -464,17 +532,86 @@ ApplicationWindow {
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: function(wheel) {
                     scrollLinger.restart();
-                    if (wheel.pixelDelta.y !== 0)
-                        editorFlick.scrollTo(editorFlick.clampContentY(editorFlick.contentY - wheel.pixelDelta.y));
+                    if (wheel.pixelDelta.y !== 0 || wheel.phase === Qt.ScrollMomentum
+                            || wheel.phase === Qt.ScrollEnd)
+                        editorFlick.scrollByTouchpad(wheel);
                     else
                         editorFlick.scrollByWheel(wheel);
                     wheel.accepted = true;
                 }
             }
 
-            onMovementStarted: wheelScroll.stop()
+            onMovementStarted: stopAnimatedScrolling()
+
+            function scrollByTouchpad(wheel) {
+                if (wheel.phase === Qt.ScrollMomentum) {
+                    touchpadMomentum.stop();
+                    touchpadGestureActive = false;
+                    platformMomentumActive = true;
+                    touchpadEventGap.restart();
+                    applyTouchpadDelta(wheel.pixelDelta.y);
+                    return;
+                }
+
+                if (wheel.phase === Qt.ScrollBegin || !touchpadGestureActive) {
+                    touchpadMomentum.stop();
+                    platformMomentumActive = false;
+                    touchpadGestureActive = true;
+                    touchpadVelocity = 0;
+                    touchpadLastEventTime = Date.now();
+                }
+
+                if (wheel.pixelDelta.y !== 0) {
+                    var now = Date.now();
+                    var movement = -wheel.pixelDelta.y * touchpadScale;
+                    var elapsed = now - touchpadLastEventTime;
+                    if (elapsed > 0 && elapsed <= touchpadEventGapMs) {
+                        var measuredVelocity = movement * 1000 / elapsed;
+                        touchpadVelocity += (measuredVelocity - touchpadVelocity)
+                            * touchpadVelocityBlend;
+                    }
+                    touchpadLastEventTime = now;
+                    applyTouchpadDelta(wheel.pixelDelta.y);
+                    touchpadEventGap.restart();
+                }
+
+                if (wheel.phase === Qt.ScrollEnd) {
+                    touchpadEventGap.stop();
+                    finishTouchpadGesture();
+                }
+            }
+
+            function applyTouchpadDelta(pixelDeltaY) {
+                wheelScroll.stop();
+                var maxY = Math.max(0, contentHeight - height);
+                var target = clampContentY(contentY - pixelDeltaY * touchpadScale);
+                contentY = target === 0 || target === maxY ? target : snapToPixel(target);
+                if (target === 0 || target === maxY)
+                    touchpadVelocity = 0;
+            }
+
+            function finishTouchpadGesture() {
+                if (!touchpadGestureActive)
+                    return;
+                touchpadGestureActive = false;
+                touchpadMomentum.begin(touchpadVelocity);
+            }
+
+            function stopTouchpadScrolling() {
+                touchpadEventGap.stop();
+                touchpadMomentum.stop();
+                touchpadGestureActive = false;
+                platformMomentumActive = false;
+                touchpadVelocity = 0;
+            }
+
+            function stopAnimatedScrolling() {
+                wheelScroll.stop();
+                stopTouchpadScrolling();
+            }
 
             function scrollByWheel(wheel) {
+                stopTouchpadScrolling();
                 // High-resolution wheels report fractional notches; feed
                 // those through the same animated path, like Chromium does
                 // for every wheel-source event.
@@ -511,7 +648,7 @@ ApplicationWindow {
 
             // Jump to a position, abandoning any wheel animation still running.
             function scrollTo(y) {
-                wheelScroll.stop();
+                stopAnimatedScrolling();
                 contentY = snapToPixel(y);
             }
 
