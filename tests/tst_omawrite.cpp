@@ -218,6 +218,54 @@ private slots:
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
     }
 
+    void movesBetweenWordsWithAltArrow() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const auto pressNavigation = [editor](Qt::Key key, Qt::KeyboardModifiers modifiers) {
+            QVariant handled;
+            const bool invoked = QMetaObject::invokeMethod(
+                editor, "handleNavigationKey",
+                Q_RETURN_ARG(QVariant, handled),
+                Q_ARG(QVariant, QVariant::fromValue(static_cast<int>(key))),
+                Q_ARG(QVariant, QVariant::fromValue(static_cast<int>(modifiers))));
+            return invoked && handled.toBool();
+        };
+
+        const QString words = QStringLiteral("Příliš žluťoučký kůň");
+        editor->setProperty("text", words);
+        editor->setProperty("cursorPosition", words.size());
+
+        QVERIFY(pressNavigation(Qt::Key_Left, Qt::AltModifier));
+        QCOMPARE(editor->property("cursorPosition").toInt(), words.indexOf(QStringLiteral("kůň")));
+        QVERIFY(pressNavigation(Qt::Key_Left, Qt::AltModifier));
+        QCOMPARE(editor->property("cursorPosition").toInt(), words.indexOf(QStringLiteral("žluťoučký")));
+
+        editor->setProperty("cursorPosition", 0);
+        QVERIFY(pressNavigation(Qt::Key_Right, Qt::AltModifier));
+        QCOMPARE(editor->property("cursorPosition").toInt(), words.indexOf(QLatin1Char(' ')));
+
+        editor->setProperty("cursorPosition", words.size());
+        QVERIFY(pressNavigation(Qt::Key_Left, Qt::AltModifier | Qt::ShiftModifier));
+        QCOMPARE(editor->property("selectionStart").toInt(), words.indexOf(QStringLiteral("kůň")));
+        QCOMPARE(editor->property("selectionEnd").toInt(), words.size());
+
+        QVERIFY(!pressNavigation(Qt::Key_Up, Qt::AltModifier));
+        QVERIFY(!pressNavigation(Qt::Key_Left, Qt::MetaModifier));
+        QVERIFY(!pressNavigation(Qt::Key_Left, Qt::ControlModifier | Qt::AltModifier));
+    }
+
     void remembersLastSaveDirectory() {
         QTemporaryDir saveDirectory;
         QVERIFY(saveDirectory.isValid());

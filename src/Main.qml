@@ -331,7 +331,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nAlt+←/→  Previous/next word\nAlt+Shift+←/→  Select by word\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -718,6 +718,63 @@ ApplicationWindow {
                         cursorPosition = target;
                 }
 
+                function moveToPosition(target, extendSelection) {
+                    target = Math.max(0, Math.min(text.length, target));
+                    if (extendSelection)
+                        moveCursorSelection(target, TextEdit.SelectCharacters);
+                    else
+                        cursorPosition = target;
+                }
+
+                // Keep word navigation independent of the active keyboard
+                // layout. Case-changing letters include Czech characters and
+                // most other alphabets without relying on ASCII-only \w.
+                function isWordCharacter(character) {
+                    if (character === "")
+                        return false;
+                    return character === "_"
+                        || /[0-9\u0300-\u036f]/.test(character)
+                        || character.toLocaleLowerCase() !== character.toLocaleUpperCase();
+                }
+
+                function wordPosition(direction) {
+                    var pos = cursorPosition;
+                    if (direction < 0) {
+                        while (pos > 0 && !isWordCharacter(text.charAt(pos - 1)))
+                            --pos;
+                        while (pos > 0 && isWordCharacter(text.charAt(pos - 1)))
+                            --pos;
+                    } else {
+                        while (pos < text.length && !isWordCharacter(text.charAt(pos)))
+                            ++pos;
+                        while (pos < text.length && isWordCharacter(text.charAt(pos)))
+                            ++pos;
+                    }
+                    return pos;
+                }
+
+                function moveWord(direction, extendSelection) {
+                    moveToPosition(wordPosition(direction), extendSelection);
+                }
+
+                function handleNavigationKey(key, modifiers) {
+                    var horizontal = key === Qt.Key_Left || key === Qt.Key_Right;
+                    if (!horizontal)
+                        return false;
+
+                    var direction = key === Qt.Key_Left ? -1 : 1;
+                    var extendSelection = modifiers & Qt.ShiftModifier;
+                    var altNavigation = (modifiers & Qt.AltModifier)
+                        && !(modifiers & (Qt.ControlModifier | Qt.MetaModifier));
+
+                    if (altNavigation) {
+                        moveWord(direction, extendSelection);
+                        return true;
+                    }
+
+                    return false;
+                }
+
                 function deleteParagraphBreakBehindCursor() {
                     if (selectionStart !== selectionEnd || cursorPosition < 2)
                         return false;
@@ -742,6 +799,11 @@ ApplicationWindow {
                     if (pasteKey || shiftInsert) {
                         if (!pasteClipboardUrlAsMarkdownLink())
                             pasteClipboardAsPlainText();
+                        event.accepted = true;
+                        return;
+                    }
+
+                    if (handleNavigationKey(event.key, event.modifiers)) {
                         event.accepted = true;
                         return;
                     }
