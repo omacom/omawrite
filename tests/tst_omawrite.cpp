@@ -1,4 +1,7 @@
 #include <QtTest>
+#include <QQuickTextDocument>
+#include <QTextBlock>
+#include <QTextDocument>
 #include <QFont>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -246,7 +249,135 @@ private slots:
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
     }
 
+    void togglesPreviewFromFooterButtonAndBack() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *preview = window->findChild<QObject *>(QStringLiteral("previewView"));
+        QObject *previewButton = window->findChild<QObject *>(QStringLiteral("previewButton"));
+        QVERIFY(editor);
+        QVERIFY(preview);
+        QVERIFY(previewButton);
+
+        // Source is the default: the editor is the visible surface.
+        QVERIFY(!window->property("previewMode").toBool());
+        QVERIFY(editor->property("visible").toBool());
+        QVERIFY(!preview->property("visible").toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(previewButton, "clicked"));
+        QVERIFY(window->property("previewMode").toBool());
+        QVERIFY(!editor->property("visible").toBool());
+        QVERIFY(preview->property("visible").toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(previewButton, "clicked"));
+        QVERIFY(!window->property("previewMode").toBool());
+        QVERIFY(editor->property("visible").toBool());
+        QVERIFY(!preview->property("visible").toBool());
+    }
+
+    void restoresBlockSpacingLostByTheMarkdownReader() {
+        QQmlEngine engine;
+        QScopedPointer<QObject> harness(makeRenderHarness(engine));
+        QVERIFY(harness);
+
+        Backend backend;
+        QTextDocument *rendered = renderThrough(backend, harness.data(),
+            QStringLiteral("# Heading\n\nParagraph one.\n\n- item\n- item\n\n> quoted\n"));
+        QVERIFY(rendered);
+
+        qreal headingTop = -1, paragraphBottom = -1, listBottom = -1, quoteTop = -1;
+        for (QTextBlock block = rendered->begin(); block.isValid(); block = block.next()) {
+            const QTextBlockFormat format = block.blockFormat();
+            if (format.headingLevel() > 0)
+                headingTop = format.topMargin();
+            else if (block.textList())
+                listBottom = format.bottomMargin();
+            else if (format.intProperty(QTextFormat::BlockQuoteLevel) > 0)
+                quoteTop = format.topMargin();
+            else if (block.text().startsWith(QStringLiteral("Paragraph")))
+                paragraphBottom = format.bottomMargin();
+        }
+
+        // Qt's Markdown reader leaves every block flush against the next; the
+        // render pass is the only thing putting the source's blank lines back.
+        QVERIFY2(paragraphBottom > 0, "paragraphs must gain a trailing gap");
+        QVERIFY2(headingTop > 0, "headings must lead their section");
+        QVERIFY2(quoteTop > 0, "quotes need a leading gap or they read as a list row");
+        QVERIFY2(listBottom >= 0 && listBottom < paragraphBottom,
+                 "list items stay tighter than paragraphs");
+    }
+
+    void collapsesRunsOfBlankLinesToOneGap() {
+        QQmlEngine engine;
+        QScopedPointer<QObject> harness(makeRenderHarness(engine));
+        QVERIFY(harness);
+
+        // CommonMark treats any run of blank lines as one block separator, so
+        // the render must not grow with the number of newlines in the source.
+        const auto spacingOf = [&](const QString &markdown) {
+            Backend backend;
+            QTextDocument *rendered = renderThrough(backend, harness.data(), markdown);
+            QList<qreal> margins;
+            if (rendered) {
+                for (QTextBlock block = rendered->begin(); block.isValid();
+                     block = block.next())
+                    margins.append(block.blockFormat().bottomMargin());
+            }
+            return margins;
+        };
+
+        const QList<qreal> single = spacingOf(QStringLiteral("A.\n\nB.\n"));
+        const QList<qreal> quadruple = spacingOf(QStringLiteral("A.\n\n\n\n\nB.\n"));
+        QCOMPARE(single.size(), 2);
+        QCOMPARE(quadruple, single);
+    }
+
 private:
+    // Two TextEdits standing in for the real pair: one the highlighter binds to,
+    // one the preview renders into.
+    static QObject *makeRenderHarness(QQmlEngine &engine) {
+        auto *component = new QQmlComponent(&engine, &engine);
+        component->setData(R"QML(
+            import QtQuick
+            Item {
+                property alias source: sourceEdit
+                property alias rendered: renderedEdit
+                TextEdit { id: sourceEdit }
+                TextEdit { id: renderedEdit }
+            }
+        )QML", QUrl());
+        if (!component->isReady())
+            return nullptr;
+        return component->create();
+    }
+
+    static QTextDocument *renderThrough(Backend &backend, QObject *harness,
+                                        const QString &markdown) {
+        QObject *source = harness->property("source").value<QObject *>();
+        QObject *rendered = harness->property("rendered").value<QObject *>();
+        if (!source || !rendered)
+            return nullptr;
+
+        auto *sourceDocument = source->property("textDocument").value<QQuickTextDocument *>();
+        auto *renderedDocument = rendered->property("textDocument").value<QQuickTextDocument *>();
+        if (!sourceDocument || !renderedDocument)
+            return nullptr;
+
+        backend.attachDocument(sourceDocument);
+        source->setProperty("text", markdown);
+        backend.renderPreview(renderedDocument);
+        return renderedDocument->textDocument();
+    }
+
     QTemporaryDir m_settingsDirectory;
 };
 

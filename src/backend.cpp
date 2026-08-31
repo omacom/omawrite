@@ -277,6 +277,42 @@ void Backend::keepExternalVersion() {
     setStatus(QStringLiteral("Kept your version"));
 }
 
+void Backend::renderPreview(QObject *textDocument) {
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    if (!quickDocument || !quickDocument->textDocument())
+        return;
+
+    QTextDocument *preview = quickDocument->textDocument();
+    preview->setDefaultFont(m_document ? m_document->defaultFont() : preview->defaultFont());
+    preview->setMarkdown(currentDocumentText());
+
+    // Qt's Markdown reader packs every block flush against the next, so the
+    // blank lines that separate paragraphs in the source disappear from the
+    // render. Put that breathing room back as real block spacing, sized from
+    // the editor font so it tracks the desktop text scale.
+    const qreal gap = preview->defaultFont().pixelSize() > 0
+                          ? preview->defaultFont().pixelSize() * 0.75
+                          : 15.0;
+
+    QTextCursor cursor(preview);
+    cursor.beginEditBlock();
+    for (QTextBlock block = preview->begin(); block.isValid(); block = block.next()) {
+        QTextBlockFormat format = block.blockFormat();
+        const bool heading = format.headingLevel() > 0;
+        const bool listItem = block.textList() != nullptr;
+        const bool quote = format.intProperty(QTextFormat::BlockQuoteLevel) > 0;
+
+        // Headings lead their section, list items stay tight together, and
+        // ordinary paragraphs get a full blank line's worth beneath them.
+        // Quotes need the leading gap too or they read as another list row.
+        format.setTopMargin(heading ? gap * 1.5 : (quote ? gap : 0));
+        format.setBottomMargin(listItem ? gap * 0.2 : gap);
+        cursor.setPosition(block.position());
+        cursor.setBlockFormat(format);
+    }
+    cursor.endEditBlock();
+}
+
 void Backend::printDocument() {
     if (!m_document) {
         setStatus(QStringLiteral("There is no document to print."));
