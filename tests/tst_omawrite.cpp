@@ -67,6 +67,33 @@ private slots:
         QCOMPARE(mixed.at(0).content.start, 18);
     }
 
+    // A code span makes its own contents literal; it does not stop markup that
+    // merely encloses one. Only a delimiter landing inside the code span does.
+    void keepsMarkupThatEnclosesACodeSpan() {
+        const auto spanning = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("_a `b` c_"));
+        QCOMPARE(spanning.size(), 1);
+        QCOMPARE(spanning.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(spanning.at(0).content.start, 1);
+        QCOMPARE(spanning.at(0).content.length, 7);
+
+        const auto linked = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("[see `code`](url)"));
+        QCOMPARE(linked.size(), 1);
+        QCOMPARE(linked.at(0).kind, MarkdownHighlighter::InlineKind::Link);
+        QCOMPARE(linked.at(0).content.start, 1);
+        QCOMPARE(linked.at(0).content.length, 10);
+
+        const auto wrapped = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("*`code`*"));
+        QCOMPARE(wrapped.size(), 1);
+        QCOMPARE(wrapped.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+
+        // The closing underscore is inside the code span, so it is not a marker.
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("_a `b_ c` d_")).size(), 0);
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());

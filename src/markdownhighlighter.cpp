@@ -210,8 +210,10 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         return Span{int(match.capturedStart(group)), int(match.capturedLength(group))};
     };
 
-    // Inline code spans suppress every other kind of inline markup, so collect
-    // their ranges first and skip any emphasis/link match that overlaps one.
+    // A code span makes its own contents literal, so collect the code ranges
+    // first and reject any emphasis/link whose delimiters land inside one. It is
+    // the delimiters that are tested, not the whole match: markup may enclose a
+    // code span (`_a `b` c_`, `[see `code`](url)`) and still be real markup.
     QList<Span> codeSpans;
     if (text.contains(QLatin1Char('`'))) {
         static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
@@ -219,14 +221,17 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         while (codeMatches.hasNext())
             codeSpans.append(span(codeMatches.next(), 0));
     }
-    const auto insideCode = [&codeSpans](const QRegularExpressionMatch &match) {
-        const int start = match.capturedStart(0);
-        const int end = start + match.capturedLength(0);
+    const auto codeCovers = [&codeSpans](int index) {
         for (const Span &code : codeSpans) {
-            if (start < code.start + code.length && code.start < end)
+            if (index >= code.start && index < code.start + code.length)
                 return true;
         }
         return false;
+    };
+    const auto insideCode = [&codeCovers](const QRegularExpressionMatch &match) {
+        const int start = match.capturedStart(0);
+        const int end = start + match.capturedLength(0);
+        return codeCovers(start) || codeCovers(end - 1);
     };
 
     static const QRegularExpression boldRe(QStringLiteral("(\\*\\*|__)(.+?)(\\1)"));
