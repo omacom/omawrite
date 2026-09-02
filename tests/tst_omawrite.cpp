@@ -54,6 +54,19 @@ private slots:
         QCOMPARE(markup.at(2).markers[0].length, 1);
     }
 
+    void ignoresInlineMarkdownInsideCodeSpans() {
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("`The_brown_fox` jumps")).size(), 0);
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("`a **b** [c](d)` and `e`")).size(), 0);
+
+        const auto mixed = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("`code_span` then *real* emphasis"));
+        QCOMPARE(mixed.size(), 1);
+        QCOMPARE(mixed.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(mixed.at(0).content.start, 18);
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());

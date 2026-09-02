@@ -210,10 +210,31 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         return Span{int(match.capturedStart(group)), int(match.capturedLength(group))};
     };
 
+    // Inline code spans suppress every other kind of inline markup, so collect
+    // their ranges first and skip any emphasis/link match that overlaps one.
+    QList<Span> codeSpans;
+    if (text.contains(QLatin1Char('`'))) {
+        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+        while (codeMatches.hasNext())
+            codeSpans.append(span(codeMatches.next(), 0));
+    }
+    const auto insideCode = [&codeSpans](const QRegularExpressionMatch &match) {
+        const int start = match.capturedStart(0);
+        const int end = start + match.capturedLength(0);
+        for (const Span &code : codeSpans) {
+            if (start < code.start + code.length && code.start < end)
+                return true;
+        }
+        return false;
+    };
+
     static const QRegularExpression boldRe(QStringLiteral("(\\*\\*|__)(.+?)(\\1)"));
     QRegularExpressionMatchIterator boldMatches = boldRe.globalMatch(text);
     while (boldMatches.hasNext()) {
         const QRegularExpressionMatch match = boldMatches.next();
+        if (insideCode(match))
+            continue;
         markup.append({InlineKind::Bold, span(match, 2),
                        {span(match, 1), span(match, 3)}});
     }
@@ -223,6 +244,8 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     QRegularExpressionMatchIterator italicMatches = italicRe.globalMatch(text);
     while (italicMatches.hasNext()) {
         const QRegularExpressionMatch match = italicMatches.next();
+        if (insideCode(match))
+            continue;
         const Span whole = span(match, 0);
         const int contentIndex = match.capturedStart(1) >= 0 ? 1 : 2;
         markup.append({InlineKind::Italic, span(match, contentIndex),
@@ -234,6 +257,8 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     QRegularExpressionMatchIterator linkMatches = linkRe.globalMatch(text);
     while (linkMatches.hasNext()) {
         const QRegularExpressionMatch match = linkMatches.next();
+        if (insideCode(match))
+            continue;
         const Span whole = span(match, 0);
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;
