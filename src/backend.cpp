@@ -463,6 +463,28 @@ void Backend::setStatus(const QString &status) {
     emit statusChanged();
 }
 
+static bool writeDocumentAtomically(const QString &path, const QByteArray &contents)
+{
+    QSaveFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+        return false;
+    if (file.write(contents) != contents.size()) {
+        file.cancelWriting();
+        return false;
+    }
+    // commit() flushes, fsyncs, and atomically renames the temp file into place,
+    // returning false (and leaving the original untouched) on any write error.
+    return file.commit();
+}
+
+static bool writeDocumentDirectly(const QString &path, const QByteArray &contents)
+{
+    QFile file(path);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text | QIODevice::Truncate))
+        return false;
+    return file.write(contents) == contents.size() && file.flush();
+}
+
 void Backend::saveTo(const QUrl &url) {
     if (!url.isLocalFile()) {
         m_closeAfterSave = false;
@@ -470,16 +492,9 @@ void Backend::saveTo(const QUrl &url) {
         return;
     }
 
-    const QString targetName = QFileInfo(url.toLocalFile()).fileName();
-    QSaveFile file(url.toLocalFile());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        m_closeAfterSave = false;
-        setStatus(QStringLiteral("Could not save %1.").arg(targetName));
-        return;
-    }
-
+    const QString path = url.toLocalFile();
+    const QString targetName = QFileInfo(path).fileName();
     const QByteArray contents = currentDocumentText().toUtf8();
-    file.write(contents);
 
     // QSaveFile commits by replacing the target. Stop watching the old inode
     // before that replacement so our own write is not classified as external.
@@ -487,13 +502,16 @@ void Backend::saveTo(const QUrl &url) {
     if (!watched.isEmpty())
         m_fileWatcher.removePaths(watched);
 
-    // commit() flushes, fsyncs, and atomically renames the temp file into place,
-    // returning false (and leaving the original untouched) on any write error.
-    if (!file.commit()) {
-        watchCurrentFile();
-        m_closeAfterSave = false;
-        setStatus(QStringLiteral("Could not write %1.").arg(targetName));
-        return;
+    if (!writeDocumentAtomically(path, contents)) {
+        // QSaveFile uses Linux O_TMPFILE. CIFS/SMB returns ENOENT for that
+        // instead of EOPNOTSUPP, so Qt never falls back to a named temp file
+        // and open() fails. Direct write still works on those mounts.
+        if (!writeDocumentDirectly(path, contents)) {
+            watchCurrentFile();
+            m_closeAfterSave = false;
+            setStatus(QStringLiteral("Could not save %1.").arg(targetName));
+            return;
+        }
     }
 
     const bool shouldClose = m_closeAfterSave;
