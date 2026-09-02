@@ -178,15 +178,6 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
-    if (text.contains(QLatin1Char('`'))) {
-        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
-        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
-        while (codeMatches.hasNext()) {
-            const QRegularExpressionMatch match = codeMatches.next();
-            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
-        }
-    }
-
     const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {
         const QTextCharFormat &contentFormat =
@@ -196,6 +187,17 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         setFormat(item.content.start, item.content.length, contentFormat);
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
+    }
+
+    // Last, so a code span keeps its own styling where emphasis encloses it.
+    // setFormat replaces rather than merges, so whichever pass runs last wins.
+    if (text.contains(QLatin1Char('`'))) {
+        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+        while (codeMatches.hasNext()) {
+            const QRegularExpressionMatch match = codeMatches.next();
+            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
+        }
     }
 }
 
