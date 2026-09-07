@@ -463,18 +463,22 @@ void Backend::setStatus(const QString &status) {
     emit statusChanged();
 }
 
-static bool writeDocumentAtomically(const QString &path, const QByteArray &contents)
+// NotOpened is kept apart from Failed because only it leaves the target
+// definitely untouched, and only then is a destructive retry safe.
+enum class AtomicWrite { Written, Failed, NotOpened };
+
+static AtomicWrite writeDocumentAtomically(const QString &path, const QByteArray &contents)
 {
     QSaveFile file(path);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
-        return false;
+        return AtomicWrite::NotOpened;
     if (file.write(contents) != contents.size()) {
         file.cancelWriting();
-        return false;
+        return AtomicWrite::Failed;
     }
     // commit() flushes, fsyncs, and atomically renames the temp file into place,
     // returning false (and leaving the original untouched) on any write error.
-    return file.commit();
+    return file.commit() ? AtomicWrite::Written : AtomicWrite::Failed;
 }
 
 static bool writeDocumentDirectly(const QString &path, const QByteArray &contents)
@@ -502,16 +506,18 @@ void Backend::saveTo(const QUrl &url) {
     if (!watched.isEmpty())
         m_fileWatcher.removePaths(watched);
 
-    if (!writeDocumentAtomically(path, contents)) {
-        // QSaveFile uses Linux O_TMPFILE. CIFS/SMB returns ENOENT for that
-        // instead of EOPNOTSUPP, so Qt never falls back to a named temp file
-        // and open() fails. Direct write still works on those mounts.
-        if (!writeDocumentDirectly(path, contents)) {
-            watchCurrentFile();
-            m_closeAfterSave = false;
-            setStatus(QStringLiteral("Could not save %1.").arg(targetName));
-            return;
-        }
+    // QSaveFile uses Linux O_TMPFILE. CIFS/SMB returns ENOENT for that instead
+    // of EOPNOTSUPP, so Qt never falls back to a named temp file and open()
+    // fails. Direct write still works on those mounts. Retry only that case:
+    // once QSaveFile has opened, the document on disk survives any later error,
+    // and truncating it to try again would destroy what the failure spared.
+    const AtomicWrite atomic = writeDocumentAtomically(path, contents);
+    if (atomic == AtomicWrite::Failed
+        || (atomic == AtomicWrite::NotOpened && !writeDocumentDirectly(path, contents))) {
+        watchCurrentFile();
+        m_closeAfterSave = false;
+        setStatus(QStringLiteral("Could not save %1.").arg(targetName));
+        return;
     }
 
     const bool shouldClose = m_closeAfterSave;
