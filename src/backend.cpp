@@ -97,6 +97,9 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
+    m_autoSaveTimer.setSingleShot(true);
+    m_autoSaveTimer.setInterval(500);
+    connect(&m_autoSaveTimer, &QTimer::timeout, this, &Backend::autoSave);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
@@ -358,6 +361,7 @@ bool Backend::editorTextChanged() {
     setModified(true);
     setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
+    scheduleAutoSave();
     return true;
 }
 
@@ -515,6 +519,19 @@ void Backend::saveTo(const QUrl &url) {
 
 void Backend::scheduleRecovery() {
     m_recoveryTimer.start();
+}
+
+void Backend::scheduleAutoSave() {
+    // Only auto-save documents that already live on disk. Untitled drafts are
+    // left to manual save so auto-save never silently opens a file picker or
+    // creates a file the writer did not name; crash recovery still covers them.
+    if (m_fileUrl.isLocalFile())
+        m_autoSaveTimer.start();
+}
+
+void Backend::autoSave() {
+    if (m_modified && m_fileUrl.isLocalFile())
+        saveTo(m_fileUrl);
 }
 
 QString Backend::recoveryPath() const {

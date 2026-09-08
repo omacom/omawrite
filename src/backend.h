@@ -104,6 +104,8 @@ private:
     void reapplyTypographyToChange();
     void scheduleRecovery();
     void writeRecovery();
+    void scheduleAutoSave();
+    void autoSave();
     void restoreRecovery();
     void clearRecovery();
     QString recoveryPath() const;
@@ -125,6 +127,7 @@ private:
     int m_lastChangeAdded = 0;
     QTimer m_wordCountTimer;
     QTimer m_recoveryTimer;
+    QTimer m_autoSaveTimer;
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;

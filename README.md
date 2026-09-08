@@ -24,8 +24,11 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
-Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
-and warns before an external change can replace local work.
+Once a document has been saved to a file, edits are auto-saved to that file a
+moment after you stop typing, so `Ctrl+S` is rarely needed. Untitled drafts are
+never auto-saved — they wait for an explicit save so Omawrite never picks a file
+name for you. Unsaved drafts are recovered after an abnormal exit. Omawrite also
+watches open files and warns before an external change can replace local work.
 
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves

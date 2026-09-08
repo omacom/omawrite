@@ -246,7 +246,68 @@ private slots:
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
     }
 
+    void autoSavesTitledDocumentsAfterEdits() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("draft.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+
+        // Give the document a home on disk, then edit it without saving again.
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+        editor->setProperty("text", QStringLiteral("auto-saved body"));
+        QVERIFY(backend.editorTextChanged());
+
+        // The debounced timer should flush to disk with no manual save.
+        QTRY_VERIFY(savedSpy.count() >= 1);
+        QVERIFY(!backend.modified());
+
+        QFile written(path);
+        QVERIFY(written.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(written.readAll()),
+                 QStringLiteral("auto-saved body"));
+    }
+
+    void doesNotAutoSaveUntitledDocuments() {
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+        QSignalSpy saveDialogSpy(&backend, &Backend::saveDialogRequested);
+        editor->setProperty("text", QStringLiteral("nameless draft"));
+        QVERIFY(backend.editorTextChanged());
+
+        // Wait past the auto-save debounce: an untitled draft must never auto-save
+        // or silently raise the save picker. Crash recovery still covers it.
+        QTest::qWait(1800);
+        QCOMPARE(savedSpy.count(), 0);
+        QCOMPARE(saveDialogSpy.count(), 0);
+        QVERIFY(backend.modified());
+    }
+
 private:
+    // Builds a minimal TextEdit and attaches its document to the backend, so
+    // editorTextChanged() sees real edits. The engine outlives the returned
+    // editor because it is a data member.
+    QObject *makeEditor(Backend &backend) {
+        QQmlComponent component(&m_engine);
+        component.setData(
+            "import QtQuick\nTextEdit { property var doc: textDocument }", QUrl());
+        if (!component.isReady()) {
+            qWarning() << component.errorString();
+            return nullptr;
+        }
+        QObject *editor = component.create();
+        if (editor)
+            backend.attachDocument(editor->property("doc").value<QObject *>());
+        return editor;
+    }
+
+    QQmlEngine m_engine;
     QTemporaryDir m_settingsDirectory;
 };
 
