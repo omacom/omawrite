@@ -87,10 +87,14 @@ SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
     m_darkMode = detectDarkMode();
     m_textScale = detectTextScale();
 
+#if QT_VERSION >= QT_VERSION_CHECK(6, 5, 0)
+    // Qt::ColorScheme and QStyleHints::colorSchemeChanged landed in Qt 6.5.
+    // On older Qt the portal's SettingChanged signal below still drives updates.
     if (QGuiApplication::styleHints()) {
         connect(QGuiApplication::styleHints(), &QStyleHints::colorSchemeChanged,
                 this, &SystemTheme::refresh);
     }
+#endif
 
     QDBusConnection::sessionBus().connect(
         QString(),
@@ -175,6 +179,12 @@ qreal SystemTheme::detectTextScale() const {
 bool SystemTheme::qtDarkMode(bool *known) const {
     *known = false;
 
+#if QT_VERSION < QT_VERSION_CHECK(6, 5, 0)
+    // Qt::ColorScheme is Qt 6.5+. Leaving *known false makes detectDarkMode()
+    // fall through to the portal and gsettings paths, which is what GNOME uses
+    // anyway.
+    return false;
+#else
     if (!QGuiApplication::styleHints())
         return false;
 
@@ -189,6 +199,7 @@ bool SystemTheme::qtDarkMode(bool *known) const {
     }
 
     return false;
+#endif
 }
 
 void SystemTheme::setDarkMode(bool darkMode) {
