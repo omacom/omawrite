@@ -182,6 +182,10 @@ bool Backend::closeActiveBuffer() {
         setStatus(QStringLiteral("Save or discard changes before closing this tab"));
         return false;
     }
+    return discardActiveBuffer();
+}
+
+bool Backend::discardActiveBuffer() {
     if (!m_bufferSession.closeBuffer(m_bufferSession.activeBufferId()))
         return false;
     loadActiveBuffer();

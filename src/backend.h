@@ -71,6 +71,7 @@ public:
     Q_INVOKABLE QString newBuffer();
     Q_INVOKABLE bool selectBuffer(const QString &id);
     Q_INVOKABLE bool closeActiveBuffer();
+    Q_INVOKABLE bool discardActiveBuffer();
     Q_INVOKABLE void updateActiveEditorState(int cursorPosition, int selectionStart, int selectionEnd);
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
