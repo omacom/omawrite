@@ -45,8 +45,10 @@ ApplicationWindow {
     color: pageColor
 
     onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
+        if (closeConfirmed || !backend.modified) {
+            backend.prepareForApplicationClose();
             return;
+        }
 
         close.accepted = false;
         pendingAction = "close";

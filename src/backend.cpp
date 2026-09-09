@@ -195,7 +195,18 @@ bool Backend::discardActiveBuffer() {
     return true;
 }
 
+void Backend::prepareForApplicationClose() {
+    if (m_applicationClosing)
+        return;
+
+    persistActiveBuffer();
+    m_applicationClosing = true;
+}
+
 void Backend::updateActiveEditorState(int cursorPosition, int selectionStart, int selectionEnd) {
+    if (m_applicationClosing)
+        return;
+
     m_cursorPosition = cursorPosition;
     m_selectionStart = selectionStart;
     m_selectionEnd = selectionEnd;
@@ -413,7 +424,7 @@ QString Backend::clipboardText() const {
 }
 
 bool Backend::editorTextChanged() {
-    if (m_loading || m_formattingTypography)
+    if (m_applicationClosing || m_loading || m_formattingTypography)
         return false;
 
     const QString text = currentDocumentText();
