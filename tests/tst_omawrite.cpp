@@ -154,6 +154,16 @@ private slots:
         QCOMPARE(backend.activeBufferId(), first);
     }
 
+    void exposesActiveBufferCaretState() {
+        Backend backend;
+
+        backend.updateActiveEditorState(4, 1, 4);
+
+        QCOMPARE(backend.activeCursorPosition(), 4);
+        QCOMPARE(backend.activeSelectionStart(), 1);
+        QCOMPARE(backend.activeSelectionEnd(), 4);
+    }
+
     void findsInlineMarkdownRanges() {
         const auto markup = MarkdownHighlighter::inlineMarkup(
             QStringLiteral("**bold** and *italic* and [site](https://example.com)"));

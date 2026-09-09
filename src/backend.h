@@ -23,6 +23,9 @@ class Backend : public QObject {
     Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
     Q_PROPERTY(QVariantList buffers READ buffers NOTIFY buffersChanged)
     Q_PROPERTY(QString activeBufferId READ activeBufferId NOTIFY activeBufferChanged)
+    Q_PROPERTY(int activeCursorPosition READ activeCursorPosition NOTIFY activeBufferChanged)
+    Q_PROPERTY(int activeSelectionStart READ activeSelectionStart NOTIFY activeBufferChanged)
+    Q_PROPERTY(int activeSelectionEnd READ activeSelectionEnd NOTIFY activeBufferChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -45,6 +48,9 @@ public:
     QUrl fileUrl() const { return m_fileUrl; }
     QVariantList buffers() const { return m_bufferSession.buffers(); }
     QString activeBufferId() const { return m_bufferSession.activeBufferId(); }
+    int activeCursorPosition() const { return m_cursorPosition; }
+    int activeSelectionStart() const { return m_selectionStart; }
+    int activeSelectionEnd() const { return m_selectionEnd; }
     QString fileName() const;
 
     bool modified() const { return m_modified; }
