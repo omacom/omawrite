@@ -6,9 +6,11 @@ TARGET = tst_omawrite
 INCLUDEPATH += ../src
 SOURCES += \
     tst_omawrite.cpp \
+    ../src/buffersession.cpp \
     ../src/backend.cpp \
     ../src/markdownhighlighter.cpp
 HEADERS += \
+    ../src/buffersession.h \
     ../src/backend.h \
     ../src/markdownhighlighter.h
 

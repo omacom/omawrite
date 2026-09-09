@@ -5,12 +5,14 @@ TARGET = omawrite
 TEMPLATE = app
 
 HEADERS += \
+    src/buffersession.h \
     src/backend.h \
     src/markdownhighlighter.h \
     src/systemtheme.h
 
 SOURCES += \
     src/main.cpp \
+    src/buffersession.cpp \
     src/backend.cpp \
     src/markdownhighlighter.cpp \
     src/systemtheme.cpp
