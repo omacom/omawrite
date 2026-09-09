@@ -14,4 +14,4 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/tests/tests.pro"
 make -j"$(nproc 2>/dev/null || echo 1)"
-QT_QPA_PLATFORM=offscreen ./tst_omawrite
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= ./tst_omawrite
