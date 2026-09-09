@@ -191,6 +191,47 @@ private slots:
                  QStringLiteral("notes.md"));
     }
 
+    void scrollsOverflowingTabs() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        for (int index = 0; index < 12; ++index)
+            backend.newBuffer();
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        window->setProperty("width", 280);
+
+        QObject *tabFlick = window->findChild<QObject *>(QStringLiteral("tabFlick"));
+        QVERIFY(tabFlick);
+        QTRY_VERIFY(tabFlick->property("contentWidth").toReal()
+                     > tabFlick->property("width").toReal());
+        QVERIFY(QMetaObject::invokeMethod(window.get(), "scrollTabs", Q_ARG(QVariant, 1)));
+        QTRY_VERIFY(tabFlick->property("contentX").toReal() > 0);
+    }
+
+    void hidesTabBarForSingleBuffer() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *tabBar = window->findChild<QObject *>(QStringLiteral("tabBar"));
+        QVERIFY(tabBar);
+        QVERIFY(!tabBar->property("visible").toBool());
+    }
+
     void restoresActiveTextAndCaretThroughQmlLifecycle() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

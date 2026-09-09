@@ -75,6 +75,11 @@ ApplicationWindow {
         unsavedChangesDialog.open();
     }
 
+    function scrollTabs(direction) {
+        tabFlick.contentX = Math.max(0, Math.min(tabFlick.contentWidth - tabFlick.width,
+                                                  tabFlick.contentX + direction * tabFlick.width * 0.75));
+    }
+
     function completePendingAction() {
         var action = pendingAction;
         pendingAction = "";
@@ -388,45 +393,122 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
 
-        Row {
-            id: tabStrip
+        Item {
+            id: tabBar
+            objectName: "tabBar"
             anchors.top: parent.top
             anchors.left: parent.left
             anchors.right: parent.right
             anchors.topMargin: 8
             anchors.leftMargin: 12
             anchors.rightMargin: 12
-            spacing: 4
+            height: 28
+            visible: backend.buffers.length > 1
             z: 2
 
-            Repeater {
-                model: backend.buffers
-                delegate: Rectangle {
-                    required property var modelData
-                    required property int index
-                    width: tabLabel.implicitWidth + 20
-                    height: 28
-                    color: modelData.id === backend.activeBufferId
-                        ? backend.themeAccent
-                        : (win.darkMode ? "#252525" : "#e7e7e7")
+            Flickable {
+                id: tabFlick
+                objectName: "tabFlick"
+                anchors.fill: parent
+                clip: true
+                contentWidth: tabStrip.width
+                contentHeight: height
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
 
-                    Label {
-                        id: tabLabel
-                        anchors.centerIn: parent
-                        text: (modelData.modified ? "* " : "")
-                            + backend.bufferTitle(modelData, index)
-                        color: modelData.id === backend.activeBufferId
-                            ? "white"
-                            : win.textColor
-                        font.family: "iA Writer Mono S"
-                        font.pixelSize: win.scaledSize(11)
-                    }
+                Row {
+                    id: tabStrip
+                    spacing: 4
 
-                    MouseArea {
-                        anchors.fill: parent
-                        cursorShape: Qt.PointingHandCursor
-                        onClicked: backend.selectBuffer(modelData.id)
+                    Repeater {
+                        model: backend.buffers
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: tabLabel.implicitWidth + 20
+                            height: 28
+                            color: modelData.id === backend.activeBufferId
+                                ? backend.themeAccent
+                                : (win.darkMode ? "#252525" : "#e7e7e7")
+
+                            Label {
+                                id: tabLabel
+                                anchors.centerIn: parent
+                                text: (modelData.modified ? "* " : "")
+                                    + backend.bufferTitle(modelData, index)
+                                color: modelData.id === backend.activeBufferId
+                                    ? "white"
+                                    : win.textColor
+                                font.family: "iA Writer Mono S"
+                                font.pixelSize: win.scaledSize(11)
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.selectBuffer(modelData.id)
+                            }
+                        }
                     }
+                }
+
+                WheelHandler {
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: function(wheel) {
+                        var delta = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.pixelDelta.y;
+                        if (delta === 0)
+                            delta = wheel.angleDelta.x !== 0 ? wheel.angleDelta.x : wheel.angleDelta.y;
+                        win.scrollTabs(delta > 0 ? -1 : 1);
+                        wheel.accepted = true;
+                    }
+                }
+            }
+
+            Rectangle {
+                id: leftTabScroll
+                objectName: "leftTabScroll"
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                width: 24
+                height: parent.height
+                visible: tabFlick.contentX > 0
+                color: win.darkMode ? "#181818" : "#f4f4f4"
+                z: 1
+
+                Label {
+                    anchors.centerIn: parent
+                    text: "‹"
+                    color: win.textColor
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: win.scrollTabs(-1)
+                }
+            }
+
+            Rectangle {
+                id: rightTabScroll
+                objectName: "rightTabScroll"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 24
+                height: parent.height
+                visible: tabFlick.contentX + tabFlick.width < tabFlick.contentWidth
+                color: win.darkMode ? "#181818" : "#f4f4f4"
+                z: 1
+
+                Label {
+                    anchors.centerIn: parent
+                    text: "›"
+                    color: win.textColor
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: win.scrollTabs(1)
                 }
             }
         }
