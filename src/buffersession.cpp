@@ -99,6 +99,23 @@ bool BufferSession::selectBuffer(const QString &id) {
     return false;
 }
 
+bool BufferSession::closeBuffer(const QString &id) {
+    for (int index = 0; index < m_buffers.size(); ++index) {
+        if (m_buffers.at(index).toMap().value(QStringLiteral("id")).toString() != id)
+            continue;
+        m_buffers.removeAt(index);
+        if (m_buffers.isEmpty()) {
+            createBuffer();
+            return true;
+        }
+        if (m_activeBufferId == id)
+            m_activeBufferId = m_buffers.at(qMin(index, m_buffers.size() - 1)).toMap()
+                .value(QStringLiteral("id")).toString();
+        return true;
+    }
+    return false;
+}
+
 bool BufferSession::updateBuffer(const QString &id, const QString &fileUrl, const QString &text,
                                  int cursorPosition, int selectionStart, int selectionEnd,
                                  bool modified) {

@@ -142,6 +142,18 @@ private slots:
         QCOMPARE(file.readAll(), QByteArray("original"));
     }
 
+    void backendCreatesAndSelectsBuffers() {
+        Backend backend;
+
+        QCOMPARE(backend.buffers().size(), 1);
+        const QString first = backend.activeBufferId();
+        const QString second = backend.newBuffer();
+        QCOMPARE(backend.buffers().size(), 2);
+        QCOMPARE(backend.activeBufferId(), second);
+        QVERIFY(backend.selectBuffer(first));
+        QCOMPARE(backend.activeBufferId(), first);
+    }
+
     void findsInlineMarkdownRanges() {
         const auto markup = MarkdownHighlighter::inlineMarkup(
             QStringLiteral("**bold** and *italic* and [site](https://example.com)"));

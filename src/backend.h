@@ -11,6 +11,8 @@
 #include <QVariantList>
 #include <memory>
 
+#include "buffersession.h"
+
 class MarkdownHighlighter;
 class QTextDocument;
 class QWindow;
@@ -19,6 +21,8 @@ class QLockFile;
 class Backend : public QObject {
     Q_OBJECT
     Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
+    Q_PROPERTY(QVariantList buffers READ buffers NOTIFY buffersChanged)
+    Q_PROPERTY(QString activeBufferId READ activeBufferId NOTIFY activeBufferChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -39,6 +43,8 @@ public:
     void setParentWindow(QWindow *window);
 
     QUrl fileUrl() const { return m_fileUrl; }
+    QVariantList buffers() const { return m_bufferSession.buffers(); }
+    QString activeBufferId() const { return m_bufferSession.activeBufferId(); }
     QString fileName() const;
 
     bool modified() const { return m_modified; }
@@ -62,6 +68,10 @@ public:
     static QString suggestedFileName(const QString &text);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
+    Q_INVOKABLE QString newBuffer();
+    Q_INVOKABLE bool selectBuffer(const QString &id);
+    Q_INVOKABLE bool closeActiveBuffer();
+    Q_INVOKABLE void updateActiveEditorState(int cursorPosition, int selectionStart, int selectionEnd);
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
@@ -86,6 +96,8 @@ public:
 
 signals:
     void fileUrlChanged();
+    void buffersChanged();
+    void activeBufferChanged();
     void modifiedChanged();
     void statusChanged();
     void wordCountChanged();
@@ -101,6 +113,8 @@ signals:
 
 private:
     void loadDocumentText(const QString &text);
+    void loadActiveBuffer();
+    void persistActiveBuffer();
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
     void setStatus(const QString &status);
@@ -133,9 +147,13 @@ private:
     int m_formattedBlockCount = 0;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;
+    int m_cursorPosition = 0;
+    int m_selectionStart = 0;
+    int m_selectionEnd = 0;
     QTimer m_wordCountTimer;
     QTimer m_recoveryTimer;
     QFileSystemWatcher m_fileWatcher;
+    BufferSession m_bufferSession;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
