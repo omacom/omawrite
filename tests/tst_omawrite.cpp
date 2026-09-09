@@ -107,6 +107,25 @@ private slots:
                  QStringLiteral("second"));
     }
 
+    void preservesBufferTextWhenUpdatingCaret() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        BufferSession session(stateDirectory.path());
+        const QString id = session.createBuffer();
+        QVERIFY(session.updateBuffer(id, QString(), QStringLiteral("first"), 0, 0, 0, true));
+        QVERIFY(session.updateBufferCursor(id, 3, 1, 3));
+        QVERIFY(session.saveNow());
+
+        BufferSession restored(stateDirectory.path());
+        QVERIFY(restored.restore());
+        const QVariantMap buffer = restored.buffers().constFirst().toMap();
+        QCOMPARE(buffer.value(QStringLiteral("text")), QStringLiteral("first"));
+        QCOMPARE(buffer.value(QStringLiteral("cursorPosition")), 3);
+        QCOMPARE(buffer.value(QStringLiteral("selectionStart")), 1);
+        QCOMPARE(buffer.value(QStringLiteral("selectionEnd")), 3);
+    }
+
     void activatesExistingBufferForSameFile() {
         QTemporaryDir stateDirectory;
         QVERIFY(stateDirectory.isValid());
@@ -154,26 +173,55 @@ private slots:
         QCOMPARE(backend.activeBufferId(), first);
     }
 
-    void exposesActiveBufferCaretState() {
-        Backend backend;
+    void restoresActiveTextAndCaretThroughQmlLifecycle() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
 
-        backend.updateActiveEditorState(4, 1, 4);
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
 
-        QCOMPARE(backend.activeCursorPosition(), 4);
-        QCOMPARE(backend.activeSelectionStart(), 1);
-        QCOMPARE(backend.activeSelectionEnd(), 4);
-    }
+        {
+            Backend writer(stateDirectory.path());
+            QQmlEngine engine;
+            engine.rootContext()->setContextProperty(QStringLiteral("backend"), &writer);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+            QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+            QScopedPointer<QObject> window(component.create());
+            QVERIFY2(window, qPrintable(component.errorString()));
 
-    void preservesActiveBufferStateAfterApplicationClosePreparation() {
-        Backend backend;
+            QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+            QVERIFY(editor);
+            QTest::qWait(120);
+            QTRY_VERIFY(!writer.buffers().isEmpty());
+            editor->setProperty("text", QStringLiteral("First tab"));
+            editor->setProperty("cursorPosition", 5);
+            QTRY_COMPARE(writer.buffers().constFirst().toMap().value(QStringLiteral("text")),
+                         QStringLiteral("First tab"));
+            QTRY_COMPARE(writer.buffers().constFirst().toMap()
+                             .value(QStringLiteral("cursorPosition")).toInt(),
+                         5);
+            writer.prepareForApplicationClose();
+        }
 
-        backend.updateActiveEditorState(4, 1, 4);
-        backend.prepareForApplicationClose();
-        backend.updateActiveEditorState(0, 0, 0);
+        BufferSession persisted(stateDirectory.path());
+        QVERIFY(persisted.restore());
+        QCOMPARE(persisted.buffers().constFirst().toMap()
+                     .value(QStringLiteral("cursorPosition")).toInt(),
+                 5);
 
-        QCOMPARE(backend.activeCursorPosition(), 4);
-        QCOMPARE(backend.activeSelectionStart(), 1);
-        QCOMPARE(backend.activeSelectionEnd(), 4);
+        Backend reader(stateDirectory.path());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &reader);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QTRY_COMPARE(editor->property("text").toString(), QStringLiteral("First tab"));
+        QTRY_COMPARE(reader.activeCursorPosition(), 5);
+        QTRY_COMPARE(editor->property("cursorPosition").toInt(), 5);
     }
 
     void findsInlineMarkdownRanges() {

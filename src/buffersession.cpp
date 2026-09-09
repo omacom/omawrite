@@ -136,6 +136,23 @@ bool BufferSession::updateBuffer(const QString &id, const QString &fileUrl, cons
     return false;
 }
 
+bool BufferSession::updateBufferCursor(const QString &id, int cursorPosition, int selectionStart,
+                                       int selectionEnd) {
+    for (QVariant &value : m_buffers) {
+        QVariantMap buffer = value.toMap();
+        if (buffer.value(QStringLiteral("id")).toString() != id)
+            continue;
+
+        const int textLength = buffer.value(QStringLiteral("text")).toString().size();
+        buffer.insert(QStringLiteral("cursorPosition"), qBound(0, cursorPosition, textLength));
+        buffer.insert(QStringLiteral("selectionStart"), qBound(0, selectionStart, textLength));
+        buffer.insert(QStringLiteral("selectionEnd"), qBound(0, selectionEnd, textLength));
+        value = buffer;
+        return true;
+    }
+    return false;
+}
+
 bool BufferSession::restore() {
     QFile file(sessionPath());
     if (!file.open(QIODevice::ReadOnly))

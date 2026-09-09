@@ -92,14 +92,15 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
 }
 
 Backend::Backend(QObject *parent)
-    : QObject(parent),
-      m_bufferSession(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)) {
+    : Backend(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), parent) {}
+
+Backend::Backend(const QString &stateDirectory, QObject *parent)
+    : QObject(parent), m_bufferSession(stateDirectory) {
     const QString savedFont = QSettings().value(editorFontSetting).toString();
     m_editorFont = !savedFont.isEmpty() && QFontDatabase::hasFamily(savedFont)
         ? savedFont
         : defaultEditorFont();
 
-    const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(stateDirectory);
     if (!m_bufferSession.restore())
         m_bufferSession.createBuffer();
@@ -204,13 +205,22 @@ void Backend::prepareForApplicationClose() {
 }
 
 void Backend::updateActiveEditorState(int cursorPosition, int selectionStart, int selectionEnd) {
-    if (m_applicationClosing)
+    if (!m_document || m_applicationClosing || m_restoringActiveBuffer)
+        return;
+    if (m_ignoringInitialCursorReset && cursorPosition == 0 && m_cursorPosition > 0)
         return;
 
     m_cursorPosition = cursorPosition;
     m_selectionStart = selectionStart;
     m_selectionEnd = selectionEnd;
-    persistActiveBuffer();
+    m_bufferSession.updateBufferCursor(m_bufferSession.activeBufferId(), cursorPosition,
+                                       selectionStart, selectionEnd);
+    m_bufferSession.saveNow();
+}
+
+void Backend::finishActiveBufferRestore() {
+    m_restoringActiveBuffer = false;
+    QTimer::singleShot(250, this, [this]() { m_ignoringInitialCursorReset = false; });
 }
 
 Backend::~Backend() = default;
@@ -256,6 +266,8 @@ void Backend::attachDocument(QObject *textDocument) {
         setStatus(QStringLiteral("Could not attach the Markdown renderer."));
         return;
     }
+
+    m_restoringActiveBuffer = true;
 
     if (m_highlighter)
         delete m_highlighter.data();
@@ -424,7 +436,8 @@ QString Backend::clipboardText() const {
 }
 
 bool Backend::editorTextChanged() {
-    if (m_applicationClosing || m_loading || m_formattingTypography)
+    if (!m_document || m_applicationClosing || m_restoringActiveBuffer || m_loading
+            || m_formattingTypography)
         return false;
 
     const QString text = currentDocumentText();
@@ -584,7 +597,10 @@ void Backend::loadActiveBuffer() {
         m_cursorPosition = buffer.value(QStringLiteral("cursorPosition")).toInt();
         m_selectionStart = buffer.value(QStringLiteral("selectionStart")).toInt();
         m_selectionEnd = buffer.value(QStringLiteral("selectionEnd")).toInt();
-        loadDocumentText(buffer.value(QStringLiteral("text")).toString());
+        m_activeBufferText = buffer.value(QStringLiteral("text")).toString();
+        m_restoringActiveBuffer = true;
+        m_ignoringInitialCursorReset = true;
+        loadDocumentText(m_activeBufferText);
         setFileUrl(QUrl(buffer.value(QStringLiteral("fileUrl")).toString()));
         setModified(buffer.value(QStringLiteral("modified")).toBool());
         return;
@@ -594,8 +610,9 @@ void Backend::loadActiveBuffer() {
 void Backend::persistActiveBuffer() {
     if (m_bufferSession.activeBufferId().isEmpty())
         return;
+    m_activeBufferText = currentDocumentText();
     m_bufferSession.updateBuffer(m_bufferSession.activeBufferId(), m_fileUrl.toString(),
-                                 currentDocumentText(), m_cursorPosition, m_selectionStart,
+                                 m_activeBufferText, m_cursorPosition, m_selectionStart,
                                  m_selectionEnd, m_modified);
     m_bufferSession.saveNow();
 }

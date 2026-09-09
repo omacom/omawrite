@@ -26,6 +26,8 @@ class Backend : public QObject {
     Q_PROPERTY(int activeCursorPosition READ activeCursorPosition NOTIFY activeBufferChanged)
     Q_PROPERTY(int activeSelectionStart READ activeSelectionStart NOTIFY activeBufferChanged)
     Q_PROPERTY(int activeSelectionEnd READ activeSelectionEnd NOTIFY activeBufferChanged)
+    Q_PROPERTY(QString activeBufferText READ activeBufferText NOTIFY activeBufferChanged)
+    Q_PROPERTY(bool restoringActiveBuffer READ restoringActiveBuffer NOTIFY activeBufferChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
@@ -41,6 +43,7 @@ class Backend : public QObject {
 
 public:
     explicit Backend(QObject *parent = nullptr);
+    Backend(const QString &stateDirectory, QObject *parent = nullptr);
     ~Backend() override;
 
     void setParentWindow(QWindow *window);
@@ -51,6 +54,8 @@ public:
     int activeCursorPosition() const { return m_cursorPosition; }
     int activeSelectionStart() const { return m_selectionStart; }
     int activeSelectionEnd() const { return m_selectionEnd; }
+    QString activeBufferText() const { return m_activeBufferText; }
+    bool restoringActiveBuffer() const { return m_restoringActiveBuffer; }
     QString fileName() const;
 
     bool modified() const { return m_modified; }
@@ -79,6 +84,7 @@ public:
     Q_INVOKABLE bool closeActiveBuffer();
     Q_INVOKABLE bool discardActiveBuffer();
     Q_INVOKABLE void prepareForApplicationClose();
+    Q_INVOKABLE void finishActiveBufferRestore();
     Q_INVOKABLE void updateActiveEditorState(int cursorPosition, int selectionStart, int selectionEnd);
     Q_INVOKABLE void openDialog();
     Q_INVOKABLE void open(const QUrl &url);
@@ -158,6 +164,7 @@ private:
     int m_cursorPosition = 0;
     int m_selectionStart = 0;
     int m_selectionEnd = 0;
+    QString m_activeBufferText;
     QTimer m_wordCountTimer;
     QTimer m_recoveryTimer;
     QFileSystemWatcher m_fileWatcher;
@@ -169,6 +176,8 @@ private:
     QByteArray m_lastKnownFileContents;
     bool m_hasKnownFileContents = false;
     bool m_applicationClosing = false;
+    bool m_restoringActiveBuffer = false;
+    bool m_ignoringInitialCursorReset = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 
