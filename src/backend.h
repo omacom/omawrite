@@ -57,6 +57,7 @@ public:
     QString activeBufferText() const { return m_activeBufferText; }
     bool restoringActiveBuffer() const { return m_restoringActiveBuffer; }
     QString fileName() const;
+    Q_INVOKABLE QString bufferTitle(const QVariantMap &buffer, int index) const;
 
     bool modified() const { return m_modified; }
     QString status() const { return m_status; }

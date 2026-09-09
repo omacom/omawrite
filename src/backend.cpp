@@ -243,6 +243,25 @@ QString Backend::fileName() const {
     return name.isEmpty() ? QStringLiteral("Untitled.md") : name;
 }
 
+QString Backend::bufferTitle(const QVariantMap &buffer, int index) const {
+    const QUrl fileUrl(buffer.value(QStringLiteral("fileUrl")).toString());
+    if (fileUrl.isLocalFile()) {
+        const QString fileName = QFileInfo(fileUrl.toLocalFile()).fileName();
+        if (!fileName.isEmpty())
+            return fileName;
+    }
+
+    const QString firstLine = buffer.value(QStringLiteral("text")).toString()
+        .section(QLatin1Char('\n'), 0, 0).trimmed();
+    if (firstLine.isEmpty())
+        return QStringLiteral("Untitled %1").arg(index + 1);
+
+    constexpr int maximumTitleLength = 29;
+    if (firstLine.size() <= maximumTitleLength)
+        return firstLine;
+    return firstLine.left(maximumTitleLength - 1) + QChar(0x2026);
+}
+
 void Backend::setDarkMode(bool darkMode) {
     if (m_darkMode == darkMode)
         return;
@@ -615,6 +634,7 @@ void Backend::persistActiveBuffer() {
                                  m_activeBufferText, m_cursorPosition, m_selectionStart,
                                  m_selectionEnd, m_modified);
     m_bufferSession.saveNow();
+    emit buffersChanged();
 }
 
 void Backend::setFileUrl(const QUrl &url) {

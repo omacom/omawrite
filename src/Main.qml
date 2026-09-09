@@ -403,6 +403,7 @@ ApplicationWindow {
                 model: backend.buffers
                 delegate: Rectangle {
                     required property var modelData
+                    required property int index
                     width: tabLabel.implicitWidth + 20
                     height: 28
                     color: modelData.id === backend.activeBufferId
@@ -413,8 +414,7 @@ ApplicationWindow {
                         id: tabLabel
                         anchors.centerIn: parent
                         text: (modelData.modified ? "* " : "")
-                            + (modelData.fileUrl === "" ? "Untitled.md"
-                               : modelData.fileUrl.split("/").pop())
+                            + backend.bufferTitle(modelData, index)
                         color: modelData.id === backend.activeBufferId
                             ? "white"
                             : win.textColor

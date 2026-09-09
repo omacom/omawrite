@@ -173,6 +173,24 @@ private slots:
         QCOMPARE(backend.activeBufferId(), first);
     }
 
+    void derivesBufferTitles() {
+        Backend backend;
+
+        QCOMPARE(backend.bufferTitle({{QStringLiteral("fileUrl"), QString()},
+                                     {QStringLiteral("text"), QString()}}, 0),
+                 QStringLiteral("Untitled 1"));
+        QCOMPARE(backend.bufferTitle({{QStringLiteral("fileUrl"), QString()},
+                                     {QStringLiteral("text"), QStringLiteral("  Draft title\nBody")}}, 1),
+                 QStringLiteral("Draft title"));
+        QCOMPARE(backend.bufferTitle({{QStringLiteral("fileUrl"), QString()},
+                                     {QStringLiteral("text"), QString(40, QChar('a'))}}, 2),
+                 QStringLiteral("aaaaaaaaaaaaaaaaaaaaaaaaaaaa…"));
+        QCOMPARE(backend.bufferTitle({{QStringLiteral("fileUrl"),
+                                      QStringLiteral("file:///tmp/notes.md")},
+                                     {QStringLiteral("text"), QStringLiteral("Ignored")}}, 3),
+                 QStringLiteral("notes.md"));
+    }
+
     void restoresActiveTextAndCaretThroughQmlLifecycle() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
