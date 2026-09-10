@@ -80,6 +80,7 @@ Dialog {
 
             SquareDialogButton {
                 id: discardButton
+                objectName: "discardUnsavedButton"
                 text: "Discard"
                 darkMode: root.darkMode
                 textScale: root.textScale

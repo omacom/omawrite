@@ -8,12 +8,16 @@ if command -v qmake6 >/dev/null 2>&1; then
   QMAKE=qmake6
 elif command -v qmake >/dev/null 2>&1; then
   QMAKE=qmake
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qt)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qt)/bin/qmake"
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qtbase)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qtbase)/bin/qmake"
 else
   echo "qmake6 or qmake is required to build omawrite." >&2
   exit 1
 fi
 
-JOBS="$(nproc 2>/dev/null || echo 1)"
+JOBS="$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 1)"
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
@@ -21,4 +25,8 @@ cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/omawrite.pro"
 make -j"$JOBS"
 
-echo "Built $BUILD_DIR/omawrite"
+if [ -d "$BUILD_DIR/omawrite.app" ]; then
+  echo "Built $BUILD_DIR/omawrite.app"
+else
+  echo "Built $BUILD_DIR/omawrite"
+fi

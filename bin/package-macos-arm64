@@ -1,0 +1,235 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+  echo "This package script must run on an Apple Silicon Mac." >&2
+  exit 1
+fi
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+# Kept apart from bin/build's tree on purpose. A bundle macdeployqt has
+# finished contains Qt frameworks and an executable rewritten to load them from
+# @executable_path; a plain `bin/build` relink hardcodes the Homebrew framework
+# paths again, so a rebuild into a deployed bundle loads two copies of Qt and
+# the app dies before its first window.
+BUILD_DIR="$ROOT/build-macos"
+APP="$BUILD_DIR/omawrite.app"
+
+if command -v qmake6 >/dev/null 2>&1; then
+  QMAKE=qmake6
+elif command -v qmake >/dev/null 2>&1; then
+  QMAKE=qmake
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qt)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qt)/bin/qmake"
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qtbase)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qtbase)/bin/qmake"
+else
+  echo "Qt 6 is required. Install it with: brew install qtbase qtdeclarative qttools" >&2
+  exit 1
+fi
+
+case "$QMAKE" in
+  /*) ;;
+  *) QMAKE="$(command -v "$QMAKE")" ;;
+esac
+QT_BIN="$(dirname -- "$QMAKE")"
+if [ -x "$QT_BIN/macdeployqt" ]; then
+  MACDEPLOYQT="$QT_BIN/macdeployqt"
+elif command -v macdeployqt >/dev/null 2>&1; then
+  MACDEPLOYQT="$(command -v macdeployqt)"
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qttools)/bin/macdeployqt" ]; then
+  MACDEPLOYQT="$(brew --prefix qttools)/bin/macdeployqt"
+else
+  MACDEPLOYQT=""
+fi
+if [ ! -x "$MACDEPLOYQT" ]; then
+  echo "macdeployqt was not found. Install it with: brew install qttools" >&2
+  exit 1
+fi
+
+JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 1)"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+# Never carry frameworks or plugins over from a previous Qt toolchain.
+rm -rf "$APP"
+"$QMAKE" "$ROOT/omawrite.pro" CONFIG+=release QMAKE_APPLE_DEVICE_ARCHS=arm64
+# Always clean. The commit About reports is a -D flag, and make rebuilds on
+# source changes without noticing that a flag moved: skipping this served a
+# binary built from yesterday's sources while the Makefile named today's
+# commit. Four seconds of compiling is not worth being unsure what is in the
+# bundle.
+make clean
+make -j"$JOBS"
+
+BINARY="$APP/Contents/MacOS/omawrite"
+if [ ! -x "$BINARY" ]; then
+  echo "The expected application bundle was not produced: $APP" >&2
+  exit 1
+fi
+
+ARCHS="$(lipo -archs "$BINARY")"
+if [ "$ARCHS" != "arm64" ]; then
+  echo "Expected an arm64-only application, but found: $ARCHS" >&2
+  exit 1
+fi
+
+QT_LIBS="$("$QMAKE" -query QT_INSTALL_LIBS)"
+QT_VERSION="$("$QMAKE" -query QT_VERSION)"
+
+# Deploying Qt takes minutes and produces the same result every time: the
+# frameworks only change when Qt does, while the part that actually changed is
+# our own 640K executable. Keep the deployed Qt and reuse it, keyed on the Qt
+# that produced it so an upgrade cannot be served a stale one.
+#
+# Reliability is the whole point here, so the assembled bundle goes through
+# exactly the same checks as a freshly deployed one, plus one that is only
+# meaningful for this path: the executable must not name Homebrew anywhere.
+# Linking it against the build machine's Qt while the bundle carries its own
+# is the failure that runs here and dies everywhere else.
+CACHE_ROOT="$BUILD_DIR/.deployed-qt"
+CACHE="$CACHE_ROOT/$QT_VERSION-$(echo "$QT_LIBS" | shasum -a 256 | cut -c1-12)"
+
+run_macdeployqt() {
+  # macdeployqt does not always search the SDK's top-level library directory
+  # when Qt is installed as split packages (as Homebrew does). Supplying
+  # qmake's reported library directory also works with the official Qt SDK.
+  if [ -d "$QT_LIBS" ]; then
+    "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -libpath="$QT_LIBS" \
+      -appstore-compliant -always-overwrite
+  else
+    "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -appstore-compliant \
+      -always-overwrite
+  fi
+}
+
+# Point the executable at the Qt inside the bundle. A fresh link names Qt by
+# absolute Homebrew path; macdeployqt rewrites those, and when the frameworks
+# come from the cache instead, this does.
+relink_to_bundled_qt() {
+  # The digits matter: QtQuickControls2 and QtQuickDialogs2 are frameworks
+  # too, and a pattern of letters alone silently skips them -- leaving the
+  # executable pointed at the build machine's Qt for exactly those two.
+  for dependency in $(otool -L "$BINARY" | awk '{print $1}' | grep '^/.*Qt[A-Za-z0-9]*\.framework/'); do
+    relative="$(echo "$dependency" | sed 's|^.*/\(Qt[A-Za-z0-9]*\.framework/.*\)$|\1|')"
+    install_name_tool -change "$dependency" \
+      "@executable_path/../Frameworks/$relative" "$BINARY"
+  done
+  # Nothing may resolve through the build machine's Qt, so the rpath that
+  # reaches it goes too. Absent on some toolchains, hence the guard.
+  install_name_tool -delete_rpath /opt/homebrew/lib "$BINARY" 2>/dev/null || true
+}
+
+rm -f "$BUILD_DIR/omawrite.dmg"
+
+if [ "${OMAWRITE_NO_CACHE:-}" = "1" ] || [ ! -d "$CACHE/Frameworks" ]; then
+  run_macdeployqt
+
+  # Keep what was just deployed, written aside and moved into place so a run
+  # interrupted here cannot leave a half-filled cache behind.
+  staging="$(mktemp -d "$CACHE_ROOT.XXXXXX")"
+  mkdir -p "$staging"
+  for part in Frameworks PlugIns; do
+    [ -d "$APP/Contents/$part" ] && cp -R "$APP/Contents/$part" "$staging/$part"
+  done
+  [ -d "$APP/Contents/Resources/qml" ] && cp -R "$APP/Contents/Resources/qml" "$staging/qml"
+  [ -f "$APP/Contents/Resources/qt.conf" ] && cp "$APP/Contents/Resources/qt.conf" "$staging/qt.conf"
+  rm -rf "$CACHE"
+  mkdir -p "$CACHE_ROOT"
+  mv "$staging" "$CACHE"
+  echo "Deployed Qt $QT_VERSION and kept it for the next build."
+else
+  echo "Reusing the deployed Qt $QT_VERSION from $CACHE"
+  for part in Frameworks PlugIns; do
+    [ -d "$CACHE/$part" ] && cp -R "$CACHE/$part" "$APP/Contents/$part"
+  done
+  mkdir -p "$APP/Contents/Resources"
+  [ -d "$CACHE/qml" ] && cp -R "$CACHE/qml" "$APP/Contents/Resources/qml"
+  [ -f "$CACHE/qt.conf" ] && cp "$CACHE/qt.conf" "$APP/Contents/Resources/qt.conf"
+  relink_to_bundled_qt
+fi
+
+# Whichever path built it, the executable must reach only the Qt in the bundle.
+if otool -L "$BINARY" | tail -n +2 | awk '{print $1}' | grep -q '^/.*Qt'; then
+  echo "the executable still links Qt outside the bundle:" >&2
+  otool -L "$BINARY" | tail -n +2 | awk '{print $1}' | grep '^/.*Qt' >&2
+  exit 1
+fi
+
+# The official SDK ships a Mimer SQL plugin that links to a proprietary client
+# library outside Qt. Omawrite does not use it; retaining SQLite is sufficient
+# for any Qt Quick local-storage dependency.
+rm -f "$APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
+
+# macdeployqt copies every plugin Qt ships, including ones whose frameworks
+# live in packages we do not have (QtPdf comes with qtwebengine; Qt3D and the
+# virtual keyboard with their own). A plugin whose framework is missing is
+# either never loaded -- dead weight -- or, if Qt does load it eagerly the way
+# it loads every image format, resolved through the build machine's Qt, which
+# drags a second copy of Qt into the process. That runs here and fails on any
+# other Mac, so prune them.
+prune_unsatisfiable() {
+  removed=0
+  for plugin in $(find "$APP/Contents/PlugIns" -name "*.dylib" 2>/dev/null); do
+    for wanted in $(otool -L "$plugin" 2>/dev/null | awk '{print $1}' \
+        | grep '^@rpath/Qt.*\.framework' \
+        | sed 's|^@rpath/\([^/]*\)\.framework.*|\1|' | sort -u); do
+      if [ ! -e "$APP/Contents/Frameworks/$wanted.framework" ]; then
+        echo "pruning $(basename "$plugin"): needs $wanted, which is not bundled"
+        rm -f "$plugin"
+        removed=1
+        break
+      fi
+    done
+  done
+  return $removed
+}
+
+# Pruning one plugin can leave another unsatisfiable, so repeat until settled.
+while prune_unsatisfiable; do :; done
+
+# The QML modules symlink to the plugins rather than carrying their own copy,
+# so pruning leaves the links dangling, and codesign refuses to verify a bundle
+# that lists a file which is not there. Take the module the link belonged to
+# with it: nothing imports a module whose plugin has gone.
+while [ -n "$(find "$APP" -type l ! -exec test -e {} \; -print 2>/dev/null | head -1)" ]; do
+  find "$APP" -type l ! -exec test -e {} \; -print 2>/dev/null | while read -r link; do
+    case "$(dirname "$link")" in
+      */Contents/Resources/qml/*) rm -rf "$(dirname "$link")" ;;
+      *) rm -f "$link" ;;
+    esac
+  done
+done
+find "$APP/Contents/PlugIns" -type d -empty -delete 2>/dev/null || true
+rm -rf "$APP/Contents/Resources/qml/QtQuick/Pdf"
+
+# Nothing may now reference a framework the bundle does not carry. Anything
+# left would be resolved against the build machine's Qt.
+missing=""
+for binary in $(find "$APP" -type f); do
+  file "$binary" 2>/dev/null | grep -q Mach-O || continue
+  for wanted in $(otool -L "$binary" 2>/dev/null | awk '{print $1}' \
+      | grep '^@rpath/Qt.*\.framework' \
+      | sed 's|^@rpath/\([^/]*\)\.framework.*|\1|' | sort -u); do
+    if [ ! -e "$APP/Contents/Frameworks/$wanted.framework" ]; then
+      missing="$missing $wanted"
+    fi
+  done
+done
+if [ -n "$missing" ]; then
+  echo "referenced but not bundled:$(echo "$missing" | tr ' ' '\n' | sort -u | tr '\n' ' ')" >&2
+  exit 1
+fi
+
+codesign --force --deep --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+
+DMG_STAGE="$(mktemp -d "$BUILD_DIR/.omawrite-dmg.XXXXXX")"
+trap 'rm -rf "$DMG_STAGE"' EXIT
+ditto "$APP" "$DMG_STAGE/Omawrite.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create -quiet -fs HFS+ -volname Omawrite -srcfolder "$DMG_STAGE" \
+  -format UDZO "$BUILD_DIR/omawrite.dmg"
+hdiutil verify "$BUILD_DIR/omawrite.dmg" >/dev/null
+
+echo "Packaged $BUILD_DIR/omawrite.dmg"

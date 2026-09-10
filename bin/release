@@ -1,0 +1,134 @@
+#!/usr/bin/env sh
+# Cut a release: version, tests, tag, a bundle built the slow honest way, the
+# source archives, and the GitHub release itself.
+#
+#   bin/release 0.5.0-macos.3 [notes-file]
+#
+# Everything is checked before anything is published, because a tag and a
+# release are public and awkward to take back. Nothing is pushed until the
+# bundle exists and has been verified.
+set -eu
+
+VERSION="${1:-}"
+NOTES="${2:-}"
+if [ -z "$VERSION" ]; then
+  echo "usage: bin/release <version> [notes-file]" >&2
+  echo "   eg: bin/release 0.5.0-macos.3 notes.md" >&2
+  exit 1
+fi
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+cd "$ROOT"
+
+TAG="v$VERSION"
+BUILD_DIR="$ROOT/build-macos"
+STAGE="$BUILD_DIR/release/$TAG"
+
+step() { printf '\n== %s\n' "$1"; }
+
+step "Checking the tree"
+if [ -n "$(git status --porcelain)" ]; then
+  echo "the working tree has changes; commit or stash them first" >&2
+  git status --short >&2
+  exit 1
+fi
+if git rev-parse "$TAG" >/dev/null 2>&1; then
+  echo "$TAG already exists" >&2
+  exit 1
+fi
+BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+REMOTE_URL="$(git remote get-url origin)"
+case "$REMOTE_URL" in
+  *omacom/omawrite*)
+    echo "origin is upstream, not your fork; refusing to release" >&2
+    exit 1 ;;
+esac
+
+step "Setting the version to $VERSION"
+# version.pri is the only place it lives; the test reads it from there.
+tmp="$(mktemp)"
+sed "s|^VERSION = .*|VERSION = $VERSION|" version.pri > "$tmp" && mv "$tmp" version.pri
+grep -q "^VERSION = $VERSION$" version.pri || { echo "could not set the version" >&2; exit 1; }
+
+step "Running the tests"
+./bin/test >/dev/null 2>&1 || { echo "tests failed; nothing was tagged" >&2; git checkout -- version.pri; exit 1; }
+echo "tests pass"
+
+step "Committing and tagging"
+git add version.pri
+git commit -q -m "Release $VERSION"
+git tag -a "$TAG" -m "Omawrite for macOS $VERSION"
+COMMIT="$(git rev-parse --short HEAD)"
+echo "$TAG at $COMMIT"
+
+step "Building the bundle the slow way"
+# A release is the one artifact where paying for a full deploy is obviously
+# worth it, so the cache is bypassed.
+rm -rf "$BUILD_DIR/omawrite.app" "$BUILD_DIR/omawrite.dmg"
+OMAWRITE_NO_CACHE=1 ./bin/package-macos-arm64 >/dev/null 2>&1 \
+  || { echo "packaging failed; $TAG is tagged locally but nothing was pushed" >&2; exit 1; }
+
+step "Verifying the bundle"
+APP="$BUILD_DIR/omawrite.app"
+BUILT_FROM="$(grep -o 'OMAWRITE_COMMIT=[^ ]*' "$BUILD_DIR/Makefile" | head -1 | sed 's|.*=\\"||;s|\\"||')"
+[ "$BUILT_FROM" = "$COMMIT" ] || { echo "the bundle says $BUILT_FROM, the tag says $COMMIT" >&2; exit 1; }
+[ "$(lipo -archs "$APP/Contents/MacOS/omawrite")" = "arm64" ] || { echo "not arm64" >&2; exit 1; }
+codesign --verify --deep --strict "$APP"
+otool -L "$APP/Contents/MacOS/omawrite" | tail -n +2 | awk '{print $1}' | grep -q '^/.*Qt' \
+  && { echo "the executable links Qt outside the bundle" >&2; exit 1; }
+echo "built from $BUILT_FROM, arm64, signed, self-contained"
+
+step "Staging the assets"
+rm -rf "$STAGE" && mkdir -p "$STAGE"
+cp "$BUILD_DIR/omawrite.dmg" "$STAGE/Omawrite-$TAG-macos-arm64.dmg"
+git archive --format=zip --prefix="omawrite-$TAG/" \
+  -o "$STAGE/omawrite-$TAG-source.zip" "$TAG"
+git archive --format=tar.gz --prefix="omawrite-$TAG/" \
+  -o "$STAGE/omawrite-$TAG-source.tar.gz" "$TAG"
+SHA="$(shasum -a 256 "$STAGE/Omawrite-$TAG-macos-arm64.dmg" | awk '{print $1}')"
+ls -lh "$STAGE"
+
+step "Pushing"
+git push -q origin "$BRANCH"
+git push -q origin "$TAG"
+
+step "Publishing"
+notes="$STAGE/notes.md"
+if [ -n "$NOTES" ] && [ -f "$NOTES" ]; then
+  cat "$NOTES" > "$notes"
+else
+  printf 'Omawrite for macOS %s.\n' "$VERSION" > "$notes"
+fi
+cat >> "$notes" <<NOTES
+
+### Install
+
+Open the DMG and drag Omawrite to Applications.
+
+**Ad-hoc signed, not notarized.** macOS will refuse it on first launch:
+right-click the app and choose **Open**, then confirm. Once only.
+
+Apple Silicon. The app is self-contained and needs nothing installed.
+
+### Verifying
+
+\`\`\`
+shasum -a 256 Omawrite-$TAG-macos-arm64.dmg
+$SHA
+\`\`\`
+
+Built from \`$COMMIT\`, which About names and links to.
+NOTES
+
+# gh resolves a fork's default repo to its parent, so the repository is named
+# explicitly from origin. A release must never land on upstream.
+GH_REPO="$(git remote get-url origin \
+  | sed -e 's|^https://github.com/||' -e 's|^git@github\.com:||' -e 's|\.git$||')"
+
+gh release create "$TAG" \
+  --repo "$GH_REPO" \
+  --title "Omawrite for macOS $VERSION" \
+  --notes-file "$notes" \
+  "$STAGE/Omawrite-$TAG-macos-arm64.dmg" \
+  "$STAGE/omawrite-$TAG-source.zip" \
+  "$STAGE/omawrite-$TAG-source.tar.gz"

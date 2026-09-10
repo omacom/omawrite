@@ -1,0 +1,112 @@
+#!/usr/bin/env python3
+"""Draw the macOS app icon.
+
+macOS does not want a square. Its icons sit on a superellipse -- the
+"squircle" -- inset inside a larger transparent canvas, so that every icon in
+the Dock lines up on the same optical grid. The Linux SVG is a full-bleed
+rounded rectangle, which is right for a themed icon set and wrong here: it
+renders as a slab that overhangs its neighbours.
+"""
+import sys
+from PIL import Image, ImageDraw
+
+CANVAS = 1024
+# Apple's grid: the artwork occupies 824 of 1024, leaving a transparent margin.
+CONTENT = 824
+RADIUS = 185.4          # of the content square, giving Apple's corner curve
+SUPERELLIPSE = 5.0      # continuous corners, rather than a circular arc
+
+TILE = (20, 20, 22)     # near-black, from the Linux icon
+PAPER = (245, 241, 232)
+INK = (16, 16, 16)
+
+SUPERSAMPLE = 4
+
+
+def squircle(size, radius, n):
+    """A rounded square whose corners are a superellipse, as Apple draws them."""
+    mask = Image.new("L", (size, size), 0)
+    draw = ImageDraw.Draw(mask)
+    draw.rectangle([radius, 0, size - radius, size], fill=255)
+    draw.rectangle([0, radius, size, size - radius], fill=255)
+    for corner_x, corner_y, step_x, step_y in (
+        (radius, radius, -1, -1),
+        (size - radius, radius, 1, -1),
+        (radius, size - radius, -1, 1),
+        (size - radius, size - radius, 1, 1),
+    ):
+        points = []
+        steps = 256
+        for i in range(steps + 1):
+            t = i / steps * (3.14159265358979 / 2)
+            # |x|^n + |y|^n = r^n
+            c, s = abs(pow(abs(__import__("math").cos(t)), 2.0 / n)), abs(
+                pow(abs(__import__("math").sin(t)), 2.0 / n))
+            points.append((corner_x + step_x * radius * c,
+                           corner_y + step_y * radius * s))
+        points.append((corner_x, corner_y))
+        draw.polygon(points, fill=255)
+    return mask
+
+
+def render(path):
+    size = CONTENT * SUPERSAMPLE
+    tile = Image.new("RGBA", (size, size), TILE + (255,))
+    draw = ImageDraw.Draw(tile)
+
+    # A page, with the three lines of writing from the Linux icon. Proportions
+    # are kept from that icon so the two read as the same mark.
+    side = int(size * 0.175)
+    top = int(size * 0.135)
+    page = [side, top, size - side, size - top]
+    page_w = page[2] - page[0]
+    page_h = page[3] - page[1]
+    draw.rounded_rectangle(page, radius=int(size * 0.035), fill=PAPER)
+
+    # Line lengths are fractions of the page, not the canvas, or the longest
+    # one runs off the edge of the paper it is written on.
+    inset = int(page_w * 0.12)
+    stroke = max(1, int(page_h * 0.055))
+    for i, width in enumerate((0.76, 0.62, 0.45)):
+        y = page[1] + int((i + 1) * page_h / 4)
+        draw.line([page[0] + inset, y, page[0] + inset + int(page_w * width), y],
+                  fill=INK, width=stroke)
+
+    tile.putalpha(squircle(size, int(RADIUS * SUPERSAMPLE), SUPERELLIPSE))
+    tile = tile.resize((CONTENT, CONTENT), Image.LANCZOS)
+
+    canvas = Image.new("RGBA", (CANVAS, CANVAS), (0, 0, 0, 0))
+    offset = (CANVAS - CONTENT) // 2
+    canvas.paste(tile, (offset, offset), tile)
+    canvas.save(path)
+
+
+def build_icns(destination):
+    """Render every size macOS asks for and pack them into the .icns."""
+    import os, shutil, subprocess, tempfile
+    sizes = [(16, "16x16"), (32, "16x16@2x"), (32, "32x32"), (64, "32x32@2x"),
+             (128, "128x128"), (256, "128x128@2x"), (256, "256x256"),
+             (512, "256x256@2x"), (512, "512x512"), (1024, "512x512@2x")]
+    work = tempfile.mkdtemp()
+    try:
+        iconset = os.path.join(work, "omawrite.iconset")
+        os.makedirs(iconset)
+        master = os.path.join(work, "icon.png")
+        render(master)
+        source = Image.open(master)
+        for px, name in sizes:
+            source.resize((px, px), Image.LANCZOS).save(
+                os.path.join(iconset, f"icon_{name}.png"))
+        subprocess.run(["iconutil", "-c", "icns", iconset, "-o", destination],
+                       check=True)
+    finally:
+        shutil.rmtree(work, ignore_errors=True)
+
+
+if __name__ == "__main__":
+    target = sys.argv[1] if len(sys.argv) > 1 else "pkgbuild/omawrite.icns"
+    if target.endswith(".icns"):
+        build_icns(target)
+    else:
+        render(target)
+    print("wrote", target)

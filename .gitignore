@@ -1,4 +1,5 @@
 /build/
+/build-macos/
 /build-tests/
 /pkg/
 /pkgbuild/pkg/

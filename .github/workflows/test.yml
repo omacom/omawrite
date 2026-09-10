@@ -1,0 +1,57 @@
+name: tests
+
+on:
+  push:
+    branches: [macos, master]
+  pull_request:
+  # Merging upstream is when this fork is most likely to break, so allow a
+  # manual run before pushing a merge.
+  workflow_dispatch:
+
+jobs:
+  macos:
+    name: build and test (macOS, Apple Silicon)
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt 6
+        run: brew install qt
+
+      - name: Build
+        run: ./bin/build
+
+      - name: Test
+        run: ./bin/test
+
+      - name: Package
+        # Proves the bundle still deploys and signs; the DMG is not published.
+        run: ./bin/package-macos-arm64
+
+      - name: Check the bundle depends on nothing outside itself
+        run: |
+          set -eu
+          APP=build-macos/omawrite.app
+          test -x "$APP/Contents/MacOS/omawrite"
+
+          # Dependencies only. A leftover LC_RPATH pointing at Homebrew is
+          # harmless on its own -- what matters is whether anything is actually
+          # loaded through it, which the packaging script's completeness check
+          # already fails on.
+          failed=0
+          while read -r binary; do
+            file "$binary" 2>/dev/null | grep -q Mach-O || continue
+            own=$(otool -D "$binary" 2>/dev/null | tail -1)
+            deps=$(otool -L "$binary" 2>/dev/null | tail -n +2 | awk '{print $1}' \
+                   | grep '/opt/homebrew' | grep -vF "$own" || true)
+            if [ -n "$deps" ]; then
+              echo "$binary depends on Homebrew:" >&2
+              echo "$deps" >&2
+              failed=1
+            fi
+          done <<EOF
+          $(find "$APP" -type f)
+          EOF
+          test "$failed" -eq 0
+
+          codesign --verify --deep --strict "$APP"

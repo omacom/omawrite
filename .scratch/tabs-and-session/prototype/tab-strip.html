@@ -1,0 +1,403 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Omawrite tab strip prototype</title>
+  <!--
+    Three variants of the tab strip, switchable via ?variant=
+    on this throwaway page (not Main.qml). PROTOTYPE — wipe me.
+    A — Top chrome tabs
+    B — Leading document rail
+    C — Title + overflow menu
+  -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Serif:ital,wght@0,400;0,600;1,400&display=swap" rel="stylesheet" />
+  <style>
+    :root {
+      --page: #f4f1ea;
+      --text: #2c2b28;
+      --muted: #aeb1b5;
+      --accent: #c45c26;
+      --footer: #e8e4dc;
+      --line: #ddd8cc;
+    }
+    * { box-sizing: border-box; }
+    html, body { height: 100%; margin: 0; }
+    body {
+      font-family: "IBM Plex Sans", system-ui, sans-serif;
+      background: #1c1b19;
+      color: var(--text);
+    }
+    .app {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      background: var(--page);
+      max-width: 1100px;
+      margin: 0 auto;
+      box-shadow: 0 0 0 1px #0003;
+    }
+    .traffic { display: flex; gap: 6px; padding: 10px 12px; }
+    .traffic i { width: 12px; height: 12px; border-radius: 50%; display: block; background: #d0ccc4; }
+
+    .editor {
+      flex: 1;
+      overflow: auto;
+      padding: 28px 0 48px;
+    }
+    .measure {
+      width: min(65ch, calc(100% - 48px));
+      margin: 0 auto;
+      font-family: "IBM Plex Serif", Georgia, serif;
+      font-size: 20px;
+      line-height: 1.55;
+    }
+    .measure h1 { font-size: 1.4em; font-weight: 600; margin: 0 0 0.8em; }
+    .measure p { margin: 0 0 1em; }
+    .dirty { font-style: italic; color: #5c4a3a; }
+
+    .footer {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 8px 16px;
+      background: var(--footer);
+      color: var(--muted);
+      font-size: 12px;
+      border-top: 1px solid var(--line);
+    }
+
+    /* A — top chrome tabs */
+    .a-tabs {
+      display: flex;
+      align-items: stretch;
+      gap: 2px;
+      padding: 0 8px 0 4px;
+      border-bottom: 1px solid var(--line);
+      overflow-x: auto;
+    }
+    .a-tabs button.tab {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 8px 12px;
+      font: 500 13px/1 "IBM Plex Sans", sans-serif;
+      color: var(--muted);
+      white-space: nowrap;
+      cursor: pointer;
+      border-bottom: 2px solid transparent;
+    }
+    .a-tabs button.tab[aria-current="true"] {
+      color: var(--text);
+      border-bottom-color: var(--accent);
+    }
+    .a-tabs .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--accent); }
+    .a-tabs .x {
+      opacity: 0.35;
+      border: 0;
+      background: none;
+      font-size: 14px;
+      cursor: pointer;
+      color: inherit;
+    }
+    .a-tabs button.tab:hover .x { opacity: 1; }
+
+    /* B — leading rail */
+    .b-shell { display: flex; flex: 1; min-height: 0; }
+    .b-rail {
+      width: 220px;
+      flex-shrink: 0;
+      border-right: 1px solid var(--line);
+      display: flex;
+      flex-direction: column;
+      background: #efebe3;
+    }
+    .b-rail h2 {
+      font-size: 11px;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      color: var(--muted);
+      margin: 16px 16px 8px;
+      font-weight: 600;
+    }
+    .b-rail button.doc {
+      appearance: none;
+      border: 0;
+      background: transparent;
+      text-align: left;
+      padding: 10px 16px;
+      font: 500 14px/1.3 "IBM Plex Sans", sans-serif;
+      color: var(--text);
+      cursor: pointer;
+    }
+    .b-rail button.doc[aria-current="true"] { background: #e4d6c6; }
+    .b-rail button.doc small { display: block; color: var(--muted); font-weight: 400; font-size: 11px; }
+    .b-rail .new {
+      margin-top: auto;
+      padding: 12px 16px;
+      font-size: 13px;
+      color: var(--accent);
+      background: none;
+      border: 0;
+      border-top: 1px solid var(--line);
+      cursor: pointer;
+      text-align: left;
+    }
+
+    /* C — title + overflow */
+    .c-bar {
+      display: flex;
+      align-items: baseline;
+      gap: 12px;
+      padding: 4px 20px 12px;
+      border-bottom: 1px solid var(--line);
+    }
+    .c-bar .title { font-size: 15px; font-weight: 600; }
+    .c-bar .star { color: var(--accent); }
+    .c-bar .menu-wrap { margin-left: auto; position: relative; }
+    .c-bar .menu-btn {
+      appearance: none;
+      border: 1px solid var(--line);
+      background: #fff8;
+      border-radius: 4px;
+      padding: 4px 10px;
+      font: 500 12px/1 "IBM Plex Sans", sans-serif;
+      cursor: pointer;
+    }
+    .c-bar .menu {
+      position: absolute;
+      right: 0;
+      top: 110%;
+      background: var(--page);
+      border: 1px solid var(--line);
+      min-width: 200px;
+      box-shadow: 0 8px 24px #0002;
+      display: none;
+      z-index: 2;
+    }
+    .c-bar .menu.open { display: block; }
+    .c-bar .menu button {
+      display: block;
+      width: 100%;
+      text-align: left;
+      border: 0;
+      background: none;
+      padding: 8px 12px;
+      font: 14px/1.3 "IBM Plex Sans", sans-serif;
+      cursor: pointer;
+    }
+    .c-bar .menu button[aria-current="true"] { font-weight: 600; }
+
+    .switcher {
+      position: fixed;
+      left: 50%;
+      bottom: 18px;
+      transform: translateX(-50%);
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      background: #111;
+      color: #f4f1ea;
+      padding: 8px 12px;
+      border-radius: 999px;
+      box-shadow: 0 8px 30px #0008;
+      z-index: 20;
+      font-size: 13px;
+    }
+    .switcher button {
+      background: #333;
+      color: inherit;
+      border: 0;
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      cursor: pointer;
+    }
+    .state {
+      position: fixed;
+      right: 12px;
+      top: 12px;
+      background: #111c;
+      color: #f4f1ea;
+      font: 11px/1.4 ui-monospace, monospace;
+      padding: 8px 10px;
+      border-radius: 6px;
+      max-width: 240px;
+      z-index: 20;
+    }
+  </style>
+</head>
+<body>
+  <div class="state" id="state"></div>
+  <div class="app" id="app"></div>
+  <div class="switcher" id="switcher">
+    <button type="button" id="prev" aria-label="Previous variant">←</button>
+    <span id="label"></span>
+    <button type="button" id="next" aria-label="Next variant">→</button>
+  </div>
+  <script>
+    const VARIANTS = [
+      { key: "A", name: "Top chrome tabs" },
+      { key: "B", name: "Leading document rail" },
+      { key: "C", name: "Title + overflow menu" },
+    ];
+    const TABS = [
+      { id: "1", title: "notes.md", dirty: false, words: 412, body: "Named, clean. Reloads from disk on session restore." },
+      { id: "2", title: "Untitled", dirty: true, words: 86, body: "Never saved. Session cache keeps this after quit." },
+      { id: "3", title: "draft.md", dirty: true, words: 1204, body: "Named and dirty. Restore comes back dirty." },
+      { id: "4", title: "Untitled 2", dirty: true, words: 12, body: "Second untitled in the session." },
+      { id: "5", title: "readme.md", dirty: false, words: 2200, body: "Another named file, to force overflow." },
+      { id: "6", title: "archive.md", dirty: false, words: 40, body: "Many tabs." },
+    ];
+
+    let activeId = "2";
+    let menuOpen = false;
+
+    function currentVariant() {
+      const v = new URLSearchParams(location.search).get("variant") || "A";
+      return VARIANTS.some((x) => x.key === v) ? v : "A";
+    }
+
+    function setVariant(key) {
+      const u = new URL(location.href);
+      u.searchParams.set("variant", key);
+      history.replaceState(null, "", u);
+      render();
+    }
+
+    function cycle(delta) {
+      const i = VARIANTS.findIndex((x) => x.key === currentVariant());
+      const next = VARIANTS[(i + delta + VARIANTS.length) % VARIANTS.length];
+      setVariant(next.key);
+    }
+
+    function activeTab() {
+      return TABS.find((t) => t.id === activeId) || TABS[0];
+    }
+
+    function selectTab(id) {
+      activeId = id;
+      menuOpen = false;
+      render();
+    }
+
+    function closeTab(id, ev) {
+      if (ev) ev.stopPropagation();
+      const idx = TABS.findIndex((t) => t.id === id);
+      TABS.splice(idx, 1);
+      if (!TABS.length) {
+        activeId = null;
+      } else if (activeId === id) {
+        activeId = TABS[Math.max(0, idx - 1)].id;
+      }
+      render();
+    }
+
+    function editorHtml() {
+      const t = activeTab();
+      if (!t) {
+        return `<div class="editor"><div class="measure"><p>Last tab closed — window would close.</p></div></div>`;
+      }
+      return `<div class="editor"><div class="measure">
+        <h1>${t.title}</h1>
+        <p>${t.body}</p>
+        <p class="${t.dirty ? "dirty" : ""}">${t.dirty ? "Unsaved work." : "Matches the file on disk."}</p>
+      </div></div>`;
+    }
+
+    function footerHtml() {
+      const t = activeTab();
+      return `<div class="footer"><span>Save</span><span>${t ? t.words + " words" : ""}</span></div>`;
+    }
+
+    function variantA() {
+      const tabs = TABS.map((t) => `
+        <button class="tab" type="button"${t.id === activeId ? ' aria-current="true"' : ""} data-id="${t.id}">
+          ${t.dirty ? `<span class="dot" title="Unsaved work"></span>` : ""}
+          <span>${t.title}</span>
+          <span class="x" data-close="${t.id}" aria-label="Close">×</span>
+        </button>`).join("");
+      return `<div class="traffic"><i></i><i></i><i></i></div>
+        <div class="a-tabs">${tabs}</div>
+        ${editorHtml()}${footerHtml()}`;
+    }
+
+    function variantB() {
+      const list = TABS.map((t) => `
+        <button class="doc" type="button"${t.id === activeId ? ' aria-current="true"' : ""} data-id="${t.id}">
+          ${t.dirty ? "• " : ""}${t.title}
+          <small>${t.words} words</small>
+        </button>`).join("");
+      return `<div class="traffic"><i></i><i></i><i></i></div>
+        <div class="b-shell">
+          <nav class="b-rail">
+            <h2>Documents</h2>
+            ${list}
+            <button class="new" type="button">New tab</button>
+          </nav>
+          <div style="flex:1;display:flex;flex-direction:column;min-width:0">
+            ${editorHtml()}${footerHtml()}
+          </div>
+        </div>`;
+    }
+
+    function variantC() {
+      const t = activeTab();
+      const items = TABS.map((x) => `
+        <button type="button"${x.id === activeId ? ' aria-current="true"' : ""} data-id="${x.id}">
+          ${x.dirty ? "• " : ""}${x.title}
+        </button>`).join("");
+      return `<div class="traffic"><i></i><i></i><i></i></div>
+        <div class="c-bar">
+          <span class="title">${t ? t.title : ""}</span>
+          ${t && t.dirty ? `<span class="star">*</span>` : ""}
+          <div class="menu-wrap">
+            <button class="menu-btn" type="button" data-menu>${TABS.length} documents</button>
+            <div class="menu ${menuOpen ? "open" : ""}">${items}
+              <button type="button" data-close="${t ? t.id : ""}">Close current</button>
+            </div>
+          </div>
+        </div>
+        ${editorHtml()}${footerHtml()}`;
+    }
+
+    function render() {
+      const key = currentVariant();
+      const meta = VARIANTS.find((x) => x.key === key);
+      document.getElementById("label").textContent = key + " — " + meta.name;
+      const app = document.getElementById("app");
+      if (key === "A") app.innerHTML = variantA();
+      else if (key === "B") app.innerHTML = variantB();
+      else app.innerHTML = variantC();
+
+      const t = activeTab();
+      document.getElementById("state").textContent =
+        JSON.stringify({ variant: key, active: t && t.title, tabs: TABS.map((x) => x.title), dirty: TABS.filter((x) => x.dirty).map((x) => x.title) }, null, 2);
+
+      app.querySelectorAll("[data-id]").forEach((el) => {
+        el.addEventListener("click", () => selectTab(el.getAttribute("data-id")));
+      });
+      app.querySelectorAll("[data-close]").forEach((el) => {
+        el.addEventListener("click", (e) => closeTab(el.getAttribute("data-close"), e));
+      });
+      const menuBtn = app.querySelector("[data-menu]");
+      if (menuBtn) menuBtn.addEventListener("click", () => { menuOpen = !menuOpen; render(); });
+    }
+
+    document.getElementById("prev").onclick = () => cycle(-1);
+    document.getElementById("next").onclick = () => cycle(1);
+    document.addEventListener("keydown", (e) => {
+      const tag = document.activeElement && document.activeElement.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+      if (e.key === "ArrowLeft") cycle(-1);
+      if (e.key === "ArrowRight") cycle(1);
+    });
+    render();
+  </script>
+</body>
+</html>

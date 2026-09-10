@@ -6,12 +6,32 @@ BUILD_DIR="$ROOT/build-tests"
 
 if command -v qmake6 >/dev/null 2>&1; then
   QMAKE=qmake6
-else
+elif command -v qmake >/dev/null 2>&1; then
   QMAKE=qmake
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qt)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qt)/bin/qmake"
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qtbase)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qtbase)/bin/qmake"
+else
+  echo "qmake6 or qmake is required to test omawrite." >&2
+  exit 1
 fi
 
 mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/tests/tests.pro"
-make -j"$(nproc 2>/dev/null || echo 1)"
+
+# The version and commit reach the binary as -D flags, and make does not track
+# those, so a bumped version.pri or a new commit would otherwise be tested
+# against a stale object file. The dirty marker is deliberately not part of the
+# stamp: it changes on every edit and nothing asserts on it.
+STAMP="$BUILD_DIR/.buildflags"
+WANT="$(grep '^VERSION' "$ROOT/version.pri")|$(git -C "$ROOT" rev-parse --short HEAD 2>/dev/null || echo unknown)"
+if [ ! -f "$STAMP" ] || [ "$(cat "$STAMP")" != "$WANT" ]; then
+  make clean >/dev/null 2>&1 || true
+fi
+
+make -j"$(nproc 2>/dev/null || sysctl -n hw.logicalcpu 2>/dev/null || echo 1)"
+printf '%s' "$WANT" > "$STAMP"
+
 QT_QPA_PLATFORM=offscreen ./tst_omawrite

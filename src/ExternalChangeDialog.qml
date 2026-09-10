@@ -5,7 +5,12 @@ Dialog {
     id: root
 
     property bool deleted: false
+    // A file turned up on a path this document took while it was empty and
+    // never read. Unlike the other two cases there is no copy of this text on
+    // disk, so Reload is the destructive answer here, not the safe one.
+    property bool appeared: false
     property bool locallyModified: false
+    readonly property bool keepIsSafer: deleted || appeared
     property bool darkMode: true
     property color textColor: darkMode ? "#d0d0d0" : "#42464c"
     property color strongTextColor: darkMode ? "#eeeeee" : "#222324"
@@ -25,7 +30,7 @@ Dialog {
     y: Math.round((containerHeight - height) / 2)
     padding: 20
 
-    onOpened: (deleted ? keepButton : reloadButton).forceActiveFocus()
+    onOpened: (keepIsSafer ? keepButton : reloadButton).forceActiveFocus()
 
     background: Rectangle {
         color: root.darkMode ? "#1a1a1a" : "#ffffff"
@@ -37,7 +42,10 @@ Dialog {
         spacing: 12
 
         Label {
-            text: root.deleted ? "File removed" : "File changed"
+            objectName: "externalChangeHeading"
+            text: root.deleted
+                ? "File removed"
+                : (root.appeared ? "File appeared" : "File changed")
             color: root.strongTextColor
             font.family: "iA Writer Mono S"
             font.pixelSize: Math.round(16 * root.textScale)
@@ -45,12 +53,15 @@ Dialog {
         }
 
         Label {
+            objectName: "externalChangeMessage"
             width: parent.width
             text: root.deleted
                 ? "This file was removed outside Omawrite. Keep your text as an unsaved document?"
-                : (root.locallyModified
-                   ? "This file changed outside Omawrite. Reloading will discard your changes."
-                   : "This file changed outside Omawrite.")
+                : (root.appeared
+                   ? "Something else created this file after Omawrite took the name. None of your text has been written yet, so reloading will discard everything you have typed."
+                   : (root.locallyModified
+                      ? "This file changed outside Omawrite. Reloading will discard your changes."
+                      : "This file changed outside Omawrite."))
             color: root.textColor
             wrapMode: Text.Wrap
             font.family: "iA Writer Mono S"
@@ -70,11 +81,12 @@ Dialog {
 
             SquareDialogButton {
                 id: keepButton
+                objectName: "keepMineButton"
                 text: "Keep Mine"
                 darkMode: root.darkMode
                 textScale: root.textScale
-                labelColor: root.deleted ? "#ffffff" : root.textColor
-                primary: root.deleted
+                labelColor: root.keepIsSafer ? "#ffffff" : root.textColor
+                primary: root.keepIsSafer
                 activeColor: root.activeButtonColor
                 KeyNavigation.left: reloadButton
                 KeyNavigation.right: reloadButton
@@ -88,9 +100,10 @@ Dialog {
 
             SquareDialogButton {
                 id: reloadButton
+                objectName: "reloadButton"
                 text: "Reload"
                 enabled: !root.deleted
-                primary: true
+                primary: !root.keepIsSafer
                 darkMode: root.darkMode
                 textScale: root.textScale
                 activeColor: root.activeButtonColor
