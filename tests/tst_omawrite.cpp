@@ -9,6 +9,7 @@
 #include "buffersession.h"
 #include "markdownhighlighter.h"
 #include "workspacesession.h"
+#include "windowmanager.h"
 
 class OmawriteTest : public QObject {
     Q_OBJECT
@@ -242,6 +243,26 @@ private slots:
         QCOMPARE(backend.buffers().size(), 1);
         QCOMPARE(backend.activeBufferId(), firstTab);
         QCOMPARE(backend.activeBufferText(), QStringLiteral("first"));
+    }
+
+    void windowManagerCreatesIndependentWritingWindows() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        WorkspaceSession session(stateDirectory.path());
+        QQmlEngine engine;
+        WindowManager manager(&session, &engine, QUrl::fromLocalFile(mainQmlPath));
+
+        Backend *first = manager.createWindow();
+        Backend *second = manager.createWindow();
+
+        QVERIFY(first);
+        QVERIFY(second);
+        QVERIFY(first != second);
+        QCOMPARE(manager.windowCount(), 2);
+        QCOMPARE(session.windows().size(), 2);
     }
 
     void preservesBufferTextWhenUpdatingCaret() {
