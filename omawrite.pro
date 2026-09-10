@@ -6,6 +6,7 @@ TEMPLATE = app
 
 HEADERS += \
     src/buffersession.h \
+    src/workspacesession.h \
     src/backend.h \
     src/markdownhighlighter.h \
     src/systemtheme.h
@@ -13,6 +14,7 @@ HEADERS += \
 SOURCES += \
     src/main.cpp \
     src/buffersession.cpp \
+    src/workspacesession.cpp \
     src/backend.cpp \
     src/markdownhighlighter.cpp \
     src/systemtheme.cpp

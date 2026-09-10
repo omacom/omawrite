@@ -8,6 +8,7 @@
 #include "backend.h"
 #include "buffersession.h"
 #include "markdownhighlighter.h"
+#include "workspacesession.h"
 
 class OmawriteTest : public QObject {
     Q_OBJECT
@@ -105,6 +106,110 @@ private slots:
         QCOMPARE(restored.buffers().at(0).toMap().value(QStringLiteral("selectionEnd")), 2);
         QCOMPARE(restored.buffers().at(1).toMap().value(QStringLiteral("text")),
                  QStringLiteral("second"));
+    }
+
+    void restoresWorkspaceWindowsAndActiveCarets() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        WorkspaceSession session(stateDirectory.path());
+        const QString firstWindow = session.createWindow(10, 20, 900, 700, false);
+        const QString firstTab = session.createTab(firstWindow, QUrl(), QStringLiteral("first"),
+                                                   2, 1, 2, true);
+        const QString secondTab = session.createTab(firstWindow, QUrl(), QStringLiteral("second"),
+                                                    4, 4, 4, true);
+        QVERIFY(session.setActiveTab(firstWindow, firstTab));
+
+        const QString secondWindow = session.createWindow(30, 40, 800, 600, true);
+        const QString thirdTab = session.createTab(secondWindow, QUrl(), QStringLiteral("third"),
+                                                   3, 0, 3, false);
+        QVERIFY(session.setActiveTab(secondWindow, thirdTab));
+        QVERIFY(session.saveNow());
+
+        WorkspaceSession restored(stateDirectory.path());
+        QVERIFY(restored.restore());
+        const QVariantList windows = restored.windows();
+        QCOMPARE(windows.size(), 2);
+
+        const QVariantMap first = windows.at(0).toMap();
+        QCOMPARE(first.value(QStringLiteral("x")).toInt(), 10);
+        QCOMPARE(first.value(QStringLiteral("activeTabId")).toString(), firstTab);
+        const QVariantList firstTabs = first.value(QStringLiteral("tabs")).toList();
+        QCOMPARE(firstTabs.size(), 2);
+        QCOMPARE(firstTabs.at(0).toMap().value(QStringLiteral("text")).toString(),
+                 QStringLiteral("first"));
+        QCOMPARE(firstTabs.at(0).toMap().value(QStringLiteral("cursorPosition")).toInt(), 2);
+        QCOMPARE(firstTabs.at(1).toMap().value(QStringLiteral("id")).toString(), secondTab);
+
+        const QVariantMap second = windows.at(1).toMap();
+        QCOMPARE(second.value(QStringLiteral("maximized")).toBool(), true);
+        QCOMPARE(second.value(QStringLiteral("activeTabId")).toString(), thirdTab);
+    }
+
+    void keepsLocalFilesUniqueAndMovesTheActiveTab() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        WorkspaceSession session(stateDirectory.path());
+        const QString firstWindow = session.createWindow(0, 0, 900, 700, false);
+        const QString firstTab = session.createTab(firstWindow,
+                                                   QUrl::fromLocalFile(QStringLiteral("/tmp/one.md")),
+                                                   QStringLiteral("one"), 0, 0, 0, false);
+        const QString secondTab = session.createTab(firstWindow, QUrl(), QStringLiteral("two"),
+                                                    0, 0, 0, false);
+        const QString secondWindow = session.createWindow(0, 0, 800, 600, false);
+
+        QCOMPARE(session.findOpenLocalFile(QUrl::fromLocalFile(QStringLiteral("/tmp/one.md"))),
+                 firstTab);
+        QVERIFY(session.createTab(secondWindow,
+                                  QUrl::fromLocalFile(QStringLiteral("/tmp/one.md")),
+                                  QStringLiteral("other copy"), 0, 0, 0, false).isEmpty());
+
+        QVERIFY(session.moveActiveTab(firstWindow, -1));
+        const QVariantList tabs = session.windows().constFirst().toMap()
+            .value(QStringLiteral("tabs")).toList();
+        QCOMPARE(tabs.at(0).toMap().value(QStringLiteral("id")).toString(), secondTab);
+        QCOMPARE(session.windows().constFirst().toMap()
+                     .value(QStringLiteral("activeTabId")).toString(), secondTab);
+    }
+
+    void rejectsWorkspaceSnapshotsWithDuplicateLocalFiles() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        const QJsonObject tab{{QStringLiteral("id"), QStringLiteral("first-tab")},
+                              {QStringLiteral("fileUrl"),
+                               QUrl::fromLocalFile(QStringLiteral("/tmp/note.md")).toString()},
+                              {QStringLiteral("text"), QStringLiteral("text")},
+                              {QStringLiteral("cursorPosition"), 0},
+                              {QStringLiteral("selectionStart"), 0},
+                              {QStringLiteral("selectionEnd"), 0},
+                              {QStringLiteral("modified"), false}};
+        const QJsonObject duplicateTab{{QStringLiteral("id"), QStringLiteral("second-tab")},
+                                       {QStringLiteral("fileUrl"),
+                                        QUrl::fromLocalFile(QStringLiteral("/tmp/note.md")).toString()},
+                                       {QStringLiteral("text"), QStringLiteral("text")},
+                                       {QStringLiteral("cursorPosition"), 0},
+                                       {QStringLiteral("selectionStart"), 0},
+                                       {QStringLiteral("selectionEnd"), 0},
+                                       {QStringLiteral("modified"), false}};
+        const QJsonObject window{{QStringLiteral("id"), QStringLiteral("window")},
+                                 {QStringLiteral("x"), 0},
+                                 {QStringLiteral("y"), 0},
+                                 {QStringLiteral("width"), 900},
+                                 {QStringLiteral("height"), 700},
+                                 {QStringLiteral("maximized"), false},
+                                 {QStringLiteral("activeTabId"), QStringLiteral("first-tab")},
+                                 {QStringLiteral("tabs"), QJsonArray{tab, duplicateTab}}};
+        QFile file(stateDirectory.filePath(QStringLiteral("session.json")));
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        file.write(QJsonDocument(QJsonObject{{QStringLiteral("version"), 1},
+                                              {QStringLiteral("windows"), QJsonArray{window}}})
+                       .toJson(QJsonDocument::Compact));
+        file.close();
+
+        WorkspaceSession session(stateDirectory.path());
+        QVERIFY(!session.restore());
     }
 
     void preservesBufferTextWhenUpdatingCaret() {

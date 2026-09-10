@@ -7,10 +7,12 @@ INCLUDEPATH += ../src
 SOURCES += \
     tst_omawrite.cpp \
     ../src/buffersession.cpp \
+    ../src/workspacesession.cpp \
     ../src/backend.cpp \
     ../src/markdownhighlighter.cpp
 HEADERS += \
     ../src/buffersession.h \
+    ../src/workspacesession.h \
     ../src/backend.h \
     ../src/markdownhighlighter.h
 
