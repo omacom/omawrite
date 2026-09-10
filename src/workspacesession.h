@@ -15,6 +15,7 @@ public:
     QString findOpenLocalFile(const QUrl &fileUrl) const;
     bool setActiveTab(const QString &windowId, const QString &tabId);
     bool moveActiveTab(const QString &windowId, int direction);
+    bool removeTab(const QString &windowId, const QString &tabId);
     bool restore();
     bool saveNow() const;
 

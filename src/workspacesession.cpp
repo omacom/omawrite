@@ -214,6 +214,33 @@ bool WorkspaceSession::moveActiveTab(const QString &windowId, int direction) {
     return false;
 }
 
+bool WorkspaceSession::removeTab(const QString &windowId, const QString &tabId) {
+    for (QVariant &value : m_windows) {
+        QVariantMap window = value.toMap();
+        if (window.value(QStringLiteral("id")).toString() != windowId)
+            continue;
+
+        QVariantList tabs = window.value(QStringLiteral("tabs")).toList();
+        for (int index = 0; index < tabs.size(); ++index) {
+            if (tabs.at(index).toMap().value(QStringLiteral("id")).toString() != tabId)
+                continue;
+
+            tabs.removeAt(index);
+            window.insert(QStringLiteral("tabs"), tabs);
+            if (window.value(QStringLiteral("activeTabId")).toString() == tabId) {
+                window.insert(QStringLiteral("activeTabId"), tabs.isEmpty()
+                              ? QString()
+                              : tabs.at(qMin(index, tabs.size() - 1)).toMap()
+                                    .value(QStringLiteral("id")).toString());
+            }
+            value = window;
+            return true;
+        }
+        return false;
+    }
+    return false;
+}
+
 bool WorkspaceSession::restore() {
     QFile file(sessionPath());
     if (!file.open(QIODevice::ReadOnly))

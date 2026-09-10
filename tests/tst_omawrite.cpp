@@ -212,6 +212,21 @@ private slots:
         QVERIFY(!session.restore());
     }
 
+    void removesTheLastTabWithoutCreatingAReplacement() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        WorkspaceSession session(stateDirectory.path());
+        const QString window = session.createWindow(0, 0, 900, 700, false);
+        const QString tab = session.createTab(window, QUrl(), QStringLiteral("draft"),
+                                              0, 0, 0, true);
+
+        QVERIFY(session.removeTab(window, tab));
+        const QVariantMap restoredWindow = session.windows().constFirst().toMap();
+        QVERIFY(restoredWindow.value(QStringLiteral("tabs")).toList().isEmpty());
+        QVERIFY(restoredWindow.value(QStringLiteral("activeTabId")).toString().isEmpty());
+    }
+
     void preservesBufferTextWhenUpdatingCaret() {
         QTemporaryDir stateDirectory;
         QVERIFY(stateDirectory.isValid());
