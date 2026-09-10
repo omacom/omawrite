@@ -18,6 +18,7 @@ public:
     ~WindowManager() override;
 
     Backend *createWindow();
+    int restoreWindows();
     int windowCount() const;
 
 private:
@@ -26,6 +27,8 @@ private:
         QQmlContext *context;
         QObject *root;
     };
+
+    Backend *createWindow(const QString &windowId);
 
     WorkspaceSession *m_workspaceSession;
     QQmlEngine *m_engine;

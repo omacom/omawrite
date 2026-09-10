@@ -26,6 +26,28 @@ Backend *WindowManager::createWindow() {
 
     const QString windowId = m_workspaceSession->createWindow(-1, -1, 1280, 820, false);
     m_workspaceSession->createTab(windowId, QUrl(), QString(), 0, 0, 0, false);
+    Backend *backend = createWindow(windowId);
+    if (!backend)
+        return nullptr;
+
+    m_workspaceSession->saveNow();
+    return backend;
+}
+
+int WindowManager::restoreWindows() {
+    if (!m_workspaceSession || !m_engine)
+        return 0;
+
+    for (const QVariant &value : m_workspaceSession->windows()) {
+        if (!createWindow(value.toMap().value(QStringLiteral("id")).toString()))
+            return 0;
+    }
+    return m_windows.size();
+}
+
+Backend *WindowManager::createWindow(const QString &windowId) {
+    if (windowId.isEmpty())
+        return nullptr;
 
     auto *backend = new Backend(m_workspaceSession, windowId);
     auto *context = new QQmlContext(m_engine->rootContext());
@@ -39,7 +61,6 @@ Backend *WindowManager::createWindow() {
     }
     backend->setParentWindow(qobject_cast<QWindow *>(window));
     m_windows.append({backend, context, window});
-    m_workspaceSession->saveNow();
     return backend;
 }
 

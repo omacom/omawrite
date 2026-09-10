@@ -111,6 +111,15 @@ QVariantList WorkspaceSession::windows() const {
     return m_windows;
 }
 
+QVariantMap WorkspaceSession::window(const QString &windowId) const {
+    for (const QVariant &value : m_windows) {
+        const QVariantMap window = value.toMap();
+        if (window.value(QStringLiteral("id")).toString() == windowId)
+            return window;
+    }
+    return {};
+}
+
 QVariantList WorkspaceSession::tabs(const QString &windowId) const {
     for (const QVariant &value : m_windows) {
         const QVariantMap window = value.toMap();
@@ -174,6 +183,10 @@ bool WorkspaceSession::updateTab(const QString &windowId, const QString &tabId,
                                  const QUrl &fileUrl, const QString &text,
                                  int cursorPosition, int selectionStart,
                                  int selectionEnd, bool modified) {
+    const QString openTabId = findOpenLocalFile(fileUrl);
+    if (!openTabId.isEmpty() && openTabId != tabId)
+        return false;
+
     for (QVariant &windowValue : m_windows) {
         QVariantMap window = windowValue.toMap();
         if (window.value(QStringLiteral("id")).toString() != windowId)
@@ -210,6 +223,17 @@ QString WorkspaceSession::findOpenLocalFile(const QUrl &fileUrl) const {
             if (openUrl.isLocalFile()
                     && QFileInfo(openUrl.toLocalFile()).absoluteFilePath() == targetPath)
                 return tabValue.toMap().value(QStringLiteral("id")).toString();
+        }
+    }
+    return {};
+}
+
+QString WorkspaceSession::windowIdForTab(const QString &tabId) const {
+    for (const QVariant &windowValue : m_windows) {
+        const QVariantMap window = windowValue.toMap();
+        for (const QVariant &tabValue : window.value(QStringLiteral("tabs")).toList()) {
+            if (tabValue.toMap().value(QStringLiteral("id")).toString() == tabId)
+                return window.value(QStringLiteral("id")).toString();
         }
     }
     return {};
@@ -284,6 +308,23 @@ bool WorkspaceSession::removeTab(const QString &windowId, const QString &tabId) 
             return true;
         }
         return false;
+    }
+    return false;
+}
+
+bool WorkspaceSession::updateWindowGeometry(const QString &windowId, int x, int y, int width,
+                                            int height, bool maximized) {
+    for (QVariant &value : m_windows) {
+        QVariantMap window = value.toMap();
+        if (window.value(QStringLiteral("id")).toString() != windowId)
+            continue;
+        window.insert(QStringLiteral("x"), x);
+        window.insert(QStringLiteral("y"), y);
+        window.insert(QStringLiteral("width"), width);
+        window.insert(QStringLiteral("height"), height);
+        window.insert(QStringLiteral("maximized"), maximized);
+        value = window;
+        return true;
     }
     return false;
 }

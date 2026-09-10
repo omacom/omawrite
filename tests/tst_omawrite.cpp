@@ -165,6 +165,10 @@ private slots:
         QVERIFY(session.createTab(secondWindow,
                                   QUrl::fromLocalFile(QStringLiteral("/tmp/one.md")),
                                   QStringLiteral("other copy"), 0, 0, 0, false).isEmpty());
+        QVERIFY(!session.updateTab(secondWindow, secondTab,
+                                   QUrl::fromLocalFile(QStringLiteral("/tmp/one.md")),
+                                   QStringLiteral("other copy"), 0, 0, 0, false));
+        QCOMPARE(session.windowIdForTab(firstTab), firstWindow);
 
         QVERIFY(session.moveActiveTab(firstWindow, -1));
         const QVariantList tabs = session.windows().constFirst().toMap()
@@ -228,6 +232,23 @@ private slots:
         QVERIFY(restoredWindow.value(QStringLiteral("activeTabId")).toString().isEmpty());
     }
 
+    void savesWorkspaceWindowGeometry() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        WorkspaceSession session(stateDirectory.path());
+        const QString windowId = session.createWindow(10, 20, 900, 700, false);
+        session.createTab(windowId, QUrl(), QString(), 0, 0, 0, false);
+
+        QVERIFY(session.updateWindowGeometry(windowId, 30, 40, 1200, 800, true));
+        const QVariantMap window = session.window(windowId);
+        QCOMPARE(window.value(QStringLiteral("x")).toInt(), 30);
+        QCOMPARE(window.value(QStringLiteral("y")).toInt(), 40);
+        QCOMPARE(window.value(QStringLiteral("width")).toInt(), 1200);
+        QCOMPARE(window.value(QStringLiteral("height")).toInt(), 800);
+        QVERIFY(window.value(QStringLiteral("maximized")).toBool());
+    }
+
     void backendReadsTabsFromItsWorkspaceWindow() {
         QTemporaryDir stateDirectory;
         QVERIFY(stateDirectory.isValid());
@@ -263,6 +284,25 @@ private slots:
         QVERIFY(first != second);
         QCOMPARE(manager.windowCount(), 2);
         QCOMPARE(session.windows().size(), 2);
+    }
+
+    void windowManagerRestoresWritingWindows() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        WorkspaceSession session(stateDirectory.path());
+        const QString firstWindow = session.createWindow(10, 20, 900, 700, false);
+        session.createTab(firstWindow, QUrl(), QStringLiteral("first"), 0, 0, 0, true);
+        const QString secondWindow = session.createWindow(30, 40, 1200, 800, true);
+        session.createTab(secondWindow, QUrl(), QStringLiteral("second"), 0, 0, 0, true);
+
+        QQmlEngine engine;
+        WindowManager manager(&session, &engine, QUrl::fromLocalFile(mainQmlPath));
+
+        QCOMPARE(manager.restoreWindows(), 2);
+        QCOMPARE(manager.windowCount(), 2);
     }
 
     void preservesBufferTextWhenUpdatingCaret() {
