@@ -159,9 +159,30 @@ Backend::Backend(const QString &stateDirectory, QObject *parent)
     });
 }
 
+Backend::Backend(WorkspaceSession *workspaceSession, const QString &windowId, QObject *parent)
+    : QObject(parent), m_bufferSession(QString()), m_workspaceSession(workspaceSession),
+      m_workspaceWindowId(windowId) {
+    for (const QVariant &value : buffers()) {
+        const QVariantMap buffer = value.toMap();
+        if (buffer.value(QStringLiteral("id")).toString() != activeBufferId())
+            continue;
+        m_activeBufferText = buffer.value(QStringLiteral("text")).toString();
+        m_cursorPosition = buffer.value(QStringLiteral("cursorPosition")).toInt();
+        m_selectionStart = buffer.value(QStringLiteral("selectionStart")).toInt();
+        m_selectionEnd = buffer.value(QStringLiteral("selectionEnd")).toInt();
+        m_fileUrl = QUrl(buffer.value(QStringLiteral("fileUrl")).toString());
+        m_modified = buffer.value(QStringLiteral("modified")).toBool();
+        break;
+    }
+    loadOmarchyTheme();
+    watchOmarchyTheme();
+}
+
 QString Backend::newBuffer() {
     persistActiveBuffer();
-    const QString id = m_bufferSession.createBuffer();
+    const QString id = m_workspaceSession
+        ? m_workspaceSession->createTab(m_workspaceWindowId, QUrl(), QString(), 0, 0, 0, false)
+        : m_bufferSession.createBuffer();
     loadActiveBuffer();
     emit buffersChanged();
     emit activeBufferChanged();
@@ -170,7 +191,8 @@ QString Backend::newBuffer() {
 
 bool Backend::selectBuffer(const QString &id) {
     persistActiveBuffer();
-    if (!m_bufferSession.selectBuffer(id))
+    if (m_workspaceSession ? !m_workspaceSession->setActiveTab(m_workspaceWindowId, id)
+                           : !m_bufferSession.selectBuffer(id))
         return false;
     loadActiveBuffer();
     emit activeBufferChanged();
@@ -187,10 +209,14 @@ bool Backend::closeActiveBuffer() {
 }
 
 bool Backend::discardActiveBuffer() {
-    if (!m_bufferSession.closeBuffer(m_bufferSession.activeBufferId()))
+    if (m_workspaceSession ? !m_workspaceSession->removeTab(m_workspaceWindowId, activeBufferId())
+                           : !m_bufferSession.closeBuffer(m_bufferSession.activeBufferId()))
         return false;
     loadActiveBuffer();
-    m_bufferSession.saveNow();
+    if (m_workspaceSession)
+        m_workspaceSession->saveNow();
+    else
+        m_bufferSession.saveNow();
     emit buffersChanged();
     emit activeBufferChanged();
     return true;
@@ -213,9 +239,7 @@ void Backend::updateActiveEditorState(int cursorPosition, int selectionStart, in
     m_cursorPosition = cursorPosition;
     m_selectionStart = selectionStart;
     m_selectionEnd = selectionEnd;
-    m_bufferSession.updateBufferCursor(m_bufferSession.activeBufferId(), cursorPosition,
-                                       selectionStart, selectionEnd);
-    m_bufferSession.saveNow();
+    persistActiveBuffer();
 }
 
 void Backend::finishActiveBufferRestore() {
@@ -609,9 +633,9 @@ void Backend::loadDocumentText(const QString &text) {
 }
 
 void Backend::loadActiveBuffer() {
-    for (const QVariant &value : m_bufferSession.buffers()) {
+    for (const QVariant &value : buffers()) {
         const QVariantMap buffer = value.toMap();
-        if (buffer.value(QStringLiteral("id")).toString() != m_bufferSession.activeBufferId())
+        if (buffer.value(QStringLiteral("id")).toString() != activeBufferId())
             continue;
         m_cursorPosition = buffer.value(QStringLiteral("cursorPosition")).toInt();
         m_selectionStart = buffer.value(QStringLiteral("selectionStart")).toInt();
@@ -627,13 +651,20 @@ void Backend::loadActiveBuffer() {
 }
 
 void Backend::persistActiveBuffer() {
-    if (m_bufferSession.activeBufferId().isEmpty())
+    if (activeBufferId().isEmpty())
         return;
     m_activeBufferText = currentDocumentText();
-    m_bufferSession.updateBuffer(m_bufferSession.activeBufferId(), m_fileUrl.toString(),
-                                 m_activeBufferText, m_cursorPosition, m_selectionStart,
-                                 m_selectionEnd, m_modified);
-    m_bufferSession.saveNow();
+    if (m_workspaceSession) {
+        m_workspaceSession->updateTab(m_workspaceWindowId, activeBufferId(), m_fileUrl,
+                                      m_activeBufferText, m_cursorPosition, m_selectionStart,
+                                      m_selectionEnd, m_modified);
+        m_workspaceSession->saveNow();
+    } else {
+        m_bufferSession.updateBuffer(m_bufferSession.activeBufferId(), m_fileUrl.toString(),
+                                     m_activeBufferText, m_cursorPosition, m_selectionStart,
+                                     m_selectionEnd, m_modified);
+        m_bufferSession.saveNow();
+    }
     emit buffersChanged();
 }
 

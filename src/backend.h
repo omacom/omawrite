@@ -12,6 +12,7 @@
 #include <memory>
 
 #include "buffersession.h"
+#include "workspacesession.h"
 
 class MarkdownHighlighter;
 class QTextDocument;
@@ -44,13 +45,17 @@ class Backend : public QObject {
 public:
     explicit Backend(QObject *parent = nullptr);
     Backend(const QString &stateDirectory, QObject *parent = nullptr);
+    Backend(WorkspaceSession *workspaceSession, const QString &windowId,
+            QObject *parent = nullptr);
     ~Backend() override;
 
     void setParentWindow(QWindow *window);
 
     QUrl fileUrl() const { return m_fileUrl; }
-    QVariantList buffers() const { return m_bufferSession.buffers(); }
-    QString activeBufferId() const { return m_bufferSession.activeBufferId(); }
+    QVariantList buffers() const { return m_workspaceSession
+            ? m_workspaceSession->tabs(m_workspaceWindowId) : m_bufferSession.buffers(); }
+    QString activeBufferId() const { return m_workspaceSession
+            ? m_workspaceSession->activeTabId(m_workspaceWindowId) : m_bufferSession.activeBufferId(); }
     int activeCursorPosition() const { return m_cursorPosition; }
     int activeSelectionStart() const { return m_selectionStart; }
     int activeSelectionEnd() const { return m_selectionEnd; }
@@ -170,6 +175,8 @@ private:
     QTimer m_recoveryTimer;
     QFileSystemWatcher m_fileWatcher;
     BufferSession m_bufferSession;
+    WorkspaceSession *m_workspaceSession = nullptr;
+    QString m_workspaceWindowId;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;

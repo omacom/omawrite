@@ -111,6 +111,24 @@ QVariantList WorkspaceSession::windows() const {
     return m_windows;
 }
 
+QVariantList WorkspaceSession::tabs(const QString &windowId) const {
+    for (const QVariant &value : m_windows) {
+        const QVariantMap window = value.toMap();
+        if (window.value(QStringLiteral("id")).toString() == windowId)
+            return window.value(QStringLiteral("tabs")).toList();
+    }
+    return {};
+}
+
+QString WorkspaceSession::activeTabId(const QString &windowId) const {
+    for (const QVariant &value : m_windows) {
+        const QVariantMap window = value.toMap();
+        if (window.value(QStringLiteral("id")).toString() == windowId)
+            return window.value(QStringLiteral("activeTabId")).toString();
+    }
+    return {};
+}
+
 QString WorkspaceSession::createWindow(int x, int y, int width, int height, bool maximized) {
     const QString id = QUuid::createUuid().toString(QUuid::WithoutBraces);
     m_windows.append(QVariantMap{{QStringLiteral("id"), id},
@@ -150,6 +168,35 @@ QString WorkspaceSession::createTab(const QString &windowId, const QUrl &fileUrl
         return id;
     }
     return {};
+}
+
+bool WorkspaceSession::updateTab(const QString &windowId, const QString &tabId,
+                                 const QUrl &fileUrl, const QString &text,
+                                 int cursorPosition, int selectionStart,
+                                 int selectionEnd, bool modified) {
+    for (QVariant &windowValue : m_windows) {
+        QVariantMap window = windowValue.toMap();
+        if (window.value(QStringLiteral("id")).toString() != windowId)
+            continue;
+        QVariantList tabs = window.value(QStringLiteral("tabs")).toList();
+        for (QVariant &tabValue : tabs) {
+            QVariantMap tab = tabValue.toMap();
+            if (tab.value(QStringLiteral("id")).toString() != tabId)
+                continue;
+            tab.insert(QStringLiteral("fileUrl"), fileUrl.toString());
+            tab.insert(QStringLiteral("text"), text);
+            tab.insert(QStringLiteral("cursorPosition"), qBound(0, cursorPosition, text.size()));
+            tab.insert(QStringLiteral("selectionStart"), qBound(0, selectionStart, text.size()));
+            tab.insert(QStringLiteral("selectionEnd"), qBound(0, selectionEnd, text.size()));
+            tab.insert(QStringLiteral("modified"), modified);
+            tabValue = tab;
+            window.insert(QStringLiteral("tabs"), tabs);
+            windowValue = window;
+            return true;
+        }
+        return false;
+    }
+    return false;
 }
 
 QString WorkspaceSession::findOpenLocalFile(const QUrl &fileUrl) const {

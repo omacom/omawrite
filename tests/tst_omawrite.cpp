@@ -227,6 +227,23 @@ private slots:
         QVERIFY(restoredWindow.value(QStringLiteral("activeTabId")).toString().isEmpty());
     }
 
+    void backendReadsTabsFromItsWorkspaceWindow() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+
+        WorkspaceSession session(stateDirectory.path());
+        const QString firstWindow = session.createWindow(0, 0, 900, 700, false);
+        const QString firstTab = session.createTab(firstWindow, QUrl(), QStringLiteral("first"),
+                                                   2, 1, 2, true);
+        const QString secondWindow = session.createWindow(0, 0, 800, 600, false);
+        session.createTab(secondWindow, QUrl(), QStringLiteral("second"), 0, 0, 0, false);
+
+        Backend backend(&session, firstWindow);
+        QCOMPARE(backend.buffers().size(), 1);
+        QCOMPARE(backend.activeBufferId(), firstTab);
+        QCOMPARE(backend.activeBufferText(), QStringLiteral("first"));
+    }
+
     void preservesBufferTextWhenUpdatingCaret() {
         QTemporaryDir stateDirectory;
         QVERIFY(stateDirectory.isValid());
