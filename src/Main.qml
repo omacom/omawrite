@@ -93,6 +93,28 @@ ApplicationWindow {
         }
     }
 
+    function ensureActiveTabVisible() {
+        for (var index = 0; index < backend.buffers.length; ++index) {
+            if (backend.buffers[index].id !== backend.activeBufferId)
+                continue;
+
+            var tab = tabRepeater.itemAt(index);
+            if (!tab) {
+                activeTabVisibilityTimer.restart();
+                return;
+            }
+
+            if (tab.x < tabFlick.contentX) {
+                tabFlick.contentX = tab.x;
+                return;
+            }
+
+            if (tab.x + tab.width > tabFlick.contentX + tabFlick.width)
+                tabFlick.contentX = tab.x + tab.width - tabFlick.width;
+            return;
+        }
+    }
+
     function completePendingAction() {
         var action = pendingAction;
         pendingAction = "";
@@ -185,6 +207,20 @@ ApplicationWindow {
             editor.cursorPosition = backend.activeCursorPosition;
             editorFlick.ensureCursorVisible();
             backend.finishActiveBufferRestore();
+        }
+    }
+
+    Timer {
+        id: activeTabVisibilityTimer
+        interval: 0
+        repeat: false
+        onTriggered: win.ensureActiveTabVisible()
+    }
+
+    Connections {
+        target: backend
+        function onActiveBufferIdChanged() {
+            activeTabVisibilityTimer.restart();
         }
     }
 
@@ -465,6 +501,7 @@ ApplicationWindow {
                     spacing: 4
 
                     Repeater {
+                        id: tabRepeater
                         model: backend.buffers
                         delegate: Rectangle {
                             required property var modelData

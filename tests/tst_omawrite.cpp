@@ -555,6 +555,32 @@ private slots:
         QCOMPARE(backend.activeBufferId(), third);
     }
 
+    void cyclesToHiddenTabsAndScrollsThemIntoView() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        for (int index = 0; index < 12; ++index)
+            backend.newBuffer();
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        window->setProperty("width", 280);
+
+        QObject *tabFlick = window->findChild<QObject *>(QStringLiteral("tabFlick"));
+        QVERIFY(tabFlick);
+        QTRY_VERIFY(tabFlick->property("contentWidth").toReal()
+                     > tabFlick->property("width").toReal());
+        QCOMPARE(tabFlick->property("contentX").toReal(), 0.0);
+
+        QVERIFY(QMetaObject::invokeMethod(window.get(), "selectAdjacentTab", Q_ARG(QVariant, -1)));
+        QTRY_VERIFY(tabFlick->property("contentX").toReal() > 0);
+    }
+
     void scopesDocumentShortcutsToTheirWindow() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
