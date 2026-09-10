@@ -20,18 +20,26 @@ public:
     Backend *createWindow();
     int restoreWindows();
     int windowCount() const;
+    Backend *primaryBackend() const;
+    void setDarkMode(bool darkMode);
+    void setTextScale(qreal textScale);
 
 private:
     struct WritingWindow {
+        QString id;
         Backend *backend;
         QQmlContext *context;
         QObject *root;
     };
 
     Backend *createWindow(const QString &windowId);
+    void activateTab(const QString &tabId);
+    void closeWindow(const QString &windowId);
 
     WorkspaceSession *m_workspaceSession;
     QQmlEngine *m_engine;
     QUrl m_qmlUrl;
     QList<WritingWindow> m_windows;
+    bool m_darkMode = true;
+    qreal m_textScale = 1.0;
 };

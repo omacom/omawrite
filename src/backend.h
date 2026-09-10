@@ -87,6 +87,7 @@ public:
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     Q_INVOKABLE QString newBuffer();
     Q_INVOKABLE bool selectBuffer(const QString &id);
+    Q_INVOKABLE bool moveActiveBuffer(int direction);
     Q_INVOKABLE bool closeActiveBuffer();
     Q_INVOKABLE bool discardActiveBuffer();
     Q_INVOKABLE void prepareForApplicationClose();
@@ -130,8 +131,12 @@ signals:
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void newWindowRequested();
+    void openTabRequested(const QString &tabId);
+    void windowEmptied();
 
 private:
+    void initializeRuntime();
     void loadDocumentText(const QString &text);
     void loadActiveBuffer();
     void persistActiveBuffer();

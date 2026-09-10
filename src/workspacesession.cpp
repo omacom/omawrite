@@ -312,6 +312,16 @@ bool WorkspaceSession::removeTab(const QString &windowId, const QString &tabId) 
     return false;
 }
 
+bool WorkspaceSession::removeWindow(const QString &windowId) {
+    for (int index = 0; index < m_windows.size(); ++index) {
+        if (m_windows.at(index).toMap().value(QStringLiteral("id")).toString() != windowId)
+            continue;
+        m_windows.removeAt(index);
+        return true;
+    }
+    return false;
+}
+
 bool WorkspaceSession::updateWindowGeometry(const QString &windowId, int x, int y, int width,
                                             int height, bool maximized) {
     for (QVariant &value : m_windows) {
@@ -371,9 +381,6 @@ bool WorkspaceSession::restore() {
 }
 
 bool WorkspaceSession::saveNow() const {
-    if (m_windows.isEmpty())
-        return false;
-
     QDir().mkpath(m_stateDirectory);
     QSaveFile file(sessionPath());
     if (!file.open(QIODevice::WriteOnly))

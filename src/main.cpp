@@ -6,12 +6,15 @@
 #include <QQmlContext>
 #include <QQmlError>
 #include <QQuickStyle>
+#include <QStandardPaths>
 #include <QUrl>
 #include <QWindow>
 #include <QFile>
 
 #include "backend.h"
 #include "systemtheme.h"
+#include "windowmanager.h"
+#include "workspacesession.h"
 
 int main(int argc, char *argv[]) {
     QApplication app(argc, argv);
@@ -28,11 +31,7 @@ int main(int argc, char *argv[]) {
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
-    Backend backend(&app);
     SystemTheme systemTheme(&app);
-    backend.setDarkMode(systemTheme.darkMode());
-    QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
-                     &Backend::setDarkMode);
 
     // Carry the desktop's text scale into the default font, so the chrome that
     // inherits it (dialog titles, buttons) grows along with the writing area.
@@ -47,33 +46,37 @@ int main(int argc, char *argv[]) {
     };
     applyInterfaceFont(systemTheme.textScale());
 
-    backend.setTextScale(systemTheme.textScale());
-    QObject::connect(&systemTheme, &SystemTheme::textScaleChanged, &backend,
-                     [&backend, applyInterfaceFont](qreal textScale) {
-        applyInterfaceFont(textScale);
-        backend.setTextScale(textScale);
-    });
-
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
                      [](const QList<QQmlError> &warnings) {
         for (const QQmlError &warning : warnings)
             qWarning().noquote() << warning.toString();
     });
-    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    WorkspaceSession workspaceSession(
+        QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+    workspaceSession.restore();
+    WindowManager windows(&workspaceSession, &engine, QUrl(QStringLiteral("qrc:/Main.qml")));
+    windows.setDarkMode(systemTheme.darkMode());
+    windows.setTextScale(systemTheme.textScale());
+    QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &windows,
+                     &WindowManager::setDarkMode);
+    QObject::connect(&systemTheme, &SystemTheme::textScaleChanged, &windows,
+                     [&windows, applyInterfaceFont](qreal textScale) {
+        applyInterfaceFont(textScale);
+        windows.setTextScale(textScale);
+    });
 
-    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
-    if (engine.rootObjects().isEmpty()) {
+    if (windows.restoreWindows() == 0)
+        windows.createWindow();
+    if (!windows.primaryBackend()) {
         qCritical() << "Could not load the Omawrite interface; resource available:"
                     << QFile::exists(QStringLiteral(":/Main.qml"));
         return -1;
     }
 
-    backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
-
     const QStringList args = app.arguments();
-    if (args.size() > 1 && !backend.modified())
-        backend.open(QUrl::fromLocalFile(args.at(1)));
+    if (args.size() > 1 && !windows.primaryBackend()->modified())
+        windows.primaryBackend()->open(QUrl::fromLocalFile(args.at(1)));
 
     return app.exec();
 }

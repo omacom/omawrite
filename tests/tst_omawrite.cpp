@@ -277,13 +277,56 @@ private slots:
         WindowManager manager(&session, &engine, QUrl::fromLocalFile(mainQmlPath));
 
         Backend *first = manager.createWindow();
-        Backend *second = manager.createWindow();
+        QVERIFY(first);
+        first->newWindow();
 
+        QTRY_COMPARE(manager.windowCount(), 2);
+        QCOMPARE(session.windows().size(), 2);
+    }
+
+    void windowManagerClosesTheLastTabWithItsWindow() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        WorkspaceSession session(stateDirectory.path());
+        QQmlEngine engine;
+        WindowManager manager(&session, &engine, QUrl::fromLocalFile(mainQmlPath));
+        Backend *backend = manager.createWindow();
+        QVERIFY(backend);
+
+        QVERIFY(backend->discardActiveBuffer());
+        QTRY_COMPARE(manager.windowCount(), 0);
+        QVERIFY(session.windows().isEmpty());
+    }
+
+    void windowManagerActivatesAnExistingFileTab() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+        const QString filePath = stateDirectory.filePath(QStringLiteral("note.md"));
+        QFile file(filePath);
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+        file.write("note");
+        file.close();
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        WorkspaceSession session(stateDirectory.path());
+        QQmlEngine engine;
+        WindowManager manager(&session, &engine, QUrl::fromLocalFile(mainQmlPath));
+        Backend *first = manager.createWindow();
+        Backend *second = manager.createWindow();
         QVERIFY(first);
         QVERIFY(second);
-        QVERIFY(first != second);
-        QCOMPARE(manager.windowCount(), 2);
-        QCOMPARE(session.windows().size(), 2);
+
+        first->open(QUrl::fromLocalFile(filePath));
+        second->open(QUrl::fromLocalFile(filePath));
+
+        QVERIFY(!session.findOpenLocalFile(QUrl::fromLocalFile(filePath)).isEmpty());
+        QCOMPARE(session.windows().at(0).toMap().value(QStringLiteral("tabs")).toList().size(), 2);
+        QCOMPARE(session.windows().at(1).toMap().value(QStringLiteral("tabs")).toList().size(), 1);
     }
 
     void windowManagerRestoresWritingWindows() {
@@ -453,6 +496,31 @@ private slots:
         QVERIFY(backend.selectBuffer(second));
         QVERIFY(QMetaObject::invokeMethod(window.get(), "selectAdjacentTab", Q_ARG(QVariant, 1)));
         QCOMPARE(backend.activeBufferId(), third);
+    }
+
+    void scopesDocumentShortcutsToTheirWindow() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        for (const QString &name : {QStringLiteral("newTabShortcut"),
+                                    QStringLiteral("closeTabShortcut"),
+                                    QStringLiteral("nextTabShortcut"),
+                                    QStringLiteral("previousTabShortcut"),
+                                    QStringLiteral("moveTabLeftShortcut"),
+                                    QStringLiteral("moveTabRightShortcut"),
+                                    QStringLiteral("newWindowShortcut")}) {
+            QObject *shortcut = window->findChild<QObject *>(name);
+            QVERIFY(shortcut);
+            QCOMPARE(shortcut->property("context").toInt(), static_cast<int>(Qt::WindowShortcut));
+        }
     }
 
     void restoresActiveTextAndCaretThroughQmlLifecycle() {

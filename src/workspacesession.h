@@ -23,6 +23,7 @@ public:
     bool setActiveTab(const QString &windowId, const QString &tabId);
     bool moveActiveTab(const QString &windowId, int direction);
     bool removeTab(const QString &windowId, const QString &tabId);
+    bool removeWindow(const QString &windowId);
     bool updateWindowGeometry(const QString &windowId, int x, int y, int width, int height,
                               bool maximized);
     bool restore();
