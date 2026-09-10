@@ -80,6 +80,19 @@ ApplicationWindow {
                                                   tabFlick.contentX + direction * tabFlick.width * 0.75));
     }
 
+    function selectAdjacentTab(direction) {
+        if (backend.buffers.length < 2)
+            return;
+
+        for (var index = 0; index < backend.buffers.length; ++index) {
+            if (backend.buffers[index].id !== backend.activeBufferId)
+                continue;
+            backend.selectBuffer(backend.buffers[(index + direction + backend.buffers.length)
+                                                 % backend.buffers.length].id);
+            return;
+        }
+    }
+
     function completePendingAction() {
         var action = pendingAction;
         pendingAction = "";
@@ -191,6 +204,18 @@ ApplicationWindow {
         sequence: "Ctrl+W"
         context: Qt.ApplicationShortcut
         onActivated: win.requestCloseTab()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Tab"
+        context: Qt.ApplicationShortcut
+        onActivated: win.selectAdjacentTab(1)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+Tab"
+        context: Qt.ApplicationShortcut
+        onActivated: win.selectAdjacentTab(-1)
     }
 
     Shortcut {
@@ -385,7 +410,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+T  New Tab\nCtrl+W  Close Tab\nCtrl+Tab  Next Tab\nCtrl+Shift+Tab  Previous Tab\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }

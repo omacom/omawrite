@@ -232,6 +232,31 @@ private slots:
         QVERIFY(!tabBar->property("visible").toBool());
     }
 
+    void cyclesTabsFromWindowShortcuts() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        const QString first = backend.activeBufferId();
+        const QString second = backend.newBuffer();
+        const QString third = backend.newBuffer();
+
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QVERIFY(QMetaObject::invokeMethod(window.get(), "selectAdjacentTab", Q_ARG(QVariant, 1)));
+        QCOMPARE(backend.activeBufferId(), first);
+        QVERIFY(QMetaObject::invokeMethod(window.get(), "selectAdjacentTab", Q_ARG(QVariant, -1)));
+        QCOMPARE(backend.activeBufferId(), third);
+        QVERIFY(backend.selectBuffer(second));
+        QVERIFY(QMetaObject::invokeMethod(window.get(), "selectAdjacentTab", Q_ARG(QVariant, 1)));
+        QCOMPARE(backend.activeBufferId(), third);
+    }
+
     void restoresActiveTextAndCaretThroughQmlLifecycle() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
