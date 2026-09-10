@@ -20,6 +20,7 @@ public:
 
     Backend *createWindow();
     int restoreWindows();
+    int recoverLegacySnapshots();
     int windowCount() const;
     Backend *primaryBackend() const;
     void setDarkMode(bool darkMode);

@@ -5,6 +5,9 @@
 #include <QQmlEngine>
 #include <QFile>
 #include <QFileInfo>
+#include <QDir>
+#include <QJsonDocument>
+#include <QJsonObject>
 #include <QTimer>
 #include <QWindow>
 
@@ -49,6 +52,34 @@ int WindowManager::restoreWindows() {
             return 0;
     }
     return m_windows.size();
+}
+
+int WindowManager::recoverLegacySnapshots() {
+    if (!m_workspaceSession || m_windows.isEmpty())
+        return 0;
+
+    int recovered = 0;
+    const QString windowId = m_windows.constFirst().id;
+    const QStringList snapshots = QDir(m_workspaceSession->stateDirectory())
+        .entryList({QStringLiteral("recovery-*.json")}, QDir::Files, QDir::Name);
+    for (const QString &snapshot : snapshots) {
+        QFile file(QDir(m_workspaceSession->stateDirectory()).filePath(snapshot));
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonDocument document = QJsonDocument::fromJson(file.readAll());
+        if (!document.isObject() || !document.object().value(QStringLiteral("text")).isString())
+            continue;
+        if (m_workspaceSession->createTab(windowId, QUrl(),
+                                          document.object().value(QStringLiteral("text")).toString(),
+                                          0, 0, 0, true).isEmpty())
+            continue;
+        file.close();
+        QFile::remove(file.fileName());
+        ++recovered;
+    }
+    if (recovered > 0)
+        m_workspaceSession->saveNow();
+    return recovered;
 }
 
 Backend *WindowManager::createWindow(const QString &windowId) {

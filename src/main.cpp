@@ -73,6 +73,7 @@ int main(int argc, char *argv[]) {
                     << QFile::exists(QStringLiteral(":/Main.qml"));
         return -1;
     }
+    windows.recoverLegacySnapshots();
 
     const QStringList args = app.arguments();
     if (args.size() > 1 && !windows.primaryBackend()->modified())

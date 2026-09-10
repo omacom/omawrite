@@ -110,6 +110,10 @@ bool windowFromJson(const QJsonValue &value, QVariantMap *window) {
 
 WorkspaceSession::WorkspaceSession(const QString &stateDirectory) : m_stateDirectory(stateDirectory) {}
 
+QString WorkspaceSession::stateDirectory() const {
+    return m_stateDirectory;
+}
+
 QVariantList WorkspaceSession::windows() const {
     return m_windows;
 }

@@ -8,6 +8,7 @@ class WorkspaceSession {
 public:
     explicit WorkspaceSession(const QString &stateDirectory);
 
+    QString stateDirectory() const;
     QVariantList windows() const;
     QVariantMap window(const QString &windowId) const;
     QVariantMap tab(const QString &tabId) const;

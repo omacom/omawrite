@@ -382,6 +382,29 @@ private slots:
         QCOMPARE(manager.windowCount(), 2);
     }
 
+    void windowManagerRecoversLegacySnapshotsAsUnsavedTabs() {
+        QTemporaryDir stateDirectory;
+        QVERIFY(stateDirectory.isValid());
+        const QString recoveryPath = stateDirectory.filePath(QStringLiteral("recovery-0.json"));
+        QFile recovery(recoveryPath);
+        QVERIFY(recovery.open(QIODevice::WriteOnly));
+        recovery.write(QJsonDocument(QJsonObject{{QStringLiteral("fileUrl"), QString()},
+                                                  {QStringLiteral("text"), QStringLiteral("draft")}})
+                           .toJson(QJsonDocument::Compact));
+        recovery.close();
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        WorkspaceSession session(stateDirectory.path());
+        QQmlEngine engine;
+        WindowManager manager(&session, &engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY(manager.createWindow());
+
+        QCOMPARE(manager.recoverLegacySnapshots(), 1);
+        QCOMPARE(session.windows().constFirst().toMap().value(QStringLiteral("tabs")).toList().size(), 2);
+        QVERIFY(!QFile::exists(recoveryPath));
+    }
+
     void preservesBufferTextWhenUpdatingCaret() {
         QTemporaryDir stateDirectory;
         QVERIFY(stateDirectory.isValid());
