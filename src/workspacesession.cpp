@@ -11,7 +11,7 @@
 #include <QUuid>
 
 namespace {
-constexpr int sessionVersion = 1;
+constexpr int sessionVersion = 2;
 
 QJsonObject jsonTab(const QVariantMap &tab) {
     return {{QStringLiteral("id"), tab.value(QStringLiteral("id")).toString()},
@@ -20,7 +20,8 @@ QJsonObject jsonTab(const QVariantMap &tab) {
             {QStringLiteral("cursorPosition"), tab.value(QStringLiteral("cursorPosition")).toInt()},
             {QStringLiteral("selectionStart"), tab.value(QStringLiteral("selectionStart")).toInt()},
             {QStringLiteral("selectionEnd"), tab.value(QStringLiteral("selectionEnd")).toInt()},
-            {QStringLiteral("modified"), tab.value(QStringLiteral("modified")).toBool()}};
+            {QStringLiteral("modified"), tab.value(QStringLiteral("modified")).toBool()},
+            {QStringLiteral("externalChanged"), tab.value(QStringLiteral("externalChanged")).toBool()}};
 }
 
 bool tabFromJson(const QJsonValue &value, QVariantMap *tab) {
@@ -35,9 +36,10 @@ bool tabFromJson(const QJsonValue &value, QVariantMap *tab) {
     const QJsonValue selectionStart = object.value(QStringLiteral("selectionStart"));
     const QJsonValue selectionEnd = object.value(QStringLiteral("selectionEnd"));
     const QJsonValue modified = object.value(QStringLiteral("modified"));
+    const QJsonValue externalChanged = object.value(QStringLiteral("externalChanged"));
     if (!id.isString() || id.toString().isEmpty() || !fileUrl.isString() || !text.isString()
             || !cursorPosition.isDouble() || !selectionStart.isDouble() || !selectionEnd.isDouble()
-            || !modified.isBool())
+            || !modified.isBool() || !externalChanged.isBool())
         return false;
 
     const int textLength = text.toString().size();
@@ -47,7 +49,8 @@ bool tabFromJson(const QJsonValue &value, QVariantMap *tab) {
             {QStringLiteral("cursorPosition"), qBound(0, cursorPosition.toInt(), textLength)},
             {QStringLiteral("selectionStart"), qBound(0, selectionStart.toInt(), textLength)},
             {QStringLiteral("selectionEnd"), qBound(0, selectionEnd.toInt(), textLength)},
-            {QStringLiteral("modified"), modified.toBool()}};
+            {QStringLiteral("modified"), modified.toBool()},
+            {QStringLiteral("externalChanged"), externalChanged.toBool()}};
     return true;
 }
 
@@ -120,6 +123,17 @@ QVariantMap WorkspaceSession::window(const QString &windowId) const {
     return {};
 }
 
+QVariantMap WorkspaceSession::tab(const QString &tabId) const {
+    for (const QVariant &windowValue : m_windows) {
+        for (const QVariant &tabValue : windowValue.toMap().value(QStringLiteral("tabs")).toList()) {
+            const QVariantMap tab = tabValue.toMap();
+            if (tab.value(QStringLiteral("id")).toString() == tabId)
+                return tab;
+        }
+    }
+    return {};
+}
+
 QVariantList WorkspaceSession::tabs(const QString &windowId) const {
     for (const QVariant &value : m_windows) {
         const QVariantMap window = value.toMap();
@@ -170,7 +184,8 @@ QString WorkspaceSession::createTab(const QString &windowId, const QUrl &fileUrl
                                 {QStringLiteral("cursorPosition"), qBound(0, cursorPosition, text.size())},
                                 {QStringLiteral("selectionStart"), qBound(0, selectionStart, text.size())},
                                 {QStringLiteral("selectionEnd"), qBound(0, selectionEnd, text.size())},
-                                {QStringLiteral("modified"), modified}});
+                                {QStringLiteral("modified"), modified},
+                                {QStringLiteral("externalChanged"), false}});
         window.insert(QStringLiteral("tabs"), tabs);
         window.insert(QStringLiteral("activeTabId"), id);
         value = window;
@@ -318,6 +333,24 @@ bool WorkspaceSession::removeWindow(const QString &windowId) {
             continue;
         m_windows.removeAt(index);
         return true;
+    }
+    return false;
+}
+
+bool WorkspaceSession::setExternalChange(const QString &tabId, bool changed) {
+    for (QVariant &windowValue : m_windows) {
+        QVariantMap window = windowValue.toMap();
+        QVariantList tabs = window.value(QStringLiteral("tabs")).toList();
+        for (QVariant &tabValue : tabs) {
+            QVariantMap tab = tabValue.toMap();
+            if (tab.value(QStringLiteral("id")).toString() != tabId)
+                continue;
+            tab.insert(QStringLiteral("externalChanged"), changed);
+            tabValue = tab;
+            window.insert(QStringLiteral("tabs"), tabs);
+            windowValue = window;
+            return true;
+        }
     }
     return false;
 }

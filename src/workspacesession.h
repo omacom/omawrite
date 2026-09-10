@@ -10,6 +10,7 @@ public:
 
     QVariantList windows() const;
     QVariantMap window(const QString &windowId) const;
+    QVariantMap tab(const QString &tabId) const;
     QVariantList tabs(const QString &windowId) const;
     QString activeTabId(const QString &windowId) const;
     QString createWindow(int x, int y, int width, int height, bool maximized);
@@ -24,6 +25,7 @@ public:
     bool moveActiveTab(const QString &windowId, int direction);
     bool removeTab(const QString &windowId, const QString &tabId);
     bool removeWindow(const QString &windowId);
+    bool setExternalChange(const QString &tabId, bool changed);
     bool updateWindowGeometry(const QString &windowId, int x, int y, int width, int height,
                               bool maximized);
     bool restore();

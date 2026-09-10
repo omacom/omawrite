@@ -3,6 +3,8 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QFile>
+#include <QFileInfo>
 #include <QTimer>
 #include <QWindow>
 
@@ -11,7 +13,10 @@
 
 WindowManager::WindowManager(WorkspaceSession *workspaceSession, QQmlEngine *engine,
                              const QUrl &qmlUrl, QObject *parent)
-    : QObject(parent), m_workspaceSession(workspaceSession), m_engine(engine), m_qmlUrl(qmlUrl) {}
+    : QObject(parent), m_workspaceSession(workspaceSession), m_engine(engine), m_qmlUrl(qmlUrl) {
+    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
+            &WindowManager::handleFileChange);
+}
 
 WindowManager::~WindowManager() {
     for (const WritingWindow &window : m_windows) {
@@ -65,10 +70,18 @@ Backend *WindowManager::createWindow(const QString &windowId) {
     backend->setParentWindow(qobject_cast<QWindow *>(window));
     connect(backend, &Backend::newWindowRequested, this, [this]() { createWindow(); });
     connect(backend, &Backend::openTabRequested, this, &WindowManager::activateTab);
+    connect(backend, &Backend::activeBufferChanged, this, [this, backend]() {
+        const QVariantMap tab = m_workspaceSession->tab(backend->activeBufferId());
+        if (tab.value(QStringLiteral("externalChanged")).toBool())
+            backend->reportExternalChange(!QFileInfo::exists(tab.value(QStringLiteral("fileUrl"))
+                                                             .toUrl().toLocalFile()));
+    });
     connect(backend, &Backend::windowEmptied, this, [this, windowId]() {
         QTimer::singleShot(0, this, [this, windowId]() { closeWindow(windowId); });
     });
     m_windows.append({windowId, backend, context, window});
+    connect(backend, &Backend::buffersChanged, this, &WindowManager::syncFileWatcher);
+    syncFileWatcher();
     return backend;
 }
 
@@ -115,9 +128,61 @@ void WindowManager::closeWindow(const QString &windowId) {
         m_windows.removeAt(index);
         m_workspaceSession->removeWindow(window.id);
         m_workspaceSession->saveNow();
+        syncFileWatcher();
         window.root->deleteLater();
         window.context->deleteLater();
         window.backend->deleteLater();
         return;
     }
+}
+
+void WindowManager::syncFileWatcher() {
+    const QStringList watched = m_fileWatcher.files();
+    if (!watched.isEmpty())
+        m_fileWatcher.removePaths(watched);
+
+    QStringList paths;
+    for (const QVariant &window : m_workspaceSession->windows()) {
+        for (const QVariant &tab : window.toMap().value(QStringLiteral("tabs")).toList()) {
+            const QUrl fileUrl(tab.toMap().value(QStringLiteral("fileUrl")).toString());
+            if (fileUrl.isLocalFile() && QFileInfo::exists(fileUrl.toLocalFile()))
+                paths.append(fileUrl.toLocalFile());
+        }
+    }
+    if (!paths.isEmpty())
+        m_fileWatcher.addPaths(paths);
+}
+
+void WindowManager::handleFileChange(const QString &path) {
+    const QUrl fileUrl = QUrl::fromLocalFile(path);
+    const QString tabId = m_workspaceSession->findOpenLocalFile(fileUrl);
+    if (tabId.isEmpty())
+        return;
+
+    const bool deleted = !QFileInfo::exists(path);
+    bool changed = deleted;
+    if (!changed) {
+        QFile file(path);
+        changed = !file.open(QIODevice::ReadOnly)
+            || QString::fromUtf8(file.readAll())
+                != m_workspaceSession->tab(tabId).value(QStringLiteral("text")).toString();
+    }
+    if (!changed) {
+        syncFileWatcher();
+        return;
+    }
+
+    m_workspaceSession->setExternalChange(tabId, true);
+    m_workspaceSession->saveNow();
+    const QString windowId = m_workspaceSession->windowIdForTab(tabId);
+    for (const WritingWindow &window : m_windows) {
+        if (window.id != windowId)
+            continue;
+        if (window.backend->activeBufferId() == tabId)
+            window.backend->reportExternalChange(deleted);
+        else
+            window.backend->refreshBuffers();
+        break;
+    }
+    syncFileWatcher();
 }

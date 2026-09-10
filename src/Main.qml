@@ -478,7 +478,8 @@ ApplicationWindow {
                             Label {
                                 id: tabLabel
                                 anchors.centerIn: parent
-                                text: (modelData.modified ? "* " : "")
+                                text: (modelData.externalChanged ? "• " : "")
+                                    + (modelData.modified ? "* " : "")
                                     + backend.bufferTitle(modelData, index)
                                 color: modelData.id === backend.activeBufferId
                                     ? "white"

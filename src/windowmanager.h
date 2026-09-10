@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include <QFileSystemWatcher>
 #include <QList>
 #include <QUrl>
 
@@ -35,6 +36,8 @@ private:
     Backend *createWindow(const QString &windowId);
     void activateTab(const QString &tabId);
     void closeWindow(const QString &windowId);
+    void syncFileWatcher();
+    void handleFileChange(const QString &path);
 
     WorkspaceSession *m_workspaceSession;
     QQmlEngine *m_engine;
@@ -42,4 +45,5 @@ private:
     QList<WritingWindow> m_windows;
     bool m_darkMode = true;
     qreal m_textScale = 1.0;
+    QFileSystemWatcher m_fileWatcher;
 };
