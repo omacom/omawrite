@@ -71,9 +71,14 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     return url.toString();
 }
 
-Backend::Backend(QObject *parent) : QObject(parent) {
-    const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+Backend::Backend(QObject *parent)
+    : Backend(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation), parent) {}
+
+Backend::Backend(const QString &stateDirectory, QObject *parent)
+    : QObject(parent), m_bufferSession(stateDirectory) {
     QDir().mkpath(stateDirectory);
+    if (!m_bufferSession.restore())
+        m_bufferSession.createBuffer();
     // Claim an orphaned snapshot before taking an empty slot. This ensures a
     // crash in window 2 is still recovered even if window 1 exited normally.
     for (int pass = 0; pass < 2 && !m_recoveryLock; ++pass) {
@@ -91,6 +96,28 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             }
         }
     }
+    initializeRuntime();
+}
+
+Backend::Backend(WorkspaceSession *workspaceSession, const QString &windowId, QObject *parent)
+    : QObject(parent), m_bufferSession(QString()), m_workspaceSession(workspaceSession),
+      m_workspaceWindowId(windowId) {
+    for (const QVariant &value : buffers()) {
+        const QVariantMap buffer = value.toMap();
+        if (buffer.value(QStringLiteral("id")).toString() != activeBufferId())
+            continue;
+        m_activeBufferText = buffer.value(QStringLiteral("text")).toString();
+        m_cursorPosition = buffer.value(QStringLiteral("cursorPosition")).toInt();
+        m_selectionStart = buffer.value(QStringLiteral("selectionStart")).toInt();
+        m_selectionEnd = buffer.value(QStringLiteral("selectionEnd")).toInt();
+        m_fileUrl = QUrl(buffer.value(QStringLiteral("fileUrl")).toString());
+        m_modified = buffer.value(QStringLiteral("modified")).toBool();
+        break;
+    }
+    initializeRuntime();
+}
+
+void Backend::initializeRuntime() {
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
@@ -107,8 +134,6 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     QFile file(path);
                     if (file.open(QIODevice::ReadOnly)
                             && file.readAll() == m_lastKnownFileContents) {
-                        // Atomic saves can replace the watched inode. Re-arm the
-                        // watcher, but do not report our own save as an outside edit.
                         watchCurrentFile();
                         return;
                     }
@@ -116,7 +141,6 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 
                 emit externalChangeDetected(deleted, m_modified);
             });
-
     loadOmarchyTheme();
     watchOmarchyTheme();
     connect(&m_themeWatcher, &QFileSystemWatcher::fileChanged, this, [this]() {
@@ -127,6 +151,86 @@ Backend::Backend(QObject *parent) : QObject(parent) {
         loadOmarchyTheme();
         watchOmarchyTheme();
     });
+}
+
+QString Backend::newBuffer() {
+    persistActiveBuffer();
+    const QString id = m_workspaceSession
+        ? m_workspaceSession->createTab(m_workspaceWindowId, QUrl(), QString(), 0, 0, 0, false)
+        : m_bufferSession.createBuffer();
+    loadActiveBuffer();
+    emit buffersChanged();
+    emit activeBufferChanged();
+    return id;
+}
+
+bool Backend::selectBuffer(const QString &id) {
+    persistActiveBuffer();
+    if (m_workspaceSession ? !m_workspaceSession->setActiveTab(m_workspaceWindowId, id)
+                           : !m_bufferSession.selectBuffer(id))
+        return false;
+    loadActiveBuffer();
+    emit activeBufferChanged();
+    return true;
+}
+
+bool Backend::moveActiveBuffer(int direction) {
+    if (!m_workspaceSession || !m_workspaceSession->moveActiveTab(m_workspaceWindowId, direction))
+        return false;
+
+    m_workspaceSession->saveNow();
+    emit buffersChanged();
+    return true;
+}
+
+bool Backend::closeActiveBuffer() {
+    persistActiveBuffer();
+    if (m_modified) {
+        setStatus(QStringLiteral("Save or discard changes before closing this tab"));
+        return false;
+    }
+    return discardActiveBuffer();
+}
+
+bool Backend::discardActiveBuffer() {
+    if (m_workspaceSession ? !m_workspaceSession->removeTab(m_workspaceWindowId, activeBufferId())
+                           : !m_bufferSession.closeBuffer(m_bufferSession.activeBufferId()))
+        return false;
+    loadActiveBuffer();
+    if (m_workspaceSession)
+        m_workspaceSession->saveNow();
+    else
+        m_bufferSession.saveNow();
+    emit buffersChanged();
+    emit activeBufferChanged();
+    if (m_workspaceSession && buffers().isEmpty())
+        emit windowEmptied();
+    return true;
+}
+
+void Backend::prepareForApplicationClose() {
+    if (m_applicationClosing)
+        return;
+
+    persistActiveBuffer();
+    m_applicationClosing = true;
+}
+
+void Backend::updateActiveEditorState(int cursorPosition, int selectionStart, int selectionEnd) {
+    if (!m_document || m_applicationClosing || m_restoringActiveBuffer)
+        return;
+    if (m_ignoringInitialCursorReset && cursorPosition == 0 && m_cursorPosition > 0)
+        return;
+
+    m_cursorPosition = cursorPosition;
+    m_selectionStart = selectionStart;
+    m_selectionEnd = selectionEnd;
+    persistActiveBuffer();
+}
+
+void Backend::finishActiveBufferRestore() {
+    m_restoringActiveBuffer = false;
+    QTimer::singleShot(250, this, [this]() { m_ignoringInitialCursorReset = false; });
 }
 
 Backend::~Backend() = default;
@@ -147,6 +251,25 @@ QString Backend::fileName() const {
 
     const QString name = m_fileUrl.fileName();
     return name.isEmpty() ? QStringLiteral("Untitled.md") : name;
+}
+
+QString Backend::bufferTitle(const QVariantMap &buffer, int index) const {
+    const QUrl fileUrl(buffer.value(QStringLiteral("fileUrl")).toString());
+    if (fileUrl.isLocalFile()) {
+        const QString fileName = QFileInfo(fileUrl.toLocalFile()).fileName();
+        if (!fileName.isEmpty())
+            return fileName;
+    }
+
+    const QString firstLine = buffer.value(QStringLiteral("text")).toString()
+        .section(QLatin1Char('\n'), 0, 0).trimmed();
+    if (firstLine.isEmpty())
+        return QStringLiteral("Untitled %1").arg(index + 1);
+
+    constexpr int maximumTitleLength = 29;
+    if (firstLine.size() <= maximumTitleLength)
+        return firstLine;
+    return firstLine.left(maximumTitleLength - 1) + QChar(0x2026);
 }
 
 void Backend::setDarkMode(bool darkMode) {
@@ -173,6 +296,8 @@ void Backend::attachDocument(QObject *textDocument) {
         return;
     }
 
+    m_restoringActiveBuffer = true;
+
     if (m_highlighter)
         delete m_highlighter.data();
 
@@ -191,7 +316,7 @@ void Backend::attachDocument(QObject *textDocument) {
             });
 
     applyDocumentTypography();
-    restoreRecovery();
+    loadActiveBuffer();
 }
 
 void Backend::openDialog() {
@@ -204,6 +329,14 @@ void Backend::open(const QUrl &url) {
         return;
     }
 
+    if (m_workspaceSession) {
+        const QString openTabId = m_workspaceSession->findOpenLocalFile(url);
+        if (!openTabId.isEmpty()) {
+            emit openTabRequested(openTabId);
+            return;
+        }
+    }
+
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
@@ -212,13 +345,21 @@ void Backend::open(const QUrl &url) {
     }
 
     const QByteArray contents = file.readAll();
-    loadDocumentText(QString::fromUtf8(contents));
-    clearRecovery();
+    persistActiveBuffer();
+    if (m_workspaceSession)
+        m_workspaceSession->createTab(m_workspaceWindowId, url, QString::fromUtf8(contents),
+                                      0, 0, 0, false);
+    else
+        m_bufferSession.openBuffer(url, QString::fromUtf8(contents));
+    loadActiveBuffer();
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
-    setFileUrl(url);
-    watchCurrentFile();
-    setModified(false);
+    if (m_workspaceSession)
+        m_workspaceSession->saveNow();
+    else
+        m_bufferSession.saveNow();
+    emit buffersChanged();
+    emit activeBufferChanged();
     setStatus(QStringLiteral("Opened %1").arg(fileName()));
 }
 
@@ -258,6 +399,26 @@ void Backend::discardRecovery() {
 }
 
 void Backend::reloadFromDisk() {
+    if (m_workspaceSession) {
+        QFile file(m_fileUrl.toLocalFile());
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+            setStatus(QStringLiteral("Could not reload %1.").arg(fileName()));
+            return;
+        }
+        const QByteArray contents = file.readAll();
+        m_workspaceSession->updateTab(m_workspaceWindowId, activeBufferId(), m_fileUrl,
+                                      QString::fromUtf8(contents), 0, 0, 0, false);
+        m_workspaceSession->setExternalChange(activeBufferId(), false);
+        m_workspaceSession->saveNow();
+        m_lastKnownFileContents = contents;
+        m_hasKnownFileContents = true;
+        loadActiveBuffer();
+        emit buffersChanged();
+        emit activeBufferChanged();
+        setStatus(QStringLiteral("Reloaded %1").arg(fileName()));
+        return;
+    }
+
     if (m_fileUrl.isLocalFile())
         open(m_fileUrl);
 }
@@ -272,9 +433,20 @@ void Backend::keepExternalVersion() {
         m_hasKnownFileContents = false;
     }
     setModified(true);
-    scheduleRecovery();
+    if (m_workspaceSession)
+        m_workspaceSession->setExternalChange(activeBufferId(), false);
+    persistActiveBuffer();
     watchCurrentFile();
     setStatus(QStringLiteral("Kept your version"));
+}
+
+void Backend::reportExternalChange(bool deleted) {
+    emit buffersChanged();
+    emit externalChangeDetected(deleted, m_modified);
+}
+
+void Backend::refreshBuffers() {
+    emit buffersChanged();
 }
 
 void Backend::printDocument() {
@@ -299,6 +471,11 @@ void Backend::printDocument() {
 }
 
 void Backend::newWindow() {
+    if (m_workspaceSession) {
+        emit newWindowRequested();
+        return;
+    }
+
     const bool started = QProcess::startDetached(QCoreApplication::applicationFilePath(),
                                                  QStringList());
     if (!started)
@@ -339,7 +516,8 @@ QString Backend::clipboardText() const {
 }
 
 bool Backend::editorTextChanged() {
-    if (m_loading || m_formattingTypography)
+    if (!m_document || m_applicationClosing || m_restoringActiveBuffer || m_loading
+            || m_formattingTypography)
         return false;
 
     const QString text = currentDocumentText();
@@ -357,7 +535,7 @@ bool Backend::editorTextChanged() {
     scheduleWordCount();
     setModified(true);
     setStatus(QStringLiteral("Unsaved"));
-    scheduleRecovery();
+    persistActiveBuffer();
     return true;
 }
 
@@ -403,6 +581,9 @@ void Backend::openExternalUrl(const QUrl &url) {
 }
 
 QVariantMap Backend::windowGeometry() const {
+    if (m_workspaceSession)
+        return m_workspaceSession->window(m_workspaceWindowId);
+
     QSettings settings;
     return {{QStringLiteral("x"), settings.value(QStringLiteral("window/x"), -1)},
             {QStringLiteral("y"), settings.value(QStringLiteral("window/y"), -1)},
@@ -412,6 +593,13 @@ QVariantMap Backend::windowGeometry() const {
 }
 
 void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maximized) {
+    if (m_workspaceSession) {
+        m_workspaceSession->updateWindowGeometry(m_workspaceWindowId, x, y, width, height,
+                                                  maximized);
+        m_workspaceSession->saveNow();
+        return;
+    }
+
     QSettings settings;
     if (!maximized) {
         settings.setValue(QStringLiteral("window/x"), x);
@@ -436,6 +624,49 @@ void Backend::loadDocumentText(const QString &text) {
     applyDocumentTypography();
     m_wordCountTimer.stop();
     setWordCount(countWords(text));
+}
+
+void Backend::loadActiveBuffer() {
+    for (const QVariant &value : buffers()) {
+        const QVariantMap buffer = value.toMap();
+        if (buffer.value(QStringLiteral("id")).toString() != activeBufferId())
+            continue;
+        m_cursorPosition = buffer.value(QStringLiteral("cursorPosition")).toInt();
+        m_selectionStart = buffer.value(QStringLiteral("selectionStart")).toInt();
+        m_selectionEnd = buffer.value(QStringLiteral("selectionEnd")).toInt();
+        m_activeBufferText = buffer.value(QStringLiteral("text")).toString();
+        m_restoringActiveBuffer = true;
+        m_ignoringInitialCursorReset = true;
+        loadDocumentText(m_activeBufferText);
+        setFileUrl(QUrl(buffer.value(QStringLiteral("fileUrl")).toString()));
+        setModified(buffer.value(QStringLiteral("modified")).toBool());
+        return;
+    }
+
+    m_activeBufferText.clear();
+    m_cursorPosition = 0;
+    m_selectionStart = 0;
+    m_selectionEnd = 0;
+    setFileUrl(QUrl());
+    setModified(false);
+}
+
+void Backend::persistActiveBuffer() {
+    if (activeBufferId().isEmpty())
+        return;
+    m_activeBufferText = currentDocumentText();
+    if (m_workspaceSession) {
+        m_workspaceSession->updateTab(m_workspaceWindowId, activeBufferId(), m_fileUrl,
+                                      m_activeBufferText, m_cursorPosition, m_selectionStart,
+                                      m_selectionEnd, m_modified);
+        m_workspaceSession->saveNow();
+    } else {
+        m_bufferSession.updateBuffer(m_bufferSession.activeBufferId(), m_fileUrl.toString(),
+                                     m_activeBufferText, m_cursorPosition, m_selectionStart,
+                                     m_selectionEnd, m_modified);
+        m_bufferSession.saveNow();
+    }
+    emit buffersChanged();
 }
 
 void Backend::setFileUrl(const QUrl &url) {
@@ -468,6 +699,15 @@ void Backend::saveTo(const QUrl &url) {
         m_closeAfterSave = false;
         setStatus(QStringLiteral("Only local files can be saved."));
         return;
+    }
+
+    if (m_workspaceSession) {
+        const QString openTabId = m_workspaceSession->findOpenLocalFile(url);
+        if (!openTabId.isEmpty() && openTabId != activeBufferId()) {
+            setStatus(QStringLiteral("This file is already open."));
+            emit openTabRequested(openTabId);
+            return;
+        }
     }
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
@@ -506,7 +746,7 @@ void Backend::saveTo(const QUrl &url) {
                          QFileInfo(url.toLocalFile()).absolutePath());
     setModified(false);
     setStatus(QStringLiteral("Saved %1").arg(fileName()));
-    clearRecovery();
+    persistActiveBuffer();
     emit saveSucceeded();
 
     if (shouldClose)
@@ -566,6 +806,9 @@ void Backend::clearRecovery() {
 }
 
 void Backend::watchCurrentFile() {
+    if (m_workspaceSession)
+        return;
+
     const QStringList watched = m_fileWatcher.files();
     if (!watched.isEmpty())
         m_fileWatcher.removePaths(watched);

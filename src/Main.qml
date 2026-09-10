@@ -44,8 +44,10 @@ ApplicationWindow {
     color: pageColor
 
     onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
+        if (closeConfirmed || !backend.modified) {
+            backend.prepareForApplicationClose();
             return;
+        }
 
         close.accepted = false;
         pendingAction = "close";
@@ -63,6 +65,55 @@ ApplicationWindow {
         unsavedChangesDialog.open();
     }
 
+    function requestCloseTab() {
+        if (!backend.modified) {
+            backend.closeActiveBuffer();
+            return;
+        }
+        pendingAction = "closeTab";
+        unsavedChangesDialog.open();
+    }
+
+    function scrollTabs(direction) {
+        tabFlick.contentX = Math.max(0, Math.min(tabFlick.contentWidth - tabFlick.width,
+                                                  tabFlick.contentX + direction * tabFlick.width * 0.75));
+    }
+
+    function selectAdjacentTab(direction) {
+        if (backend.buffers.length < 2)
+            return;
+
+        for (var index = 0; index < backend.buffers.length; ++index) {
+            if (backend.buffers[index].id !== backend.activeBufferId)
+                continue;
+            backend.selectBuffer(backend.buffers[(index + direction + backend.buffers.length)
+                                                 % backend.buffers.length].id);
+            return;
+        }
+    }
+
+    function ensureActiveTabVisible() {
+        for (var index = 0; index < backend.buffers.length; ++index) {
+            if (backend.buffers[index].id !== backend.activeBufferId)
+                continue;
+
+            var tab = tabRepeater.itemAt(index);
+            if (!tab) {
+                activeTabVisibilityTimer.restart();
+                return;
+            }
+
+            if (tab.x < tabFlick.contentX) {
+                tabFlick.contentX = tab.x;
+                return;
+            }
+
+            if (tab.x + tab.width > tabFlick.contentX + tabFlick.width)
+                tabFlick.contentX = tab.x + tab.width - tabFlick.width;
+            return;
+        }
+    }
+
     function completePendingAction() {
         var action = pendingAction;
         pendingAction = "";
@@ -71,6 +122,8 @@ ApplicationWindow {
             close();
         } else if (action === "open") {
             backend.open(pendingOpenUrl);
+        } else if (action === "closeTab") {
+            backend.discardActiveBuffer();
         }
     }
 
@@ -137,10 +190,85 @@ ApplicationWindow {
         editor.forceActiveFocus();
     }
 
+    function restoreActiveCursor() {
+        activeBufferRestoreTimer.restart();
+    }
+
+    Timer {
+        id: activeBufferRestoreTimer
+        interval: 100
+        repeat: false
+        onTriggered: {
+            if (editor.text !== backend.activeBufferText) {
+                restart();
+                return;
+            }
+            editor.cursorPosition = backend.activeCursorPosition;
+            editorFlick.ensureCursorVisible();
+            backend.finishActiveBufferRestore();
+        }
+    }
+
+    Timer {
+        id: activeTabVisibilityTimer
+        interval: 0
+        repeat: false
+        onTriggered: win.ensureActiveTabVisible()
+    }
+
+    Connections {
+        target: backend
+        function onActiveBufferIdChanged() {
+            activeTabVisibilityTimer.restart();
+        }
+    }
+
     Shortcut {
         sequence: "Ctrl+S"
         context: Qt.ApplicationShortcut
         onActivated: backend.save()
+    }
+
+    Shortcut {
+        objectName: "newTabShortcut"
+        sequence: "Ctrl+T"
+        context: Qt.WindowShortcut
+        onActivated: backend.newBuffer()
+    }
+
+    Shortcut {
+        objectName: "closeTabShortcut"
+        sequence: "Ctrl+W"
+        context: Qt.WindowShortcut
+        onActivated: win.requestCloseTab()
+    }
+
+    Shortcut {
+        objectName: "nextTabShortcut"
+        sequence: "Ctrl+Tab"
+        context: Qt.WindowShortcut
+        onActivated: win.selectAdjacentTab(1)
+    }
+
+    Shortcut {
+        objectName: "previousTabShortcut"
+        sequence: "Ctrl+Shift+Tab"
+        context: Qt.WindowShortcut
+        onActivated: win.selectAdjacentTab(-1)
+    }
+
+    Shortcut {
+        objectName: "moveTabLeftShortcut"
+        sequence: "Ctrl+Shift+PgUp"
+        context: Qt.WindowShortcut
+        onActivated: backend.moveActiveBuffer(-1)
+    }
+
+    Shortcut {
+        objectName: "moveTabRightShortcut"
+        sequence: "Ctrl+Shift+PgDown"
+        context: Qt.WindowShortcut
+        onActivated: backend.moveActiveBuffer(1)
     }
 
     Shortcut {
@@ -185,8 +313,9 @@ ApplicationWindow {
     }
 
     Shortcut {
+        objectName: "newWindowShortcut"
         sequence: "Ctrl+N"
-        context: Qt.ApplicationShortcut
+        context: Qt.WindowShortcut
         onActivated: backend.newWindow()
     }
 
@@ -265,6 +394,10 @@ ApplicationWindow {
             externalChangeDialog.locallyModified = locallyModified;
             externalChangeDialog.open();
         }
+
+        function onActiveBufferChanged() {
+            win.restoreActiveCursor();
+        }
     }
 
     Dialogs.FileDialog {
@@ -331,13 +464,135 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+T  New Tab\nCtrl+W  Close Tab\nCtrl+Tab  Next Tab\nCtrl+Shift+Tab  Previous Tab\nCtrl+Shift+PgUp  Move Tab Left\nCtrl+Shift+PgDown  Move Tab Right\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
 
     Item {
         anchors.fill: parent
+
+        Item {
+            id: tabBar
+            objectName: "tabBar"
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.topMargin: 8
+            anchors.leftMargin: 12
+            anchors.rightMargin: 12
+            height: 28
+            visible: backend.buffers.length > 1
+            z: 2
+
+            Flickable {
+                id: tabFlick
+                objectName: "tabFlick"
+                anchors.fill: parent
+                clip: true
+                contentWidth: tabStrip.width
+                contentHeight: height
+                flickableDirection: Flickable.HorizontalFlick
+                boundsBehavior: Flickable.StopAtBounds
+
+                Row {
+                    id: tabStrip
+                    spacing: 4
+
+                    Repeater {
+                        id: tabRepeater
+                        model: backend.buffers
+                        delegate: Rectangle {
+                            required property var modelData
+                            required property int index
+                            width: tabLabel.implicitWidth + 20
+                            height: 28
+                            color: modelData.id === backend.activeBufferId
+                                ? backend.themeAccent
+                                : (win.darkMode ? "#252525" : "#e7e7e7")
+
+                            Label {
+                                id: tabLabel
+                                anchors.centerIn: parent
+                                text: (modelData.externalChanged ? "• " : "")
+                                    + (modelData.modified ? "* " : "")
+                                    + backend.bufferTitle(modelData, index)
+                                color: modelData.id === backend.activeBufferId
+                                    ? "white"
+                                    : win.textColor
+                                font.family: "iA Writer Mono S"
+                                font.pixelSize: win.scaledSize(11)
+                            }
+
+                            MouseArea {
+                                anchors.fill: parent
+                                cursorShape: Qt.PointingHandCursor
+                                onClicked: backend.selectBuffer(modelData.id)
+                            }
+                        }
+                    }
+                }
+
+                WheelHandler {
+                    acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
+                    onWheel: function(wheel) {
+                        var delta = wheel.pixelDelta.x !== 0 ? wheel.pixelDelta.x : wheel.pixelDelta.y;
+                        if (delta === 0)
+                            delta = wheel.angleDelta.x !== 0 ? wheel.angleDelta.x : wheel.angleDelta.y;
+                        win.scrollTabs(delta > 0 ? -1 : 1);
+                        wheel.accepted = true;
+                    }
+                }
+            }
+
+            Rectangle {
+                id: leftTabScroll
+                objectName: "leftTabScroll"
+                anchors.left: parent.left
+                anchors.verticalCenter: parent.verticalCenter
+                width: 24
+                height: parent.height
+                visible: tabFlick.contentX > 0
+                color: win.darkMode ? "#181818" : "#f4f4f4"
+                z: 1
+
+                Label {
+                    anchors.centerIn: parent
+                    text: "‹"
+                    color: win.textColor
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: win.scrollTabs(-1)
+                }
+            }
+
+            Rectangle {
+                id: rightTabScroll
+                objectName: "rightTabScroll"
+                anchors.right: parent.right
+                anchors.verticalCenter: parent.verticalCenter
+                width: 24
+                height: parent.height
+                visible: tabFlick.contentX + tabFlick.width < tabFlick.contentWidth
+                color: win.darkMode ? "#181818" : "#f4f4f4"
+                z: 1
+
+                Label {
+                    anchors.centerIn: parent
+                    text: "›"
+                    color: win.textColor
+                }
+
+                MouseArea {
+                    anchors.fill: parent
+                    cursorShape: Qt.PointingHandCursor
+                    onClicked: win.scrollTabs(1)
+                }
+            }
+        }
 
         Flickable {
             id: editorFlick
@@ -533,7 +788,7 @@ ApplicationWindow {
                 id: editor
                 objectName: "sourceEditor"
                 x: Math.round((editorFlick.width - width) / 2)
-                y: Math.max(42, Math.round(win.height * 0.05))
+                y: Math.max(72, Math.round(win.height * 0.05))
                 width: win.editorWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
                 text: ""
@@ -559,6 +814,18 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                onCursorPositionChanged: {
+                    if (!backend.restoringActiveBuffer)
+                        backend.updateActiveEditorState(cursorPosition, selectionStart, selectionEnd);
+                }
+                onSelectionStartChanged: {
+                    if (!backend.restoringActiveBuffer)
+                        backend.updateActiveEditorState(cursorPosition, selectionStart, selectionEnd);
+                }
+                onSelectionEndChanged: {
+                    if (!backend.restoringActiveBuffer)
+                        backend.updateActiveEditorState(cursorPosition, selectionStart, selectionEnd);
+                }
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -773,7 +1040,12 @@ ApplicationWindow {
                 onTextChanged: {
                     if (win.searchUpdating)
                         return;
+                    if (backend.restoringActiveBuffer) {
+                        activeBufferRestoreTimer.restart();
+                        return;
+                    }
                     var contentChanged = backend.editorTextChanged();
+                    backend.updateActiveEditorState(cursorPosition, selectionStart, selectionEnd);
                     if (win.searchOpen && contentChanged)
                         win.updateSearch();
                 }
@@ -791,6 +1063,7 @@ ApplicationWindow {
 
                 Component.onCompleted: {
                     backend.attachDocument(textDocument);
+                    win.restoreActiveCursor();
                     forceActiveFocus();
                 }
             }
