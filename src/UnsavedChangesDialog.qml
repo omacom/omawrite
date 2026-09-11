@@ -28,6 +28,24 @@ Dialog {
     y: Math.round((containerHeight - height) / 2)
     padding: 20
 
+    Shortcut {
+        sequence: "C"
+        enabled: root.opened
+        onActivated: cancelButton.clicked()
+    }
+
+    Shortcut {
+        sequence: "D"
+        enabled: root.opened
+        onActivated: discardButton.clicked()
+    }
+
+    Shortcut {
+        sequence: "S"
+        enabled: root.opened
+        onActivated: saveButton.clicked()
+    }
+
     background: Rectangle {
         color: root.darkMode ? "#1a1a1a" : "#ffffff"
         border.color: root.darkMode ? "#343434" : "#d8d8d8"
@@ -68,6 +86,7 @@ Dialog {
             SquareDialogButton {
                 id: cancelButton
                 text: "Cancel"
+                formattedText: "<u>C</u>ancel"
                 darkMode: root.darkMode
                 textScale: root.textScale
                 labelColor: root.textColor
@@ -81,6 +100,7 @@ Dialog {
             SquareDialogButton {
                 id: discardButton
                 text: "Discard"
+                formattedText: "<u>D</u>iscard"
                 darkMode: root.darkMode
                 textScale: root.textScale
                 labelColor: root.textColor
@@ -97,6 +117,7 @@ Dialog {
             SquareDialogButton {
                 id: saveButton
                 text: "Save"
+                formattedText: "<u>S</u>ave"
                 primary: true
                 darkMode: root.darkMode
                 textScale: root.textScale

@@ -9,6 +9,7 @@ Button {
     property color labelColor: primary ? "#ffffff" : "#d0d0d0"
     property color activeColor: "#428bca"
     property real textScale: 1
+    property string formattedText: ""
 
     leftPadding: 16
     rightPadding: 16
@@ -19,7 +20,8 @@ Button {
     Keys.onEnterPressed: clicked()
 
     contentItem: Label {
-        text: control.text
+        text: control.formattedText.length > 0 ? control.formattedText : control.text
+        textFormat: control.formattedText.length > 0 ? Text.RichText : Text.PlainText
         color: control.labelColor
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
