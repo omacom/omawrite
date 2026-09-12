@@ -198,7 +198,15 @@ void Backend::attachDocument(QObject *textDocument) {
             });
 
     applyDocumentTypography();
-    restoreRecovery();
+
+    // A pad has no unsaved work to recover — the file on disk is always the
+    // document. Restoring a draft here would be actively harmful: it marks the
+    // document modified, which makes main() skip opening the file at all, and
+    // the autosave would then write that stale draft over the newer file.
+    if (m_padMode)
+        clearRecovery();
+    else
+        restoreRecovery();
 }
 
 void Backend::openDialog() {
@@ -582,6 +590,10 @@ void Backend::savePadCursorPosition(int position) {
 }
 
 void Backend::scheduleRecovery() {
+    // Pads save themselves; a recovery draft would only be a stale copy of a
+    // file that is already current.
+    if (m_padMode)
+        return;
     m_recoveryTimer.start();
 }
 

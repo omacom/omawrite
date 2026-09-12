@@ -5,6 +5,9 @@
 #include <QQmlEngine>
 #include <QQuickStyle>
 #include <QQuickTextDocument>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -15,6 +18,9 @@ class OmawriteTest : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
+        // Recovery drafts go to AppDataLocation; keep the suite out of the
+        // real one so a test run cannot touch a live pad's state.
+        QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
@@ -349,6 +355,75 @@ private slots:
 
         backend.open(QUrl::fromLocalFile(path));
         QCOMPARE(restoreSpy.count(), 0);
+    }
+
+    // A draft left by an abnormally-ended session used to be adopted on
+    // attach, which marks the document modified — and main() only opens the
+    // file when it is unmodified. The pad would then autosave that stale draft
+    // straight over the newer file on disk, with nobody typing anything.
+    void padModeIgnoresAndClearsARecoveryDraft() {
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QVERIFY(!stateDirectory.isEmpty());
+        QDir().mkpath(stateDirectory);
+        const QDir stateDir(stateDirectory);
+        for (const QString &leftover : stateDir.entryList({QStringLiteral("recovery-*.json")}, QDir::Files))
+            QFile::remove(stateDir.filePath(leftover));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+        QFile disk(path);
+        QVERIFY(disk.open(QIODevice::WriteOnly | QIODevice::Text));
+        disk.write("the newer content that is actually on disk\n");
+        disk.close();
+
+        QFile draft(stateDir.filePath(QStringLiteral("recovery-0.json")));
+        QVERIFY(draft.open(QIODevice::WriteOnly));
+        draft.write(QJsonDocument(QJsonObject{
+            {QStringLiteral("fileUrl"), QUrl::fromLocalFile(path).toString()},
+            {QStringLiteral("text"), QStringLiteral("a stale draft")}}).toJson());
+        draft.close();
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        QVERIFY(!backend.modified());
+        QVERIFY(!QFileInfo::exists(stateDir.filePath(QStringLiteral("recovery-0.json"))));
+
+        backend.open(QUrl::fromLocalFile(path));
+        backend.flushPad();
+        QCOMPARE(readAll(path),
+                 QStringLiteral("the newer content that is actually on disk\n"));
+    }
+
+    void padModeWritesNoRecoveryDrafts() {
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QDir().mkpath(stateDirectory);
+        const QDir stateDir(stateDirectory);
+        for (const QString &leftover : stateDir.entryList({QStringLiteral("recovery-*.json")}, QDir::Files))
+            QFile::remove(stateDir.filePath(leftover));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("typing into a pad"));
+        QVERIFY(backend.editorTextChanged());
+        QTest::qWait(900);
+
+        QCOMPARE(stateDir.entryList({QStringLiteral("recovery-*.json")}, QDir::Files).count(), 0);
     }
 
     void scalesTextWithDesktopTextSize() {
