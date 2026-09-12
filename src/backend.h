@@ -20,6 +20,7 @@ class Backend : public QObject {
     Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
+    Q_PROPERTY(bool padMode READ padMode CONSTANT)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
@@ -39,6 +40,8 @@ public:
     QString fileName() const;
 
     bool modified() const { return m_modified; }
+    bool padMode() const { return m_padMode; }
+    void setPadMode(bool padMode);
     QString status() const { return m_status; }
     int wordCount() const { return m_wordCount; }
     bool darkMode() const { return m_darkMode; }
@@ -58,6 +61,9 @@ public:
     Q_INVOKABLE void open(const QUrl &url);
     Q_INVOKABLE void save();
     Q_INVOKABLE void saveForClose();
+    Q_INVOKABLE void flushPad();
+    Q_INVOKABLE int padCursorPosition() const;
+    Q_INVOKABLE void savePadCursorPosition(int position);
     Q_INVOKABLE void saveAsDialog();
     Q_INVOKABLE void saveAs(const QUrl &url);
     Q_INVOKABLE void fileDialogCanceled();
@@ -87,6 +93,7 @@ signals:
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
+    void padCursorRestoreRequested(int position);
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
@@ -102,6 +109,9 @@ private:
     void scheduleWordCount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
+    QString padCursorSettingKey() const;
+    void scheduleAutosave();
+    void autosaveNow();
     void scheduleRecovery();
     void writeRecovery();
     void restoreRecovery();
@@ -125,6 +135,8 @@ private:
     int m_lastChangeAdded = 0;
     QTimer m_wordCountTimer;
     QTimer m_recoveryTimer;
+    QTimer m_autosaveTimer;
+    bool m_padMode = false;
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;

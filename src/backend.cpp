@@ -35,6 +35,7 @@
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString padCursorSettingPrefix = QStringLiteral("pad/cursor/");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -97,6 +98,12 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
+
+    // Pad mode writes straight through to the file instead of leaving the
+    // document dirty, so there is never anything to save on the way out.
+    m_autosaveTimer.setSingleShot(true);
+    m_autosaveTimer.setInterval(400);
+    connect(&m_autosaveTimer, &QTimer::timeout, this, &Backend::autosaveNow);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
@@ -191,7 +198,15 @@ void Backend::attachDocument(QObject *textDocument) {
             });
 
     applyDocumentTypography();
-    restoreRecovery();
+
+    // A pad has no unsaved work to recover — the file on disk is always the
+    // document. Restoring a draft here would be actively harmful: it marks the
+    // document modified, which makes main() skip opening the file at all, and
+    // the autosave would then write that stale draft over the newer file.
+    if (m_padMode)
+        clearRecovery();
+    else
+        restoreRecovery();
 }
 
 void Backend::openDialog() {
@@ -220,6 +235,11 @@ void Backend::open(const QUrl &url) {
     watchCurrentFile();
     setModified(false);
     setStatus(QStringLiteral("Opened %1").arg(fileName()));
+
+    // Only once the text and its typography are in place, so the editor puts
+    // the caret against the final layout rather than the one it replaced.
+    if (m_padMode)
+        emit padCursorRestoreRequested(padCursorPosition());
 }
 
 void Backend::save() {
@@ -356,8 +376,10 @@ bool Backend::editorTextChanged() {
 
     scheduleWordCount();
     setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
+    if (!m_padMode)
+        setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
+    scheduleAutosave();
     return true;
 }
 
@@ -513,7 +535,65 @@ void Backend::saveTo(const QUrl &url) {
         emit closeAfterSave();
 }
 
+void Backend::setPadMode(bool padMode) {
+    m_padMode = padMode;
+}
+
+void Backend::scheduleAutosave() {
+    if (!m_padMode)
+        return;
+    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
+        return;
+    m_autosaveTimer.start();
+}
+
+void Backend::autosaveNow() {
+    if (!m_padMode || !m_modified)
+        return;
+    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
+        return;
+    saveTo(m_fileUrl);
+}
+
+// Called on the way out so the last few keystrokes, still inside the debounce
+// window, land on disk before the window goes away.
+void Backend::flushPad() {
+    m_autosaveTimer.stop();
+    autosaveNow();
+}
+
+// Each pad remembers its own caret, keyed by the file it writes to, so two
+// pads on two files do not inherit each other's position.
+QString Backend::padCursorSettingKey() const {
+    if (!m_fileUrl.isLocalFile())
+        return QString();
+    return padCursorSettingPrefix +
+           QString::fromLatin1(QUrl::toPercentEncoding(m_fileUrl.toLocalFile()));
+}
+
+// -1 means "nothing remembered yet", which the editor reads as end of document:
+// a pad you have never opened should still be ready to type into.
+int Backend::padCursorPosition() const {
+    const QString key = padCursorSettingKey();
+    if (key.isEmpty())
+        return -1;
+    return QSettings().value(key, -1).toInt();
+}
+
+void Backend::savePadCursorPosition(int position) {
+    if (!m_padMode || position < 0)
+        return;
+    const QString key = padCursorSettingKey();
+    if (key.isEmpty())
+        return;
+    QSettings().setValue(key, position);
+}
+
 void Backend::scheduleRecovery() {
+    // Pads save themselves; a recovery draft would only be a stale copy of a
+    // file that is already current.
+    if (m_padMode)
+        return;
     m_recoveryTimer.start();
 }
 

@@ -4,6 +4,10 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QStandardPaths>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -14,6 +18,9 @@ class OmawriteTest : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
+        // Recovery drafts go to AppDataLocation; keep the suite out of the
+        // real one so a test run cannot touch a live pad's state.
+        QStandardPaths::setTestModeEnabled(true);
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
@@ -192,6 +199,233 @@ private slots:
         QCOMPARE(openDialogSpy.count(), 1);
     }
 
+    // --- OmaPad: pad mode -------------------------------------------------
+    //
+    // The pad has no dirty state to resolve on the way out: edits land on disk
+    // behind a short debounce, and flushPad() drains whatever is still in it.
+
+    void autosavesInPadMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("typed into the pad"));
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(backend.modified());
+
+        // No keystroke, no button: the debounce alone puts it on disk.
+        QTRY_COMPARE(readAll(path), QStringLiteral("typed into the pad"));
+        QVERIFY(!backend.modified());
+    }
+
+    void flushPadWritesWithoutWaitingForTheDebounce() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("last keystroke"));
+        QVERIFY(backend.editorTextChanged());
+
+        // This is what closing the window does. It must land synchronously,
+        // because the window is gone immediately afterwards.
+        backend.flushPad();
+        QCOMPARE(readAll(path), QStringLiteral("last keystroke"));
+        QVERIFY(!backend.modified());
+    }
+
+    void leavesSavingAloneOutsidePadMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("ordinary editing"));
+        QVERIFY(backend.editorTextChanged());
+
+        QTest::qWait(700);
+        QCOMPARE(readAll(path), QString());
+        QVERIFY(backend.modified());
+    }
+
+    void padWindowDropsTheDirtyMarker() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        backend.setPadMode(true);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        // The pad is always saved, so the title never carries the dirty marker.
+        QVERIFY(!window->property("title").toString().startsWith(QLatin1Char('*')));
+        QVERIFY(window->property("title").toString().endsWith(QStringLiteral(" - Omawrite")));
+    }
+
+    void remembersThePadCursorPerFile() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("first.md"));
+        const QString second = directory.filePath(QStringLiteral("second.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        backend.saveAs(QUrl::fromLocalFile(first));
+        // Nothing remembered yet: the editor reads -1 as end of document.
+        QCOMPARE(backend.padCursorPosition(), -1);
+        backend.savePadCursorPosition(12);
+        QCOMPARE(backend.padCursorPosition(), 12);
+
+        // A second pad keeps its own caret rather than inheriting the first.
+        backend.saveAs(QUrl::fromLocalFile(second));
+        QCOMPARE(backend.padCursorPosition(), -1);
+        backend.savePadCursorPosition(3);
+        QCOMPARE(backend.padCursorPosition(), 3);
+
+        backend.saveAs(QUrl::fromLocalFile(first));
+        QCOMPARE(backend.padCursorPosition(), 12);
+    }
+
+    void restoresThePadCursorOnOpen() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+        seed.write("# pad\n\nsome text to put a caret into\n");
+        seed.close();
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        QSignalSpy restoreSpy(&backend, &Backend::padCursorRestoreRequested);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(restoreSpy.count(), 1);
+        QCOMPARE(restoreSpy.takeFirst().at(0).toInt(), -1);
+
+        backend.savePadCursorPosition(9);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(restoreSpy.count(), 1);
+        QCOMPARE(restoreSpy.takeFirst().at(0).toInt(), 9);
+    }
+
+    void doesNotRememberACursorOutsidePadMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        QSignalSpy restoreSpy(&backend, &Backend::padCursorRestoreRequested);
+        backend.savePadCursorPosition(7);
+        QCOMPARE(backend.padCursorPosition(), -1);
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(restoreSpy.count(), 0);
+    }
+
+    // A draft left by an abnormally-ended session used to be adopted on
+    // attach, which marks the document modified — and main() only opens the
+    // file when it is unmodified. The pad would then autosave that stale draft
+    // straight over the newer file on disk, with nobody typing anything.
+    void padModeIgnoresAndClearsARecoveryDraft() {
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QVERIFY(!stateDirectory.isEmpty());
+        QDir().mkpath(stateDirectory);
+        const QDir stateDir(stateDirectory);
+        for (const QString &leftover : stateDir.entryList({QStringLiteral("recovery-*.json")}, QDir::Files))
+            QFile::remove(stateDir.filePath(leftover));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+        QFile disk(path);
+        QVERIFY(disk.open(QIODevice::WriteOnly | QIODevice::Text));
+        disk.write("the newer content that is actually on disk\n");
+        disk.close();
+
+        QFile draft(stateDir.filePath(QStringLiteral("recovery-0.json")));
+        QVERIFY(draft.open(QIODevice::WriteOnly));
+        draft.write(QJsonDocument(QJsonObject{
+            {QStringLiteral("fileUrl"), QUrl::fromLocalFile(path).toString()},
+            {QStringLiteral("text"), QStringLiteral("a stale draft")}}).toJson());
+        draft.close();
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        QVERIFY(!backend.modified());
+        QVERIFY(!QFileInfo::exists(stateDir.filePath(QStringLiteral("recovery-0.json"))));
+
+        backend.open(QUrl::fromLocalFile(path));
+        backend.flushPad();
+        QCOMPARE(readAll(path),
+                 QStringLiteral("the newer content that is actually on disk\n"));
+    }
+
+    void padModeWritesNoRecoveryDrafts() {
+        const QString stateDirectory =
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+        QDir().mkpath(stateDirectory);
+        const QDir stateDir(stateDirectory);
+        for (const QString &leftover : stateDir.entryList({QStringLiteral("recovery-*.json")}, QDir::Files))
+            QFile::remove(stateDir.filePath(leftover));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("typing into a pad"));
+        QVERIFY(backend.editorTextChanged());
+        QTest::qWait(900);
+
+        QCOMPARE(stateDir.entryList({QStringLiteral("recovery-*.json")}, QDir::Files).count(), 0);
+    }
+
     void scalesTextWithDesktopTextSize() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -248,6 +482,30 @@ private slots:
 
 private:
     QTemporaryDir m_settingsDirectory;
+private:
+    // A minimal stand-in for the editor in Main.qml: a TextEdit whose
+    // QQuickTextDocument is what Backend::attachDocument expects.
+    QObject *createEditor() {
+        m_editorComponent.reset(new QQmlComponent(&m_editorEngine));
+        m_editorComponent->setData(QByteArrayLiteral(
+            "import QtQuick\nTextEdit { textFormat: TextEdit.PlainText }"), QUrl());
+        if (!m_editorComponent->isReady()) {
+            qWarning() << m_editorComponent->errorString();
+            return nullptr;
+        }
+        return m_editorComponent->create();
+    }
+
+    static QString readAll(const QString &path) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return QString();
+        return QString::fromUtf8(file.readAll());
+    }
+
+    QQmlEngine m_editorEngine;
+    QScopedPointer<QQmlComponent> m_editorComponent;
+
 };
 
 QTEST_MAIN(OmawriteTest)

@@ -27,6 +27,29 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
 
+## Pad mode
+
+    omawrite --pad ~/notes/scratch.md
+
+`--pad` is for the one file you keep coming back to — a scratch pad on a
+keybinding, a journal, a notes window that lives on a corner of the screen.
+The file is given up front, so there is nothing to name and nothing to pick,
+and the document is never left dirty:
+
+- every edit is written to the file behind a short debounce, so the copy on
+  disk keeps up on its own,
+- closing flushes whatever is still inside that debounce and then closes, with
+  no unsaved-changes dialog in the way,
+- the title never carries the `*` marker, because there is never unsaved work
+  to mark.
+
+A pad also remembers where you left the caret, per file, and puts it back on
+open, so returning to a pad does not mean finding your place again. A pad with
+nothing remembered yet opens at the end of the document.
+
+`Ctrl+S` still saves, and everything else behaves as it always does. Without
+`--pad` nothing changes.
+
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
 Omawrite at the size it is designed around; larger and smaller sizes scale from there.
