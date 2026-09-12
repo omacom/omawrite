@@ -97,6 +97,12 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
+
+    // Pad mode writes straight through to the file instead of leaving the
+    // document dirty, so there is never anything to save on the way out.
+    m_autosaveTimer.setSingleShot(true);
+    m_autosaveTimer.setInterval(400);
+    connect(&m_autosaveTimer, &QTimer::timeout, this, &Backend::autosaveNow);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
@@ -356,8 +362,10 @@ bool Backend::editorTextChanged() {
 
     scheduleWordCount();
     setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
+    if (!m_padMode)
+        setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
+    scheduleAutosave();
     return true;
 }
 
@@ -511,6 +519,33 @@ void Backend::saveTo(const QUrl &url) {
 
     if (shouldClose)
         emit closeAfterSave();
+}
+
+void Backend::setPadMode(bool padMode) {
+    m_padMode = padMode;
+}
+
+void Backend::scheduleAutosave() {
+    if (!m_padMode)
+        return;
+    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
+        return;
+    m_autosaveTimer.start();
+}
+
+void Backend::autosaveNow() {
+    if (!m_padMode || !m_modified)
+        return;
+    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
+        return;
+    saveTo(m_fileUrl);
+}
+
+// Called on the way out so the last few keystrokes, still inside the debounce
+// window, land on disk before the window goes away.
+void Backend::flushPad() {
+    m_autosaveTimer.stop();
+    autosaveNow();
 }
 
 void Backend::scheduleRecovery() {

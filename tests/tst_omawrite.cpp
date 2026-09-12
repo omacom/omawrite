@@ -4,6 +4,7 @@
 #include <QQmlContext>
 #include <QQmlEngine>
 #include <QQuickStyle>
+#include <QQuickTextDocument>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -192,6 +193,91 @@ private slots:
         QCOMPARE(openDialogSpy.count(), 1);
     }
 
+    // --- OmaPad: pad mode -------------------------------------------------
+    //
+    // The pad has no dirty state to resolve on the way out: edits land on disk
+    // behind a short debounce, and flushPad() drains whatever is still in it.
+
+    void autosavesInPadMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("typed into the pad"));
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(backend.modified());
+
+        // No keystroke, no button: the debounce alone puts it on disk.
+        QTRY_COMPARE(readAll(path), QStringLiteral("typed into the pad"));
+        QVERIFY(!backend.modified());
+    }
+
+    void flushPadWritesWithoutWaitingForTheDebounce() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("last keystroke"));
+        QVERIFY(backend.editorTextChanged());
+
+        // This is what closing the window does. It must land synchronously,
+        // because the window is gone immediately afterwards.
+        backend.flushPad();
+        QCOMPARE(readAll(path), QStringLiteral("last keystroke"));
+        QVERIFY(!backend.modified());
+    }
+
+    void leavesSavingAloneOutsidePadMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("ordinary editing"));
+        QVERIFY(backend.editorTextChanged());
+
+        QTest::qWait(700);
+        QCOMPARE(readAll(path), QString());
+        QVERIFY(backend.modified());
+    }
+
+    void padWindowDropsTheDirtyMarker() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        backend.setPadMode(true);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        // The pad is always saved, so the title never carries the dirty marker.
+        QVERIFY(!window->property("title").toString().startsWith(QLatin1Char('*')));
+        QVERIFY(window->property("title").toString().endsWith(QStringLiteral(" - Omawrite")));
+    }
+
     void scalesTextWithDesktopTextSize() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -248,6 +334,30 @@ private slots:
 
 private:
     QTemporaryDir m_settingsDirectory;
+private:
+    // A minimal stand-in for the editor in Main.qml: a TextEdit whose
+    // QQuickTextDocument is what Backend::attachDocument expects.
+    QObject *createEditor() {
+        m_editorComponent.reset(new QQmlComponent(&m_editorEngine));
+        m_editorComponent->setData(QByteArrayLiteral(
+            "import QtQuick\nTextEdit { textFormat: TextEdit.PlainText }"), QUrl());
+        if (!m_editorComponent->isReady()) {
+            qWarning() << m_editorComponent->errorString();
+            return nullptr;
+        }
+        return m_editorComponent->create();
+    }
+
+    static QString readAll(const QString &path) {
+        QFile file(path);
+        if (!file.open(QIODevice::ReadOnly | QIODevice::Text))
+            return QString();
+        return QString::fromUtf8(file.readAll());
+    }
+
+    QQmlEngine m_editorEngine;
+    QScopedPointer<QQmlComponent> m_editorComponent;
+
 };
 
 QTEST_MAIN(OmawriteTest)

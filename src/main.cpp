@@ -19,6 +19,10 @@ int main(int argc, char *argv[]) {
     app.setDesktopFileName(QStringLiteral("omawrite"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
 
+    // `--pad` keeps one file open and saves it continuously: no dirty state to
+    // resolve, and no dialog between the writer and the door.
+    const bool padMode = app.arguments().contains(QStringLiteral("--pad"));
+
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Regular.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Italic.ttf"));
     QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/iAWriterMonoS-Bold.ttf"));
@@ -29,6 +33,7 @@ int main(int argc, char *argv[]) {
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
     Backend backend(&app);
+    backend.setPadMode(padMode);
     SystemTheme systemTheme(&app);
     backend.setDarkMode(systemTheme.darkMode());
     QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
@@ -72,8 +77,13 @@ int main(int argc, char *argv[]) {
     backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
 
     const QStringList args = app.arguments();
-    if (args.size() > 1 && !backend.modified())
-        backend.open(QUrl::fromLocalFile(args.at(1)));
+    for (qsizetype i = 1; i < args.size(); ++i) {
+        if (args.at(i).startsWith(QLatin1Char('-')))
+            continue;
+        if (!backend.modified())
+            backend.open(QUrl::fromLocalFile(args.at(i)));
+        break;
+    }
 
     return app.exec();
 }

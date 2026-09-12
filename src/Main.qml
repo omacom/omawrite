@@ -13,7 +13,8 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    // A pad is always saved, so it never carries the dirty marker.
+    title: (backend.modified && !backend.padMode ? "* " : "") + backend.fileName + " - Omawrite"
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -44,6 +45,13 @@ ApplicationWindow {
     color: pageColor
 
     onClosing: function(close) {
+        // The pad closes on the spot: flush whatever is still inside the
+        // autosave debounce and go. No prompt, no waiting.
+        if (backend.padMode) {
+            backend.flushPad();
+            return;
+        }
+
         if (closeConfirmed || !backend.modified)
             return;
 
