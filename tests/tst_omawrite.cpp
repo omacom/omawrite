@@ -278,6 +278,79 @@ private slots:
         QVERIFY(window->property("title").toString().endsWith(QStringLiteral(" - Omawrite")));
     }
 
+    void remembersThePadCursorPerFile() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString first = directory.filePath(QStringLiteral("first.md"));
+        const QString second = directory.filePath(QStringLiteral("second.md"));
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        backend.saveAs(QUrl::fromLocalFile(first));
+        // Nothing remembered yet: the editor reads -1 as end of document.
+        QCOMPARE(backend.padCursorPosition(), -1);
+        backend.savePadCursorPosition(12);
+        QCOMPARE(backend.padCursorPosition(), 12);
+
+        // A second pad keeps its own caret rather than inheriting the first.
+        backend.saveAs(QUrl::fromLocalFile(second));
+        QCOMPARE(backend.padCursorPosition(), -1);
+        backend.savePadCursorPosition(3);
+        QCOMPARE(backend.padCursorPosition(), 3);
+
+        backend.saveAs(QUrl::fromLocalFile(first));
+        QCOMPARE(backend.padCursorPosition(), 12);
+    }
+
+    void restoresThePadCursorOnOpen() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("pad.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+        seed.write("# pad\n\nsome text to put a caret into\n");
+        seed.close();
+
+        Backend backend;
+        backend.setPadMode(true);
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+
+        QSignalSpy restoreSpy(&backend, &Backend::padCursorRestoreRequested);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(restoreSpy.count(), 1);
+        QCOMPARE(restoreSpy.takeFirst().at(0).toInt(), -1);
+
+        backend.savePadCursorPosition(9);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(restoreSpy.count(), 1);
+        QCOMPARE(restoreSpy.takeFirst().at(0).toInt(), 9);
+    }
+
+    void doesNotRememberACursorOutsidePadMode() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("doc.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(createEditor());
+        QVERIFY(editor);
+        backend.attachDocument(editor->property("textDocument").value<QObject *>());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        QSignalSpy restoreSpy(&backend, &Backend::padCursorRestoreRequested);
+        backend.savePadCursorPosition(7);
+        QCOMPARE(backend.padCursorPosition(), -1);
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(restoreSpy.count(), 0);
+    }
+
     void scalesTextWithDesktopTextSize() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

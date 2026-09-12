@@ -35,6 +35,7 @@
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+const QString padCursorSettingPrefix = QStringLiteral("pad/cursor/");
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -226,6 +227,11 @@ void Backend::open(const QUrl &url) {
     watchCurrentFile();
     setModified(false);
     setStatus(QStringLiteral("Opened %1").arg(fileName()));
+
+    // Only once the text and its typography are in place, so the editor puts
+    // the caret against the final layout rather than the one it replaced.
+    if (m_padMode)
+        emit padCursorRestoreRequested(padCursorPosition());
 }
 
 void Backend::save() {
@@ -546,6 +552,33 @@ void Backend::autosaveNow() {
 void Backend::flushPad() {
     m_autosaveTimer.stop();
     autosaveNow();
+}
+
+// Each pad remembers its own caret, keyed by the file it writes to, so two
+// pads on two files do not inherit each other's position.
+QString Backend::padCursorSettingKey() const {
+    if (!m_fileUrl.isLocalFile())
+        return QString();
+    return padCursorSettingPrefix +
+           QString::fromLatin1(QUrl::toPercentEncoding(m_fileUrl.toLocalFile()));
+}
+
+// -1 means "nothing remembered yet", which the editor reads as end of document:
+// a pad you have never opened should still be ready to type into.
+int Backend::padCursorPosition() const {
+    const QString key = padCursorSettingKey();
+    if (key.isEmpty())
+        return -1;
+    return QSettings().value(key, -1).toInt();
+}
+
+void Backend::savePadCursorPosition(int position) {
+    if (!m_padMode || position < 0)
+        return;
+    const QString key = padCursorSettingKey();
+    if (key.isEmpty())
+        return;
+    QSettings().setValue(key, position);
 }
 
 void Backend::scheduleRecovery() {

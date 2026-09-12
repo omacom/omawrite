@@ -48,6 +48,7 @@ ApplicationWindow {
         // The pad closes on the spot: flush whatever is still inside the
         // autosave debounce and go. No prompt, no waiting.
         if (backend.padMode) {
+            backend.savePadCursorPosition(editor.cursorPosition);
             backend.flushPad();
             return;
         }
@@ -260,6 +261,10 @@ ApplicationWindow {
         function onCloseAfterSave() {
             win.closeConfirmed = true;
             win.close();
+        }
+
+        function onPadCursorRestoreRequested(position) {
+            editor.restorePadCursor(position);
         }
 
         function onSaveSucceeded() {
@@ -567,6 +572,22 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+
+                // Put the caret back where this pad was left. Re-asserting the
+                // position also keeps the caret correct when the window is
+                // resized just after the document loads — a floating rule, a
+                // restored geometry — which relays the document out underneath
+                // a cursor rectangle that is not recomputed for it, leaving the
+                // caret drawn a line high until the first keystroke.
+                function restorePadCursor(position) {
+                    var target = position < 0
+                        ? length
+                        : Math.max(0, Math.min(length, position));
+                    cursorPosition = 0;
+                    cursorPosition = target;
+                    forceActiveFocus();
+                    editorFlick.ensureCursorVisible();
+                }
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);

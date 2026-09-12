@@ -43,6 +43,10 @@ and the document is never left dirty:
 - the title never carries the `*` marker, because there is never unsaved work
   to mark.
 
+A pad also remembers where you left the caret, per file, and puts it back on
+open, so returning to a pad does not mean finding your place again. A pad with
+nothing remembered yet opens at the end of the document.
+
 `Ctrl+S` still saves, and everything else behaves as it always does. Without
 `--pad` nothing changes.
 

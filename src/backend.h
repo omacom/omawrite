@@ -62,6 +62,8 @@ public:
     Q_INVOKABLE void save();
     Q_INVOKABLE void saveForClose();
     Q_INVOKABLE void flushPad();
+    Q_INVOKABLE int padCursorPosition() const;
+    Q_INVOKABLE void savePadCursorPosition(int position);
     Q_INVOKABLE void saveAsDialog();
     Q_INVOKABLE void saveAs(const QUrl &url);
     Q_INVOKABLE void fileDialogCanceled();
@@ -91,6 +93,7 @@ signals:
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
+    void padCursorRestoreRequested(int position);
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
@@ -106,6 +109,7 @@ private:
     void scheduleWordCount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
+    QString padCursorSettingKey() const;
     void scheduleAutosave();
     void autosaveNow();
     void scheduleRecovery();
