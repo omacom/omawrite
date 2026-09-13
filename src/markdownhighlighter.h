@@ -47,6 +47,8 @@ private:
     QString m_customAccent;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
+    QTextCharFormat m_checkboxMarkerFormat;
+    QTextCharFormat m_checkedItemFormat;
     QTextCharFormat m_headingFormat;
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;

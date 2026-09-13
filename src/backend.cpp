@@ -373,6 +373,13 @@ QVariantList Backend::hiddenRangesAt(int position) const {
 
     const int lineStart = block.position();
     QList<QPair<int, int>> spans;
+    static const QRegularExpression checkboxRe(
+        QStringLiteral("^(\\s*[-+*]\\s+)(\\[[ xX]\\])(?=\\s|$)"));
+    const QRegularExpressionMatch checkbox = checkboxRe.match(block.text());
+    if (checkbox.hasMatch()) {
+        spans.append({lineStart + checkbox.capturedStart(2),
+                      lineStart + checkbox.capturedStart(2) + checkbox.capturedLength(2)});
+    }
     const QList<MarkdownHighlighter::InlineMarkup> markup =
         MarkdownHighlighter::inlineMarkup(block.text());
     for (const MarkdownHighlighter::InlineMarkup &item : markup) {

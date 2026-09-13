@@ -173,6 +173,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+L"
+        context: Qt.WindowShortcut
+        onActivated: editor.toggleCheckbox()
+    }
+
+    Shortcut {
         sequence: "Ctrl+?"
         context: Qt.ApplicationShortcut
         onActivated: shortcutsDialog.open()
@@ -331,7 +337,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+L  Toggle checkbox\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -598,6 +604,85 @@ ApplicationWindow {
                     }
                 }
 
+                property var checklistItems: []
+                function rebuildChecklistItems() {
+                    var items = [];
+                    var offset = 0;
+                    var lines = text.split("\n");
+                    for (var i = 0; i < lines.length; ++i) {
+                        var line = lines[i];
+                        var match = line.match(/^(\s*[-+*]\s+)\[([ xX])\](?=\s|$)/);
+                        if (match) {
+                            items.push({
+                                position: offset + match[1].length,
+                                checked: match[2].toLowerCase() === "x"
+                            });
+                        }
+                        offset += line.length + 1;
+                    }
+                    checklistItems = items;
+                }
+
+                function toggleCheckbox() {
+                    var start = Math.min(selectionStart, selectionEnd);
+                    var end = Math.max(selectionStart, selectionEnd);
+                    var lineStart = text.lastIndexOf("\n", Math.max(0, start - 1)) + 1;
+                    var lineEnd = text.indexOf("\n", start);
+                    if (lineEnd < 0)
+                        lineEnd = text.length;
+                    var line = text.slice(lineStart, lineEnd);
+                    var match = line.match(/^(\s*)([-+*])(\s+)(?:\[([ xX])\])?(\s*)(.*)$/);
+                    if (!match)
+                        return;
+
+                    var prefixLength = match[1].length + match[2].length + match[3].length;
+                    var markerStart = lineStart + prefixLength;
+                    var selectionLength = end - start;
+
+                    if (match[4] !== undefined) {
+                        var checked = match[4].toLowerCase() === "x";
+                        var existingGap = match[5] || "";
+                        var hasContent = (match[6] || "").length > 0;
+                        var newGap = hasContent && existingGap.length === 0 ? " " : existingGap;
+                        EditorMutations.replaceRange(editor, markerStart,
+                                                     markerStart + 3,
+                                                     (checked ? "[ ]" : "[x]"));
+                    } else {
+                        EditorMutations.replaceRange(editor, markerStart, markerStart,
+                                                     "[ ] ");
+                    }
+
+                    cursorPosition = Math.min(text.length, start + selectionLength);
+                    if (selectionLength > 0)
+                        select(start, start + selectionLength);
+                }
+
+                function toggleCheckboxAt(position) {
+                    var lineStart = text.lastIndexOf("\n", Math.max(0, position - 1)) + 1;
+                    var lineEnd = text.indexOf("\n", position);
+                    if (lineEnd < 0)
+                        lineEnd = text.length;
+                    var line = text.slice(lineStart, lineEnd);
+                    var match = line.match(/^(\s*[-+*]\s+)\[([ xX])\](\s*)(.*)$/);
+                    if (!match)
+                        return;
+
+                    var checkboxStart = lineStart + match[1].length;
+                    var existingGap = match[3] || "";
+                    var hasContent = (match[4] || "").length > 0;
+                    var newGap = hasContent && existingGap.length === 0 ? " " : existingGap;
+                    var oldSelectionStart = Math.min(selectionStart, selectionEnd);
+                    var oldSelectionEnd = Math.max(selectionStart, selectionEnd);
+                    EditorMutations.replaceRange(editor, checkboxStart,
+                                                 checkboxStart + 3,
+                                                 (match[2].toLowerCase() === "x" ? "[ ]" : "[x]"));
+                    if (oldSelectionStart !== oldSelectionEnd)
+                        select(oldSelectionStart, oldSelectionEnd);
+                    else
+                        cursorPosition = oldSelectionEnd;
+                    forceActiveFocus();
+                }
+
                 function smartReturn(softBreak) {
                     if (softBreak) {
                         replaceSelectionWith("\n");
@@ -609,6 +694,17 @@ ApplicationWindow {
                     var fences = (before.match(/^\s*```/gm) || []).length;
                     if ((fences % 2) === 1) {
                         replaceSelectionWith("\n");
+                        return;
+                    }
+                    var checkboxMatch = line.match(/^(\s*)([-+*])\s+\[([ xX])\](?:\s+(.*))?$/);
+                    if (checkboxMatch) {
+                        var checkboxContent = checkboxMatch[4] || "";
+                        if (checkboxContent.length === 0) {
+                            EditorMutations.replaceRange(editor, lineStart, cursorPosition, "\n");
+                        } else {
+                            replaceSelectionWith("\n" + checkboxMatch[1]
+                                                 + checkboxMatch[2] + " [ ] ");
+                        }
                         return;
                     }
                     var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
@@ -771,11 +867,65 @@ ApplicationWindow {
                 }
 
                 onTextChanged: {
+                    rebuildChecklistItems();
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
                     if (win.searchOpen && contentChanged)
                         win.updateSearch();
+                }
+
+                Repeater {
+                    id: checklistRepeater
+                    model: editor.checklistItems
+                    delegate: Item {
+                        required property var modelData
+                        readonly property real checkboxSize: Math.max(12, editor.font.pixelSize * 0.72)
+                        readonly property rect markerRect: {
+                            // positionToRectangle() is a plain method call, not a
+                            // tracked property, so this binding otherwise only
+                            // re-evaluates when modelData changes. Loading a
+                            // document reformats line-height right after the
+                            // checklist items are first computed, which moves
+                            // every line but doesn't touch modelData - reading
+                            // implicitHeight (unused otherwise) gives the binding
+                            // a real dependency on layout, so boxes correct
+                            // themselves instead of staying misplaced until the
+                            // next edit rebuilds the list.
+                            var _layoutDependency = editor.implicitHeight;
+                            return editor.positionToRectangle(modelData.position);
+                        }
+                        x: markerRect.x
+                        y: markerRect.y + Math.max(0, (markerRect.height - checkboxSize) / 2)
+                        width: checkboxSize
+                        height: checkboxSize
+                        z: 10
+
+                        Rectangle {
+                            anchors.fill: parent
+                            radius: Math.max(2, width * 0.15)
+                            color: modelData.checked ? win.textColor : "transparent"
+                            border.width: 1
+                            border.color: win.mutedColor
+
+                            Text {
+                                anchors.centerIn: parent
+                                text: "\u2713"
+                                visible: modelData.checked
+                                color: win.pageColor
+                                font.pixelSize: parent.height * 0.72
+                                font.weight: Font.Bold
+                                verticalAlignment: Text.AlignVCenter
+                                horizontalAlignment: Text.AlignHCenter
+                            }
+                        }
+
+                        MouseArea {
+                            anchors.fill: parent
+                            cursorShape: Qt.PointingHandCursor
+                            onClicked: editor.toggleCheckboxAt(modelData.position)
+                        }
+                    }
                 }
 
                 Text {
@@ -791,6 +941,7 @@ ApplicationWindow {
 
                 Component.onCompleted: {
                     backend.attachDocument(textDocument);
+                    rebuildChecklistItems();
                     forceActiveFocus();
                 }
             }
