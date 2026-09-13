@@ -6,6 +6,7 @@
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
+#include <QFont>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -14,6 +15,7 @@
 #include <QPrinter>
 #include <QQuickTextDocument>
 #include <QRegularExpression>
+#include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
 #include <QJsonDocument>
@@ -277,6 +279,18 @@ void Backend::keepExternalVersion() {
     setStatus(QStringLiteral("Kept your version"));
 }
 
+QFont Backend::printFont(const QFont &editorFont, qreal screenDpi) {
+    // The editor sizes its font in pixels, which a printer takes as device dots.
+    // Convert to points at the screen's DPI so the page matches the editor.
+    QFont font = editorFont;
+    if (font.pixelSize() <= 0)
+        return font;
+
+    const qreal dpi = screenDpi > 0.0 ? screenDpi : 96.0;
+    font.setPointSizeF(font.pixelSize() * 72.0 / dpi);
+    return font;
+}
+
 void Backend::printDocument() {
     if (!m_document) {
         setStatus(QStringLiteral("There is no document to print."));
@@ -292,7 +306,10 @@ void Backend::printDocument() {
 
     if (dialog.exec() == QDialog::Accepted) {
         QTextDocument rendered;
-        rendered.setDefaultFont(m_document->defaultFont());
+        const QScreen *screen = m_parentWindow ? m_parentWindow->screen()
+                                               : QGuiApplication::primaryScreen();
+        rendered.setDefaultFont(printFont(m_document->defaultFont(),
+                                          screen ? screen->logicalDotsPerInchY() : 0.0));
         rendered.setMarkdown(currentDocumentText());
         rendered.print(&printer);
     }
