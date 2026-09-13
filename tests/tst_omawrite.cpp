@@ -162,6 +162,33 @@ private slots:
         QCOMPARE(editor->property("wrappedSelectionEnd").toInt(), 12);
     }
 
+    void deletesPreviousWordWithControlW() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("alpha beta  "));
+        editor->setProperty("cursorPosition", 12);
+        QVERIFY(QMetaObject::invokeMethod(editor, "forceActiveFocus"));
+        QCoreApplication::processEvents();
+
+        QWindow *quickWindow = qobject_cast<QWindow *>(window.data());
+        QVERIFY(quickWindow);
+        QTest::keyClick(quickWindow, Qt::Key_W, Qt::ControlModifier);
+
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("alpha "));
+        QCOMPARE(editor->property("cursorPosition").toInt(), 6);
+    }
+
     void savesAndOpensFromFooterButtons() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

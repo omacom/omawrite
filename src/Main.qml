@@ -331,7 +331,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+W  Delete Previous Word\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -731,6 +731,14 @@ ApplicationWindow {
                     return true;
                 }
 
+                function deletePreviousWord() {
+                    var end = Math.max(selectionStart, selectionEnd);
+                    var start = Math.min(selectionStart, selectionEnd);
+                    if (start === end)
+                        start = EditorMutations.previousWhitespaceDelimitedWordStart(text, end);
+                    EditorMutations.replaceRange(editor, start, end, "");
+                }
+
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
                     var pasteKey = (event.key === Qt.Key_V)
@@ -742,6 +750,15 @@ ApplicationWindow {
                     if (pasteKey || shiftInsert) {
                         if (!pasteClipboardUrlAsMarkdownLink())
                             pasteClipboardAsPlainText();
+                        event.accepted = true;
+                        return;
+                    }
+
+                    var deletePreviousWordKey = event.key === Qt.Key_W
+                        && (event.modifiers & Qt.ControlModifier)
+                        && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier));
+                    if (deletePreviousWordKey) {
+                        deletePreviousWord();
                         event.accepted = true;
                         return;
                     }
