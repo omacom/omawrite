@@ -4,6 +4,17 @@ function normalizePlainText(text) {
     return text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
 }
 
+function previousWhitespaceDelimitedWordStart(text, position) {
+    var start = Math.max(0, Math.min(text.length, position));
+
+    while (start > 0 && /\s/.test(text.charAt(start - 1)))
+        --start;
+    while (start > 0 && !/\s/.test(text.charAt(start - 1)))
+        --start;
+
+    return start;
+}
+
 function replaceRange(editor, rangeStart, rangeEnd, replacement,
                       selectionStartOffset, selectionEndOffset) {
     var start = Math.max(0, Math.min(editor.text.length, rangeStart));
