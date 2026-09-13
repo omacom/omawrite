@@ -44,6 +44,19 @@ private slots:
                  QStringLiteral("Already.md"));
     }
 
+    void printsInPointsNotPixels() {
+        QFont editorFont;
+        editorFont.setPixelSize(20);
+        const QFont printed = Backend::printFont(editorFont, 96.0);
+        QCOMPARE(printed.pixelSize(), -1);
+        QCOMPARE(printed.pointSizeF(), 15.0);
+        QCOMPARE(Backend::printFont(editorFont, 0.0).pointSizeF(), 15.0);
+
+        QFont pointFont;
+        pointFont.setPointSizeF(11.0);
+        QCOMPARE(Backend::printFont(pointFont, 144.0).pointSizeF(), 11.0);
+    }
+
     void findsInlineMarkdownRanges() {
         const auto markup = MarkdownHighlighter::inlineMarkup(
             QStringLiteral("**bold** and *italic* and [site](https://example.com)"));
