@@ -175,8 +175,8 @@ private slots:
         QVERIFY2(window, qPrintable(component.errorString()));
 
         QVERIFY(window->findChild<QObject *>(QStringLiteral("sourceEditor")));
-        QVERIFY(!window->findChild<QObject *>(QStringLiteral("renderedPreview")));
-        QVERIFY(!window->findChild<QObject *>(QStringLiteral("modeToggle")));
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("renderedPreview")));
+        QVERIFY(window->findChild<QObject *>(QStringLiteral("modeToggle")));
 
         QObject *saveButton = window->findChild<QObject *>(QStringLiteral("saveButton"));
         QObject *openButton = window->findChild<QObject *>(QStringLiteral("openButton"));
@@ -190,6 +190,38 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void togglesMarkdownPreviewWithoutChangingSource() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *preview = window->findChild<QObject *>(QStringLiteral("renderedPreview"));
+        QObject *toggle = window->findChild<QObject *>(QStringLiteral("modeToggle"));
+        QVERIFY(editor);
+        QVERIFY(preview);
+        QVERIFY(toggle);
+        QVERIFY(!preview->property("visible").toBool());
+
+        editor->setProperty("text", QStringLiteral("# Hello\n\n**world**"));
+        QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));
+        QVERIFY(preview->property("visible").toBool());
+        QTRY_VERIFY(preview->property("text").toString().contains(QStringLiteral("Hello")));
+        QVERIFY(!preview->property("text").toString().contains(QLatin1Char('#')));
+        QVERIFY(!editor->property("visible").toBool());
+
+        QVERIFY(QMetaObject::invokeMethod(toggle, "clicked"));
+        QVERIFY(editor->property("visible").toBool());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("# Hello\n\n**world**"));
     }
 
     void scalesTextWithDesktopTextSize() {

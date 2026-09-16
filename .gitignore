@@ -1,5 +1,6 @@
 /build/
 /build-tests/
+/.scratch/
 /pkg/
 /pkgbuild/pkg/
 /pkgbuild/src/

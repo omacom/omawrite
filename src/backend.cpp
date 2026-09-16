@@ -8,6 +8,8 @@
 #include <QFileInfo>
 #include <QDesktopServices>
 #include <QGuiApplication>
+#include <QHash>
+#include <QImageReader>
 #include <QMimeData>
 #include <QProcess>
 #include <QPrintDialog>
@@ -20,6 +22,7 @@
 #include <QJsonObject>
 #include <QLockFile>
 #include <QSaveFile>
+#include <QSet>
 #include <QTextBlock>
 #include <QTextBlockFormat>
 #include <QTextCursor>
@@ -30,11 +33,117 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <functional>
 
 #include "markdownhighlighter.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+
+class PreviewDocument final : public QTextDocument {
+public:
+    explicit PreviewDocument(std::function<void(const QString &)> imageLoaded, QObject *parent)
+        : QTextDocument(parent), m_imageLoaded(std::move(imageLoaded)) {}
+
+    void setImageRoot(const QString &root) {
+        m_imageRoot = QFileInfo(root).canonicalFilePath();
+    }
+
+    bool setImageWidth(int width) {
+        const int imageWidth = qMax(1, width);
+        if (m_imageWidth == imageWidth)
+            return false;
+        m_imageWidth = imageWidth;
+        return true;
+    }
+
+    void setAllowedImages(const QString &markdown, const QUrl &baseUrl) {
+        m_allowedImages.clear();
+        static const QRegularExpression imageRe(
+            QStringLiteral("!\\[[^\\]]*\\]\\((?:<([^>]+)>|([^\\s)]+))(?:\\s+[^)]*)?\\)"));
+        QRegularExpressionMatchIterator matches = imageRe.globalMatch(markdown);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            allowImage(match.captured(1).isEmpty() ? match.captured(2) : match.captured(1), baseUrl);
+        }
+
+        QHash<QString, QString> references;
+        static const QRegularExpression referenceRe(
+            QStringLiteral("^\\s{0,3}\\[([^\\]]+)\\]:\\s*(?:<([^>]+)>|([^\\s]+))"),
+            QRegularExpression::MultilineOption);
+        QRegularExpressionMatchIterator definitions = referenceRe.globalMatch(markdown);
+        while (definitions.hasNext()) {
+            const QRegularExpressionMatch match = definitions.next();
+            references.insert(referenceKey(match.captured(1)),
+                              match.captured(2).isEmpty() ? match.captured(3) : match.captured(2));
+        }
+
+        static const QRegularExpression referenceImageRe(
+            QStringLiteral("!\\[([^\\]]*)\\]\\[([^\\]]*)\\]"));
+        matches = referenceImageRe.globalMatch(markdown);
+        while (matches.hasNext()) {
+            const QRegularExpressionMatch match = matches.next();
+            const QString destination = references.value(referenceKey(
+                match.captured(2).isEmpty() ? match.captured(1) : match.captured(2)));
+            if (!destination.isEmpty())
+                allowImage(destination, baseUrl);
+        }
+    }
+
+protected:
+    QVariant loadResource(int type, const QUrl &url) override {
+        if (type != QTextDocument::ImageResource)
+            return QTextDocument::loadResource(type, url);
+
+        const QString path = QFileInfo(url.toLocalFile()).canonicalFilePath();
+        if (!url.isLocalFile() || path.isEmpty() || m_imageRoot.isEmpty()
+                || !path.startsWith(m_imageRoot + QLatin1Char('/'))
+                || !m_allowedImages.contains(url.toLocalFile())
+                || !QFileInfo(path).isFile()) {
+            return {};
+        }
+
+        QImageReader::setAllocationLimit(32);
+        if (path.endsWith(QStringLiteral(".svg"), Qt::CaseInsensitive)) {
+            QFile svg(path);
+            if (!svg.open(QIODevice::ReadOnly | QIODevice::Text)
+                    || QString::fromUtf8(svg.readAll()).contains(QRegularExpression(
+                        QStringLiteral("(?:href|xlink:href)\\s*=\\s*[\\\"'](?!#)|"
+                                       "url\\(\\s*[\\\"']?(?!#)|@import|<image\\b|xml-stylesheet")))) {
+                return {};
+            }
+        }
+        QImageReader reader(path);
+        const QSize size = reader.size();
+        if (!size.isValid())
+            return {};
+        if (size.width() > m_imageWidth)
+            reader.setScaledSize(size.scaled(m_imageWidth, size.height(), Qt::KeepAspectRatio));
+
+        const QImage image = reader.read();
+        if (image.isNull())
+            return {};
+
+        m_imageLoaded(path);
+        return image;
+    }
+
+private:
+    void allowImage(const QString &destination, const QUrl &baseUrl) {
+        const QUrl source(destination);
+        if (source.isRelative() && source.scheme().isEmpty())
+            m_allowedImages.insert(baseUrl.resolved(source).toLocalFile());
+    }
+
+    static QString referenceKey(const QString &label) {
+        return label.simplified().toCaseFolded();
+    }
+
+    std::function<void(const QString &)> m_imageLoaded;
+    QString m_imageRoot;
+    QSet<QString> m_allowedImages;
+    int m_imageWidth = 800;
+};
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -97,6 +206,15 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
+    connect(&m_previewImageWatcher, &QFileSystemWatcher::fileChanged, this,
+            [this](const QString &path) {
+                if (QFile::exists(path))
+                    m_previewImageWatcher.addPath(path);
+                if (m_previewDocument) {
+                    setPreviewMarkdown(m_previewMarkdown);
+                    emit previewChanged();
+                }
+            });
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
@@ -192,6 +310,46 @@ void Backend::attachDocument(QObject *textDocument) {
 
     applyDocumentTypography();
     restoreRecovery();
+}
+
+void Backend::attachPreviewDocument(QObject *textDocument) {
+    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
+    if (!quickDocument) {
+        setStatus(QStringLiteral("Could not attach the Markdown preview."));
+        return;
+    }
+
+    if (!m_previewDocument) {
+        m_previewDocument = new PreviewDocument(
+            [this](const QString &path) { watchPreviewImage(path); }, this);
+    }
+    quickDocument->setTextDocument(m_previewDocument);
+    setPreviewMarkdown(m_previewMarkdown);
+}
+
+void Backend::setPreviewMarkdown(const QString &markdown) {
+    m_previewMarkdown = markdown;
+    if (!m_previewDocument)
+        return;
+
+    const QUrl baseUrl = m_fileUrl.isLocalFile()
+        ? QUrl::fromLocalFile(QFileInfo(m_fileUrl.toLocalFile()).absolutePath() + QLatin1Char('/'))
+        : QUrl();
+    m_previewDocument->setBaseUrl(baseUrl);
+    m_previewDocument->setImageRoot(baseUrl.toLocalFile());
+    m_previewDocument->setAllowedImages(markdown, baseUrl);
+    const QStringList watchedImages = m_previewImageWatcher.files();
+    if (!watchedImages.isEmpty())
+        m_previewImageWatcher.removePaths(watchedImages);
+    m_previewDocument->clear();
+    m_previewDocument->setMarkdown(
+        markdown, QTextDocument::MarkdownFeatures(QTextDocument::MarkdownDialectGitHub)
+                      | QTextDocument::MarkdownNoHTML);
+}
+
+void Backend::setPreviewWidth(int width) {
+    if (m_previewDocument && m_previewDocument->setImageWidth(width))
+        setPreviewMarkdown(m_previewMarkdown);
 }
 
 void Backend::openDialog() {
@@ -445,6 +603,8 @@ void Backend::setFileUrl(const QUrl &url) {
     m_fileUrl = url;
     emit fileUrlChanged();
     watchCurrentFile();
+    if (m_previewDocument)
+        setPreviewMarkdown(m_previewMarkdown);
 }
 
 void Backend::setModified(bool modified) {
@@ -571,6 +731,11 @@ void Backend::watchCurrentFile() {
         m_fileWatcher.removePaths(watched);
     if (m_fileUrl.isLocalFile() && QFileInfo::exists(m_fileUrl.toLocalFile()))
         m_fileWatcher.addPath(m_fileUrl.toLocalFile());
+}
+
+void Backend::watchPreviewImage(const QString &path) {
+    if (!m_previewImageWatcher.files().contains(path))
+        m_previewImageWatcher.addPath(path);
 }
 
 void Backend::loadOmarchyTheme() {
