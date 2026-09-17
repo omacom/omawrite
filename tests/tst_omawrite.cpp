@@ -8,6 +8,30 @@
 #include "backend.h"
 #include "markdownhighlighter.h"
 
+// Counts QML "Binding loop detected" warnings while it is alive, forwarding
+// everything to the previous handler so test output stays intact.
+class BindingLoopCounter {
+public:
+    BindingLoopCounter() {
+        s_count = 0;
+        m_previous = qInstallMessageHandler(handle);
+        s_previous = m_previous;
+    }
+    ~BindingLoopCounter() { qInstallMessageHandler(m_previous); }
+    int count() const { return s_count; }
+
+private:
+    static void handle(QtMsgType type, const QMessageLogContext &context, const QString &message) {
+        if (message.contains(QLatin1String("Binding loop detected")))
+            ++s_count;
+        if (s_previous)
+            s_previous(type, context, message);
+    }
+    static inline int s_count = 0;
+    static inline QtMessageHandler s_previous = nullptr;
+    QtMessageHandler m_previous = nullptr;
+};
+
 class OmawriteTest : public QObject {
     Q_OBJECT
 
@@ -216,6 +240,32 @@ private slots:
         backend.setTextScale(9.0 / 12.0);
         QCOMPARE(window->property("editorFontPixelSize").toInt(), 15);
         QCOMPARE(editor->property("font").value<QFont>().pixelSize(), 15);
+    }
+
+    void shortcutsDialogHasNoBindingLoop() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        // Material's Dialog derives implicitWidth from its content item; a bare
+        // Label assigned as contentItem feeds back into that binding and QML
+        // reports a binding loop for the dialog on every launch.
+        BindingLoopCounter bindingLoops;
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("shortcutsDialog"));
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(dialog->property("implicitWidth").toReal() > 0, true);
+
+        QCOMPARE(bindingLoops.count(), 0);
     }
 
     void remembersLastSaveDirectory() {
