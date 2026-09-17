@@ -36,6 +36,17 @@
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 
+namespace {
+
+// A shade of `from` carried part of the way towards `to`.
+QColor blend(const QColor &from, const QColor &to, qreal amount) {
+    return QColor::fromRgbF(from.redF() + (to.redF() - from.redF()) * amount,
+                            from.greenF() + (to.greenF() - from.greenF()) * amount,
+                            from.blueF() + (to.blueF() - from.blueF()) * amount);
+}
+
+}
+
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
     static const QRegularExpression lineBreakRe(QStringLiteral("[\\r\\n]"));
@@ -180,7 +191,8 @@ void Backend::attachDocument(QObject *textDocument) {
     m_lastDocumentText = m_document->toPlainText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
-    m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
+    m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent,
+                             m_themeCodeBackground);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {
@@ -369,6 +381,11 @@ QVariantList Backend::hiddenRangesAt(int position) const {
     const QTextBlock block =
         m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
     if (!block.isValid())
+        return ranges;
+
+    // The highlighter leaves fenced code alone, so it hides nothing there.
+    if (block.userState() == MarkdownHighlighter::InsideFence
+            || MarkdownHighlighter::isFence(block.text()))
         return ranges;
 
     const int lineStart = block.position();
@@ -578,6 +595,7 @@ void Backend::loadOmarchyTheme() {
     m_themeForeground = m_darkMode ? QStringLiteral("#eeeeee") : QStringLiteral("#222324");
     m_themeAccent = m_darkMode ? QStringLiteral("#5584aa") : QStringLiteral("#2077b2");
     m_themeSelection = m_darkMode ? QStringLiteral("#186a9a") : QStringLiteral("#2077b2");
+    QString lighterBackground;
 
     const QString colorsPath = QDir::homePath()
         + QStringLiteral("/.local/state/omarchy/current/theme/colors.toml");
@@ -611,6 +629,8 @@ void Backend::loadOmarchyTheme() {
                 m_themeAccent = value;
             else if (key == QStringLiteral("selection"))
                 m_themeSelection = value;
+            else if (key == QStringLiteral("lighter_background"))
+                lighterBackground = value;
         }
     }
 
@@ -636,9 +656,21 @@ void Backend::loadOmarchyTheme() {
         emit darkModeChanged();
     }
 
+    // Omarchy themes name a lighter background for panels like the one code
+    // sits on, so use the shade the theme chose. Not every theme sets the key,
+    // and a few set it to the page background, which would leave code with no
+    // panel at all: mix a shade of the page towards the text for those. Mixing,
+    // unlike lightening, still moves on a pure black background.
+    const QColor page(m_themeBackground);
+    const QColor lighter(lighterBackground);
+    m_themeCodeBackground = (lighter.isValid() && lighter != page
+                                 ? lighter
+                                 : blend(page, QColor(m_themeForeground), 0.06)).name();
+
     if (m_highlighter) {
         m_highlighter->setDarkMode(m_darkMode);
-        m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
+        m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent,
+                                 m_themeCodeBackground);
     }
 
     emit themeColorsChanged();
