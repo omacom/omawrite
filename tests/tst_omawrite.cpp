@@ -1,4 +1,5 @@
 #include <QtTest>
+#include <QClipboard>
 #include <QFont>
 #include <QQmlComponent>
 #include <QQmlContext>
@@ -244,6 +245,61 @@ private slots:
         fallbackDocument.saveAsDialog();
         const QUrl fallbackUrl = fallbackDialogSpy.takeFirst().constFirst().toUrl();
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
+    }
+
+    void writesAPastedImageBesideTheDocument() {
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        QVERIFY(clipboard);
+
+        QTemporaryDir folder;
+        QVERIFY(folder.isValid());
+        const QString path = folder.filePath(QStringLiteral("notes.md"));
+        QFile seed(path);
+        QVERIFY(seed.open(QIODevice::WriteOnly | QIODevice::Text));
+        seed.write("# Notes\n");
+        seed.close();
+
+        QImage pasted(4, 3, QImage::Format_RGB32);
+        pasted.fill(Qt::red);
+        clipboard->setImage(pasted);
+
+        Backend backend;
+        backend.open(QUrl::fromLocalFile(path));
+
+        const QString reference = backend.saveClipboardImage();
+        QCOMPARE(reference, QStringLiteral("images/") + QFileInfo(reference).fileName());
+
+        // The reference is relative to the document, so it resolves beside it
+        // and stays inside the folder the preview is allowed to read.
+        const QString written = folder.filePath(reference);
+        QVERIFY(QFileInfo::exists(written));
+        QCOMPARE(QImage(written).size(), pasted.size());
+
+        // A second paste in the same second takes a name of its own rather than
+        // writing over the first.
+        const QString second = backend.saveClipboardImage();
+        QVERIFY(!second.isEmpty());
+        QVERIFY(second != reference);
+        QVERIFY(QFileInfo::exists(folder.filePath(second)));
+
+        clipboard->clear();
+    }
+
+    void refusesToPasteAnImageIntoAnUntitledDocument() {
+        QClipboard *clipboard = QGuiApplication::clipboard();
+        QVERIFY(clipboard);
+
+        QImage pasted(2, 2, QImage::Format_RGB32);
+        pasted.fill(Qt::blue);
+        clipboard->setImage(pasted);
+
+        // Nothing is written, because an untitled document has no folder for the
+        // image to sit in that a later Save As would keep it beside.
+        Backend backend;
+        QVERIFY(backend.saveClipboardImage().isEmpty());
+        QVERIFY(backend.status().contains(QStringLiteral("Save the document first")));
+
+        clipboard->clear();
     }
 
 private:

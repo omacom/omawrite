@@ -66,6 +66,7 @@ public:
     Q_INVOKABLE void keepExternalVersion();
     Q_INVOKABLE void printDocument();
     Q_INVOKABLE void newWindow();
+    Q_INVOKABLE QString saveClipboardImage();
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE bool editorTextChanged();

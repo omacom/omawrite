@@ -22,6 +22,9 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
 - `Ctrl+H` opens find and replace.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
+- `Ctrl+V` pastes an image from the clipboard: it is written to an `images`
+  folder beside the document and referred to by a relative path, so the two
+  move together.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files

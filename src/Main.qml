@@ -662,6 +662,20 @@ ApplicationWindow {
                     return true;
                 }
 
+                // An image on the clipboard is written beside the document and
+                // referred to by a relative path, so the document and its
+                // pictures move together. Runs after the link paste, so a
+                // selection with a URL behind it still becomes a link rather
+                // than a copy of the image.
+                function pasteClipboardImage() {
+                    var path = backend.saveClipboardImage();
+                    if (path === "")
+                        return false;
+
+                    replaceSelectionWith("![](" + escapeMarkdownLinkDestination(path) + ")");
+                    return true;
+                }
+
                 function pasteClipboardAsPlainText() {
                     var pastedText = backend.clipboardText();
                     if (pastedText.length > 0)
@@ -740,7 +754,7 @@ ApplicationWindow {
                         && (event.modifiers & Qt.ShiftModifier)
                         && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier));
                     if (pasteKey || shiftInsert) {
-                        if (!pasteClipboardUrlAsMarkdownLink())
+                        if (!pasteClipboardUrlAsMarkdownLink() && !pasteClipboardImage())
                             pasteClipboardAsPlainText();
                         event.accepted = true;
                         return;

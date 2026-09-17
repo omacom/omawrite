@@ -4,8 +4,11 @@
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
+#include <QDateTime>
 #include <QFile>
 #include <QFileInfo>
+#include <QImage>
+#include <QImageReader>
 #include <QDesktopServices>
 #include <QGuiApplication>
 #include <QMimeData>
@@ -303,6 +306,94 @@ void Backend::newWindow() {
                                                  QStringList());
     if (!started)
         setStatus(QStringLiteral("Could not open a new window."));
+}
+
+// The folder a pasted image lands in, beside the document that refers to it.
+// Under the document's own folder, so a relative reference keeps working when
+// the folder is moved, synced, or opened by anything else that reads Markdown.
+const QString pastedImageFolder = QStringLiteral("images");
+
+// An image the clipboard carries as a file rather than as pixels, which is what
+// a file manager or a browser's "Copy Image" puts there. Returns its path.
+static QString clipboardImageFile(const QMimeData *mimeData) {
+    if (!mimeData->hasUrls())
+        return {};
+
+    const QByteArrayList readable = QImageReader::supportedImageFormats();
+    for (const QUrl &url : mimeData->urls()) {
+        if (!url.isLocalFile())
+            continue;
+        const QFileInfo info(url.toLocalFile());
+        if (!info.isFile())
+            continue;
+        if (readable.contains(info.suffix().toLower().toUtf8()))
+            return info.absoluteFilePath();
+    }
+    return {};
+}
+
+// A name nothing in the folder answers to yet. The clock names the image so
+// pastes stay in the order they were made; a counter settles the collisions
+// that a clock at one second's resolution still leaves.
+static QString unusedImageName(const QDir &folder, const QString &suffix) {
+    const QString stamp = QStringLiteral("pasted-")
+        + QDateTime::currentDateTime().toString(QStringLiteral("yyyyMMdd-HHmmss"));
+    QString name = stamp + QLatin1Char('.') + suffix;
+    for (int attempt = 2; folder.exists(name); ++attempt)
+        name = stamp + QLatin1Char('-') + QString::number(attempt) + QLatin1Char('.') + suffix;
+    return name;
+}
+
+QString Backend::saveClipboardImage() {
+    const QClipboard *clipboard = QGuiApplication::clipboard();
+    const QMimeData *mimeData = clipboard ? clipboard->mimeData() : nullptr;
+    if (!mimeData)
+        return {};
+
+    const QString sourceFile = clipboardImageFile(mimeData);
+    if (!mimeData->hasImage() && sourceFile.isEmpty())
+        return {};
+
+    // An untitled document has no folder of its own, so an image pasted into it
+    // would have nowhere to live that the document could still point at once it
+    // is saved somewhere else.
+    if (!m_fileUrl.isLocalFile()) {
+        setStatus(QStringLiteral("Save the document first, then paste the image."));
+        return {};
+    }
+
+    QDir folder(QFileInfo(m_fileUrl.toLocalFile()).absolutePath());
+    if (!folder.exists(pastedImageFolder) && !folder.mkpath(pastedImageFolder)) {
+        setStatus(QStringLiteral("Could not make an %1 folder.").arg(pastedImageFolder));
+        return {};
+    }
+    const QDir imageFolder(folder.filePath(pastedImageFolder));
+
+    QString name;
+    bool written = false;
+    if (!sourceFile.isEmpty()) {
+        // Copying keeps the original encoding, which re-encoding to PNG would
+        // throw away along with any compression the file already had.
+        name = unusedImageName(imageFolder, QFileInfo(sourceFile).suffix().toLower());
+        written = QFile::copy(sourceFile, imageFolder.filePath(name));
+    } else {
+        const QImage image = qvariant_cast<QImage>(mimeData->imageData());
+        if (image.isNull()) {
+            setStatus(QStringLiteral("The clipboard image could not be read."));
+            return {};
+        }
+        name = unusedImageName(imageFolder, QStringLiteral("png"));
+        written = image.save(imageFolder.filePath(name), "PNG");
+    }
+
+    if (!written) {
+        setStatus(QStringLiteral("Could not write %1.").arg(name));
+        return {};
+    }
+
+    const QString relativePath = pastedImageFolder + QLatin1Char('/') + name;
+    setStatus(QStringLiteral("Pasted %1").arg(relativePath));
+    return relativePath;
 }
 
 QString Backend::clipboardUrl() const {
