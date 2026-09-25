@@ -38,6 +38,7 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property bool previewVisible: true
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -197,6 +198,11 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Shift+V"
+        context: Qt.ApplicationShortcut
+        onActivated: win.previewVisible = !win.previewVisible
+    }
+    Shortcut {
         sequence: "Ctrl+P"
         context: Qt.ApplicationShortcut
         onActivated: backend.printDocument()
@@ -331,7 +337,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+Shift+V  Preview\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -341,7 +347,10 @@ ApplicationWindow {
 
         Flickable {
             id: editorFlick
-            anchors.fill: parent
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: parent.left
+            anchors.right: win.previewVisible ? parent.horizontalCenter : parent.right
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
@@ -534,7 +543,7 @@ ApplicationWindow {
                 objectName: "sourceEditor"
                 x: Math.round((editorFlick.width - width) / 2)
                 y: Math.max(42, Math.round(win.height * 0.05))
-                width: win.editorWidth
+                width: Math.min(win.editorWidth, editorFlick.width)
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
                 text: ""
                 textFormat: TextEdit.PlainText
@@ -771,6 +780,7 @@ ApplicationWindow {
                 }
 
                 onTextChanged: {
+                    previewDebounce.restart();
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
@@ -796,6 +806,60 @@ ApplicationWindow {
             }
         }
 
+        // Subtle divider between the editor and the preview pane.
+        Rectangle {
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.horizontalCenter: parent.horizontalCenter
+            width: 1
+            color: win.darkMode ? "#3a3a37" : "#e2e0d2"
+            visible: win.previewVisible
+        }
+
+        Flickable {
+            id: previewFlick
+            anchors.top: parent.top
+            anchors.bottom: parent.bottom
+            anchors.left: parent.horizontalCenter
+            anchors.right: parent.right
+            anchors.leftMargin: 24
+            anchors.rightMargin: 24
+            clip: true
+            contentWidth: width
+            contentHeight: Math.max(height, previewText.y + previewText.implicitHeight + 220)
+            boundsBehavior: Flickable.StopAtBounds
+            visible: win.previewVisible
+            ScrollBar.vertical: ScrollBar {
+                policy: ScrollBar.AsNeeded
+                bottomPadding: win.scaledSize(32)
+                bottomInset: win.scaledSize(32)
+            }
+
+            Timer {
+                id: previewDebounce
+                interval: 200
+                onTriggered: previewText.text = editor.text
+            }
+
+            TextEdit {
+                id: previewText
+                objectName: "previewPane"
+                x: Math.round((previewFlick.width - width) / 2)
+                y: Math.max(42, Math.round(win.height * 0.05))
+                width: Math.min(win.editorWidth, previewFlick.width)
+                height: Math.max(previewFlick.height - y - 96, implicitHeight + 20)
+                readOnly: true
+                textFormat: TextEdit.MarkdownText
+                wrapMode: TextEdit.Wrap
+                selectByMouse: true
+                color: win.textColor
+                onLinkActivated: function(link) { backend.openExternalUrl(link) }
+                font.pixelSize: win.scaledSize(17)
+
+                Component.onCompleted: previewDebounce.restart()
+            }
+        }
+
         Row {
             id: footerStatus
             anchors.left: parent.left
@@ -811,6 +875,14 @@ ApplicationWindow {
                 iconColor: win.mutedColor
                 tooltip: "Save"
                 onClicked: backend.save()
+            }
+
+            FooterIconButton {
+                objectName: "previewButton"
+                iconName: "preview"
+                iconColor: win.previewVisible ? backend.themeAccent : win.mutedColor
+                tooltip: "Toggle preview (Ctrl+Shift+V)"
+                onClicked: win.previewVisible = !win.previewVisible
             }
 
             FooterIconButton {
