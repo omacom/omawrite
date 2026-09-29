@@ -29,49 +29,36 @@ ApplicationWindow {
     readonly property int editorWidth: Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)))
-    property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
     property var searchMatches: []
     property int searchMatchIndex: -1
-    property url pendingOpenUrl
-    property string pendingAction: ""
     property bool replaceOpen: false
-    property bool awaitingPendingSave: false
+    // True while the active tab's close is waiting on the unsaved-changes
+    // dialog's "Save" button to finish an in-flight save.
+    property bool closingActiveTab: false
+    // Points at whichever per-tab TextEdit is currently active, so every
+    // existing "editor.*" reference below keeps working unchanged as tabs
+    // are added, removed, and switched. Deliberately NOT a binding on
+    // editorRepeater.itemAt(activeTabIndex): itemAt() is a plain method
+    // call, not a tracked property, so a binding would only re-evaluate
+    // when activeTabIndex itself changes again -- if the Repeater is still
+    // creating that tab's delegate at that moment (its creation is queued,
+    // not synchronous with the index change), the binding would freeze on
+    // null forever. Each delegate assigns itself here explicitly once it is
+    // actually ready, in applyActivation() below.
+    property Item editor: null
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
 
-    onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
-            return;
-
-        close.accepted = false;
-        pendingAction = "close";
-        if (!unsavedChangesDialog.opened)
-            unsavedChangesDialog.open();
-    }
+    // Autosave and session persistence mean nothing is lost by closing
+    // outright; just flush any debounced writes still pending.
+    onClosing: backend.flushAllPendingWrites()
 
     function requestOpen(url) {
-        if (!backend.modified) {
-            backend.open(url);
-            return;
-        }
-        pendingOpenUrl = url;
-        pendingAction = "open";
-        unsavedChangesDialog.open();
-    }
-
-    function completePendingAction() {
-        var action = pendingAction;
-        pendingAction = "";
-        if (action === "close") {
-            closeConfirmed = true;
-            close();
-        } else if (action === "open") {
-            backend.open(pendingOpenUrl);
-        }
+        backend.activateOrOpenTab(url);
     }
 
     FontMetrics {
@@ -191,6 +178,31 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+T"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.newTab()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+W"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.closeActiveTab()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Tab"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.activeTabIndex = (backend.activeTabIndex + 1) % backend.tabs.length
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+Tab"
+        context: Qt.ApplicationShortcut
+        onActivated: backend.activeTabIndex =
+            (backend.activeTabIndex - 1 + backend.tabs.length) % backend.tabs.length
+    }
+
+    Shortcut {
         sequence: "Ctrl+Shift+S"
         context: Qt.ApplicationShortcut
         onActivated: backend.saveAsDialog()
@@ -249,21 +261,28 @@ ApplicationWindow {
             saveFileDialog.open();
         }
 
-        function onCloseAfterSave() {
-            win.closeConfirmed = true;
-            win.close();
-        }
-
         function onSaveSucceeded() {
-            win.awaitingPendingSave = false;
-            if (win.pendingAction !== "")
-                win.completePendingAction();
+            if (win.closingActiveTab) {
+                win.closingActiveTab = false;
+                // The tab just gained a name, so this re-check closes it
+                // directly without prompting again.
+                backend.closeActiveTab();
+            }
         }
 
         function onExternalChangeDetected(deleted, locallyModified) {
             externalChangeDialog.deleted = deleted;
             externalChangeDialog.locallyModified = locallyModified;
             externalChangeDialog.open();
+        }
+
+        function onCloseActiveTabRequiresConfirmation() {
+            win.closingActiveTab = true;
+            unsavedChangesDialog.open();
+        }
+
+        function onLastTabClosed() {
+            win.close();
         }
     }
 
@@ -283,8 +302,7 @@ ApplicationWindow {
         onAccepted: backend.saveAs(selectedFile)
         onRejected: {
             backend.fileDialogCanceled();
-            win.awaitingPendingSave = false;
-            win.pendingAction = "";
+            win.closingActiveTab = false;
         }
     }
 
@@ -299,16 +317,9 @@ ApplicationWindow {
         containerWidth: win.width
         containerHeight: win.height
 
-        onDiscardRequested: {
-            backend.discardRecovery();
-            win.completePendingAction();
-        }
-
-        onSaveRequested: {
-            win.awaitingPendingSave = true;
-            backend.save();
-        }
-        onCancelRequested: win.pendingAction = ""
+        onDiscardRequested: backend.discardActiveTab()
+        onSaveRequested: backend.save()
+        onCancelRequested: win.closingActiveTab = false
     }
 
     ExternalChangeDialog {
@@ -331,7 +342,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+T  New Tab\nCtrl+W  Close Tab\nCtrl+Tab  Next Tab\nCtrl+Shift+Tab  Previous Tab\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -339,14 +350,41 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
 
+        TabStrip {
+            id: tabStrip
+            anchors.top: parent.top
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.leftMargin: 24
+            anchors.rightMargin: 24
+            tabsModel: backend.tabs
+            activeIndex: backend.activeTabIndex
+            darkMode: win.darkMode
+            textColor: win.textColor
+            mutedColor: win.mutedColor
+            accentColor: backend.themeAccent
+            textScale: win.textScale
+            onTabActivated: function(index) { backend.activeTabIndex = index; }
+            onTabCloseRequested: function(index) {
+                backend.activeTabIndex = index;
+                backend.closeActiveTab();
+            }
+            onNewTabRequested: backend.newTab()
+        }
+
         Flickable {
             id: editorFlick
-            anchors.fill: parent
+            anchors.top: tabStrip.bottom
+            anchors.left: parent.left
+            anchors.right: parent.right
+            anchors.bottom: parent.bottom
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: editor
+                ? Math.max(height, editor.y + editor.implicitHeight + 220)
+                : height
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -518,6 +556,8 @@ ApplicationWindow {
             // Keep the editing caret within the viewport so writing past the
             // bottom edge scrolls the page along with the text.
             function ensureCursorVisible() {
+                if (!editor)
+                    return;
                 var margin = win.editorFontPixelSize * 2;
                 var cursorTop = editor.y + editor.cursorRectangle.y;
                 var cursorBottom = cursorTop + editor.cursorRectangle.height;
@@ -529,13 +569,20 @@ ApplicationWindow {
                     scrollTo(Math.max(0, cursorTop - margin));
             }
 
-            TextEdit {
-                id: editor
+            Repeater {
+                id: editorRepeater
+                objectName: "editorRepeater"
+                model: backend.tabs
+
+                delegate: TextEdit {
+                id: tabEditor
                 objectName: "sourceEditor"
                 x: Math.round((editorFlick.width - width) / 2)
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
                 height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+                visible: index === backend.activeTabIndex
+                enabled: visible
                 text: ""
                 textFormat: TextEdit.PlainText
                 wrapMode: TextEdit.Wrap
@@ -558,12 +605,15 @@ ApplicationWindow {
                     width: 1
                     color: win.strongTextColor
                 }
-                onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                onCursorRectangleChanged: if (visible) editorFlick.ensureCursorVisible()
+                onCursorPositionChanged: if (visible) backend.updateCursorState(cursorPosition, selectionStart, selectionEnd)
+                onSelectionStartChanged: if (visible) backend.updateCursorState(cursorPosition, selectionStart, selectionEnd)
+                onSelectionEndChanged: if (visible) backend.updateCursorState(cursorPosition, selectionStart, selectionEnd)
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
                     var end = Math.max(selectionStart, selectionEnd);
-                    EditorMutations.replaceRange(editor, start, end, replacement);
+                    EditorMutations.replaceRange(tabEditor, start, end, replacement);
                 }
 
                 function wrapSelection(before, after) {
@@ -571,7 +621,7 @@ ApplicationWindow {
                     var start = Math.min(selectionStart, selectionEnd);
                     var end = Math.max(selectionStart, selectionEnd);
                     var selected = text.slice(start, end);
-                    EditorMutations.replaceRange(editor, start, end,
+                    EditorMutations.replaceRange(tabEditor, start, end,
                                                  before + selected + after,
                                                  before.length,
                                                  before.length + selected.length);
@@ -587,14 +637,14 @@ ApplicationWindow {
                     var escapedLabel = escapeMarkdownLinkText(label);
                     var markdown = "[" + escapedLabel + "](" + escapeMarkdownLinkDestination(destination) + ")";
                     if (selected.length === 0) {
-                        EditorMutations.replaceRange(editor, start, end, markdown,
+                        EditorMutations.replaceRange(tabEditor, start, end, markdown,
                                                      1, 1 + escapedLabel.length);
                     } else if (url.length === 0) {
-                        EditorMutations.replaceRange(editor, start, end, markdown,
+                        EditorMutations.replaceRange(tabEditor, start, end, markdown,
                                                      escapedLabel.length + 3,
                                                      markdown.length - 1);
                     } else {
-                        EditorMutations.replaceRange(editor, start, end, markdown);
+                        EditorMutations.replaceRange(tabEditor, start, end, markdown);
                     }
                 }
 
@@ -614,7 +664,7 @@ ApplicationWindow {
                     var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
                     if (match) {
                         if (match[3].length === 0) {
-                            EditorMutations.replaceRange(editor, lineStart,
+                            EditorMutations.replaceRange(tabEditor, lineStart,
                                                          cursorPosition, "\n");
                         } else {
                             var marker = match[2];
@@ -773,8 +823,11 @@ ApplicationWindow {
                 onTextChanged: {
                     if (win.searchUpdating)
                         return;
-                    var contentChanged = backend.editorTextChanged();
-                    if (win.searchOpen && contentChanged)
+                    // Runs for every tab (even in the background, e.g. while
+                    // session restore loads its text), but only the active
+                    // tab's search results need refreshing.
+                    var contentChanged = backend.editorTextChangedForTab(modelData);
+                    if (visible && win.searchOpen && contentChanged)
                         win.updateSearch();
                 }
 
@@ -782,16 +835,35 @@ ApplicationWindow {
                     anchors.left: parent.left
                     anchors.top: parent.top
                     text: "# Start writing"
-                    visible: editor.text.length === 0 && !editor.activeFocus
+                    visible: tabEditor.text.length === 0 && !tabEditor.activeFocus
                     color: win.mutedColor
-                    font.family: editor.font.family
-                    font.pixelSize: editor.font.pixelSize
-                    font.weight: editor.font.weight
+                    font.family: tabEditor.font.family
+                    font.pixelSize: tabEditor.font.pixelSize
+                    font.weight: tabEditor.font.weight
                 }
 
-                Component.onCompleted: {
-                    backend.attachDocument(textDocument);
+                // Applies a restored cursor/selection (if any) and focuses
+                // this tab. Runs once at creation for the initially-active
+                // tab, and again whenever the user switches back to this tab.
+                function applyActivation() {
+                    win.editor = tabEditor;
+                    var restore = backend.consumePendingCursorRestore();
+                    if (restore.valid) {
+                        if (restore.selectionStart !== restore.selectionEnd)
+                            select(restore.selectionStart, restore.selectionEnd);
+                        else
+                            cursorPosition = restore.cursor;
+                    }
                     forceActiveFocus();
+                }
+
+                onVisibleChanged: if (visible) applyActivation()
+
+                Component.onCompleted: {
+                    backend.attachTabDocument(modelData, textDocument);
+                    if (index === backend.activeTabIndex)
+                        applyActivation();
+                }
                 }
             }
         }
