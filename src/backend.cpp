@@ -71,7 +71,10 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     return url.toString();
 }
 
-Backend::Backend(QObject *parent) : QObject(parent) {
+Backend::Backend(QObject *parent)
+    : QObject(parent),
+      m_mathRenderer(QStandardPaths::writableLocation(QStandardPaths::CacheLocation)
+                     + QStringLiteral("/math")) {
     const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     QDir().mkpath(stateDirectory);
     // Claim an orphaned snapshot before taking an empty slot. This ensures a

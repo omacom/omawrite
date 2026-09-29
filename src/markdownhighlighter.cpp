@@ -4,6 +4,7 @@
 
 #include <QAbstractTextDocumentLayout>
 #include <QColor>
+#include <QElapsedTimer>
 #include <QFont>
 #include <QFontInfo>
 #include <QFontMetricsF>
@@ -21,9 +22,11 @@ namespace {
 // end inside a formula. A private-use character no markup pattern names.
 constexpr QChar mathMask(0xE000);
 
-// Renders arriving within this many milliseconds share one refresh, so a
-// document full of formulas does not reflow once per formula.
-constexpr int mathRenderBatchMs = 40;
+// Renders arriving within a window share one refresh, so a document full of
+// formulas does not reflow once per formula. The window is twice what the
+// last refresh cost, which in a long note is mostly Qt laying the text out.
+constexpr int minimumMathRenderBatchMs = 40;
+constexpr int maximumMathRenderBatchMs = 1000;
 
 struct MathBox {
     qreal width;
@@ -41,6 +44,7 @@ public:
         bool standalone;
         MathBox box;
         QByteArray svg;
+        QString tex;
     };
     QList<Formula> formulas;
 };
@@ -589,8 +593,33 @@ void MarkdownHighlighter::setMathRenderer(MathRenderer *renderer) {
     m_mathRenderer = renderer;
     if (renderer)
         connect(renderer, &MathRenderer::rendered, this, &MarkdownHighlighter::mathRendered);
+    updateMathPreamble();
     for (const MathSpan &span : std::as_const(m_math))
         scheduleMathRefresh(span.start, span.end);
+}
+
+void MarkdownHighlighter::updateMathPreamble() {
+    if (!m_mathRenderer)
+        return;
+
+    static const QRegularExpression definitionRe(QStringLiteral(
+        "\\\\(?:newcommand|renewcommand|newenvironment|renewenvironment|def|let"
+        "|DeclareMathOperator)(?![A-Za-z])"));
+    const int caret = m_mathCaret.position();
+    QStringList definitions;
+    for (const MathSpan &span : std::as_const(m_math)) {
+        if (!definitionRe.match(span.tex).hasMatch())
+            continue;
+        // A definition being edited applies once the caret leaves it, rather
+        // than typesetting every formula again at each keystroke.
+        if (caret >= span.outerStart && caret <= span.outerEnd)
+            return;
+        definitions.append(span.tex);
+    }
+    if (m_mathRenderer->setPreamble(definitions)) {
+        for (const MathSpan &span : std::as_const(m_math))
+            scheduleMathRefresh(span.start, span.end);
+    }
 }
 
 void MarkdownHighlighter::setMathCaret(int position) {
@@ -599,12 +628,15 @@ void MarkdownHighlighter::setMathCaret(int position) {
     const int before = mathSpanAt(m_mathCaret.position());
     m_mathCaret.setPosition(qBound(0, position, document()->characterCount() - 1));
     const int after = mathSpanAt(m_mathCaret.position());
+    if (m_mathRenderer)
+        m_mathRenderer->setFocus(m_mathCaret.position());
     if (before == after)
         return;
     for (const int index : {before, after}) {
         if (index >= 0)
             scheduleMathRefresh(m_math.at(index).outerStart, m_math.at(index).outerEnd);
     }
+    updateMathPreamble();
 }
 
 QList<MarkdownHighlighter::Span> MarkdownHighlighter::mathSegments(const QTextBlock &block) const {
@@ -624,6 +656,8 @@ void MarkdownHighlighter::highlightMath(const QString &text) {
     const int blockEnd = blockStart + int(text.size());
     const int caret = m_mathCaret.position();
     std::unique_ptr<MathBlockData> data;
+    if (m_mathRenderer)
+        m_mathRenderer->setFocus(caret);
 
     for (int i = firstMathSpanAfter(blockStart);
          i < m_math.size() && m_math.at(i).start < blockEnd; ++i) {
@@ -632,9 +666,21 @@ void MarkdownHighlighter::highlightMath(const QString &text) {
         const int to = qMin(span.end, blockEnd) - blockStart;
         const bool revealed = caret >= span.outerStart && caret <= span.outerEnd;
         const std::optional<MathRenderer::Result> result = revealed || !m_mathRenderer
-            ? std::nullopt : m_mathRenderer->result(span.tex, span.display);
+            ? std::nullopt : m_mathRenderer->result(span.tex, span.display, span.start);
 
-        if (!result || !result->ok) {
+        // A formula being typeset again, as after a macro definition changed,
+        // keeps its previous rendering meanwhile instead of flashing its source.
+        MathBox box{};
+        QByteArray svg;
+        const MathBlockData::Formula *previous =
+            placedFormula(document()->findBlock(span.start), span);
+        if (result && result->ok) {
+            box = mathBox(*result, document());
+            svg = result->svg;
+        } else if (!result && !revealed && previous && previous->tex == span.tex) {
+            box = previous->box;
+            svg = previous->svg;
+        } else {
             // The source shows while it is being edited, while MathJax is
             // still typesetting it, and in the error colour if MathJax failed.
             if (result)
@@ -646,7 +692,6 @@ void MarkdownHighlighter::highlightMath(const QString &text) {
             continue;
         }
 
-        const MathBox box = mathBox(*result, document());
         if (span.standalone)
             setFormat(0, int(text.size()), m_hiddenMarkerFormat);
         else
@@ -659,7 +704,7 @@ void MarkdownHighlighter::highlightMath(const QString &text) {
                                              text.at(offset)));
         if (!data)
             data = std::make_unique<MathBlockData>();
-        data->formulas.append({offset, span.end - span.start, span.standalone, box, result->svg});
+        data->formulas.append({offset, span.end - span.start, span.standalone, box, svg, span.tex});
     }
     setCurrentBlockUserData(data.release());
 }
@@ -710,6 +755,7 @@ void MarkdownHighlighter::updateMathIndex(int position, int charsRemoved, int ch
     const QList<MathSpan> previous = std::exchange(m_math, mathSpans(document()->toPlainText()));
     if (previous.isEmpty() && m_math.isEmpty())
         return;
+    updateMathPreamble();
 
     // A formula the edit left as it was is highlighted correctly already.
     // Any other one is refreshed, which covers the blocks QSyntaxHighlighter
@@ -750,7 +796,7 @@ void MarkdownHighlighter::updateMathIndex(int position, int charsRemoved, int ch
 void MarkdownHighlighter::mathRendered(const QString &tex, bool display) {
     for (const MathSpan &span : std::as_const(m_math)) {
         if (span.display == display && span.tex == tex)
-            scheduleMathRefresh(span.start, span.end, mathRenderBatchMs);
+            scheduleMathRefresh(span.start, span.end, m_mathRenderBatchMs);
     }
 }
 
@@ -788,6 +834,8 @@ void MarkdownHighlighter::refreshMath() {
     if (!doc)
         return;
 
+    QElapsedTimer cost;
+    cost.start();
     // One edit block, so the editor re-renders once for the whole batch.
     const int last = doc->characterCount() - 1;
     QSet<int> refreshed;
@@ -804,6 +852,8 @@ void MarkdownHighlighter::refreshMath() {
         }
     }
     batch.endEditBlock();
+    m_mathRenderBatchMs = qBound(minimumMathRenderBatchMs, int(2 * cost.elapsed()),
+                                 maximumMathRenderBatchMs);
 }
 
 int MarkdownHighlighter::mathSpanAt(int position) const {

@@ -20,6 +20,8 @@ class OmawriteTest : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
+        // Keep typeset formulas out of the real cache directory.
+        QVERIFY(qputenv("XDG_CACHE_HOME", m_settingsDirectory.filePath(QStringLiteral("cache")).toUtf8()));
         QQuickStyle::setStyle(QStringLiteral("Material"));
         qmlRegisterType<MathOverlay>("Omawrite", 1, 0, "MathOverlay");
         QSettings::setDefaultFormat(QSettings::IniFormat);
@@ -139,6 +141,113 @@ private slots:
         const auto failed = renderer.result(QStringLiteral("\\frac{a"), false);
         QVERIFY(failed && !failed->ok);
         QVERIFY(!failed->error.isEmpty());
+    }
+
+    void typesetsMathNearTheCaretFirst() {
+        MathRenderer renderer;
+        QStringList order;
+        connect(&renderer, &MathRenderer::rendered, this,
+                [&order](const QString &tex, bool) { order.append(tex); });
+        renderer.setFocus(5000);
+        for (int i = 0; i < 8; ++i)
+            QVERIFY(!renderer.result(QStringLiteral("x_{%1}").arg(i), false, i * 10));
+        QVERIFY(!renderer.result(QStringLiteral("y"), false, 5000));
+        QTRY_COMPARE_WITH_TIMEOUT(order.size(), 9, 20000);
+        // The worker may have taken the first jobs before the one at the caret came in.
+        QVERIFY2(order.indexOf(QStringLiteral("y")) <= 2, qPrintable(order.join(u' ')));
+    }
+
+    void cachesTypesetMathOnDisk() {
+        QTemporaryDir cache;
+        QVERIFY(cache.isValid());
+        const QString tex = QStringLiteral("\\sqrt{x^2+1}");
+        MathRenderer::Result typeset;
+        {
+            MathRenderer renderer(cache.path());
+            QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+            QVERIFY(!renderer.result(tex, true));
+            QTRY_COMPARE_WITH_TIMEOUT(renderedSpy.count(), 1, 20000);
+            typeset = *renderer.result(tex, true);
+            QVERIFY(typeset.ok);
+        }
+        QCOMPARE(QDir(cache.path()).entryList(QDir::Files).size(), 1);
+
+        // A new session reads the formula back instead of typesetting it.
+        MathRenderer renderer(cache.path());
+        QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(!renderer.result(tex, true));
+        QTRY_COMPARE(renderedSpy.count(), 1);
+        QVERIFY2(timer.elapsed() < 150, "the cached formula waited for MathJax to start");
+        const auto cached = renderer.result(tex, true);
+        QVERIFY(cached && cached->ok);
+        QCOMPARE(cached->svg, typeset.svg);
+        QCOMPARE(cached->width, typeset.width);
+        QCOMPARE(cached->depth, typeset.depth);
+    }
+
+    void typesetsMathAfterItsMacroDefinitions() {
+        QTemporaryDir cache;
+        QVERIFY(cache.isValid());
+        const QString use = QStringLiteral("\\R^n");
+        const QStringList preamble{QStringLiteral("\\newcommand{\\R}{\\mathbb{R}}")};
+        const auto typeset = [&](MathRenderer &renderer) {
+            QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+            if (const auto done = renderer.result(use, false))
+                return *done;
+            [&] { QTRY_VERIFY_WITH_TIMEOUT(renderedSpy.count() > 0, 20000); }();
+            return renderer.result(use, false).value_or(MathRenderer::Result());
+        };
+
+        MathRenderer defined(cache.path());
+        QVERIFY(defined.setPreamble(preamble));
+        QVERIFY(!defined.setPreamble(preamble));
+        QVERIFY(typeset(defined).ok);
+
+        // Cached under its definitions, the formula is not served without them.
+        MathRenderer undefined(cache.path());
+        QVERIFY(!typeset(undefined).ok);
+        QVERIFY(undefined.setPreamble(preamble));
+        QVERIFY(typeset(undefined).ok);
+    }
+
+    void retypesetsMathWhenAMacroDefinitionChanges() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const QString text = QStringLiteral("$\\newcommand{\\R}{\\mathbb{R}}$ so $\\R^n$ is a space.\nend");
+        editor->setProperty("text", text);
+        const int away = int(text.size());
+        editor->setProperty("cursorPosition", away);
+        const auto useSvg = [&backend]() {
+            const auto placements = backend.mathPlacements();
+            return placements.size() == 2 ? placements.at(1).svg : QByteArray();
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(!useSvg().isEmpty(), 20000);
+        const QByteArray reals = useSvg();
+
+        // Editing the definition leaves its uses alone until the caret leaves it.
+        const int letter = int(text.indexOf(QStringLiteral("{R}"))) + 1;
+        editor->setProperty("cursorPosition", letter);
+        QVERIFY(QMetaObject::invokeMethod(editor, "remove", Q_ARG(int, letter), Q_ARG(int, letter + 1)));
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, letter), Q_ARG(QString, QStringLiteral("Q"))));
+        QTest::qWait(300);
+        QTRY_COMPARE(backend.mathPlacements().size(), 1);
+        QCOMPARE(backend.mathPlacements().at(0).svg, reals);
+
+        editor->setProperty("cursorPosition", away);
+        QTRY_VERIFY_WITH_TIMEOUT(!useSvg().isEmpty() && useSvg() != reals, 20000);
     }
 
     void showsMathSourceUnderTheCaret() {

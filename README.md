@@ -35,6 +35,12 @@ move away and it renders again. A formula MathJax cannot typeset keeps showing
 its source in red. Dollar amounts like `$5 and $10`, code spans, and fenced code
 stay text. Printing still shows the TeX source.
 
+Macros defined in a formula with `\newcommand`, `\def`, or `\DeclareMathOperator`
+apply to every formula in the document; a definition being edited takes effect
+once the caret leaves it. Formulas near the caret are typeset first, and
+typeset formulas are cached under `~/.cache/Omacom/omawrite/math`, so reopening
+a note shows its math at once.
+
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
 

@@ -89,6 +89,7 @@ private:
 
     void updateMathIndex(int position, int charsRemoved, int charsAdded);
     void mathRendered(const QString &tex, bool display);
+    void updateMathPreamble();
     void documentLayoutChanged();
     void scheduleMathRefresh(int start, int end, int delay = 0);
     void refreshMath();
@@ -118,6 +119,7 @@ private:
     QTextCursor m_mathCaret;
     QList<std::pair<int, int>> m_mathRefresh;
     QTimer m_mathRefreshTimer;
+    int m_mathRenderBatchMs = 40;
     QFont m_mathFont;
     qreal m_mathTextWidth = -1;
 };
