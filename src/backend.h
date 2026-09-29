@@ -10,7 +10,9 @@
 #include <QVariantList>
 #include <memory>
 
-class MarkdownHighlighter;
+#include "markdownhighlighter.h"
+#include "mathrenderer.h"
+
 class QTextDocument;
 class QWindow;
 class QLockFile;
@@ -70,6 +72,8 @@ public:
     Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
+    Q_INVOKABLE void setMathCaret(int position);
+    QList<MarkdownHighlighter::MathPlacement> mathPlacements() const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
     Q_INVOKABLE QVariantMap windowGeometry() const;
@@ -88,6 +92,7 @@ signals:
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void mathPlacementsChanged();
 
 private:
     void loadDocumentText(const QString &text);
@@ -129,6 +134,7 @@ private:
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
+    MathRenderer m_mathRenderer;
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
     bool m_hasKnownFileContents = false;

@@ -3,10 +3,16 @@
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
+#include <QQuickItem>
 #include <QQuickStyle>
+#include <QQuickWindow>
+
+#include <algorithm>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "mathoverlay.h"
+#include "mathrenderer.h"
 
 class OmawriteTest : public QObject {
     Q_OBJECT
@@ -14,7 +20,10 @@ class OmawriteTest : public QObject {
 private slots:
     void initTestCase() {
         QVERIFY(m_settingsDirectory.isValid());
+        // Keep typeset formulas out of the real cache directory.
+        QVERIFY(qputenv("XDG_CACHE_HOME", m_settingsDirectory.filePath(QStringLiteral("cache")).toUtf8()));
         QQuickStyle::setStyle(QStringLiteral("Material"));
+        qmlRegisterType<MathOverlay>("Omawrite", 1, 0, "MathOverlay");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
@@ -52,6 +61,288 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void findsMath() {
+        const auto spans = [](const char *text) {
+            return MarkdownHighlighter::mathSpans(QString::fromUtf8(text));
+        };
+
+        auto found = spans("a $x^2$ b");
+        QCOMPARE(found.size(), 1);
+        QCOMPARE(found.at(0).start, 2);
+        QCOMPARE(found.at(0).end, 7);
+        QCOMPARE(found.at(0).tex, QStringLiteral("x^2"));
+        QVERIFY(!found.at(0).display);
+
+        QVERIFY(spans("costs $5 and $10 each").isEmpty());
+        QVERIFY(spans("$ x$ and $x $").isEmpty());
+        QVERIFY(spans("a \\$x\\$ b").isEmpty());
+        QVERIFY(spans("costs $5, see `$x$`").isEmpty());
+        QVERIFY(spans("```\n$x$\n```").isEmpty());
+
+        found = spans("then \\(a+b\\) done");
+        QCOMPARE(found.size(), 1);
+        QCOMPARE(found.at(0).tex, QStringLiteral("a+b"));
+        QCOMPARE(found.at(0).delimiter, 2);
+        QVERIFY(!found.at(0).display);
+
+        found = spans("  $$\\int f$$ ");
+        QCOMPARE(found.size(), 1);
+        QVERIFY(found.at(0).display);
+        QVERIFY(found.at(0).standalone);
+        QCOMPARE(found.at(0).tex, QStringLiteral("\\int f"));
+        QVERIFY(!spans("text $$x$$ more").at(0).standalone);
+
+        found = spans("para\n\n$$\n\\begin{aligned}a&=b\\end{aligned}\n$$\nafter $y$");
+        QCOMPARE(found.size(), 2);
+        QVERIFY(found.at(0).standalone);
+        QCOMPARE(found.at(0).tex, QStringLiteral("\n\\begin{aligned}a&=b\\end{aligned}\n"));
+        QCOMPARE(found.at(1).tex, QStringLiteral("y"));
+
+        found = spans("\\[\nx\n\\]");
+        QCOMPARE(found.size(), 1);
+        QVERIFY(found.at(0).standalone);
+        QCOMPARE(spans("\\[x\\]").size(), 1);
+        // Markdown prose escapes brackets the same way.
+        QVERIFY(spans("see \\[1\\] and \\[sic\\]").isEmpty());
+
+        // An unclosed $$ ends at the blank line instead of swallowing the rest.
+        found = spans("$$\nx\n\ny $z$");
+        QCOMPARE(found.size(), 1);
+        QCOMPARE(found.at(0).tex, QStringLiteral("z"));
+    }
+
+    void masksMathFromInlineMarkup() {
+        const QString text = QStringLiteral("$x_1 + y_2$ and _it_");
+        const auto math = MarkdownHighlighter::mathSpans(text);
+        QCOMPARE(math.size(), 1);
+        const auto markup = MarkdownHighlighter::inlineMarkup(
+            text, {{math.at(0).start, math.at(0).end - math.at(0).start}});
+        QCOMPARE(markup.size(), 1);
+        QCOMPARE(markup.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(markup.at(0).content.start, int(text.indexOf(QStringLiteral("it"))));
+    }
+
+    void rendersMathWithMathJax() {
+        MathRenderer renderer;
+        QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+        QVERIFY(!renderer.result(QStringLiteral("\\frac{a}{b}"), false));
+        QVERIFY(!renderer.result(QStringLiteral("\\frac{a"), false));
+        QTRY_COMPARE_WITH_TIMEOUT(renderedSpy.count(), 2, 20000);
+
+        const auto rendered = renderer.result(QStringLiteral("\\frac{a}{b}"), false);
+        QVERIFY(rendered && rendered->ok);
+        QVERIFY(rendered->svg.startsWith("<svg"));
+        QVERIFY(rendered->width > 0);
+        QVERIFY(rendered->depth > 0);
+        QVERIFY(rendered->height > rendered->depth);
+
+        const auto failed = renderer.result(QStringLiteral("\\frac{a"), false);
+        QVERIFY(failed && !failed->ok);
+        QVERIFY(!failed->error.isEmpty());
+    }
+
+    void typesetsMathNearTheCaretFirst() {
+        MathRenderer renderer;
+        QStringList order;
+        connect(&renderer, &MathRenderer::rendered, this,
+                [&order](const QString &tex, bool) { order.append(tex); });
+        renderer.setFocus(5000);
+        for (int i = 0; i < 8; ++i)
+            QVERIFY(!renderer.result(QStringLiteral("x_{%1}").arg(i), false, i * 10));
+        QVERIFY(!renderer.result(QStringLiteral("y"), false, 5000));
+        QTRY_COMPARE_WITH_TIMEOUT(order.size(), 9, 20000);
+        // The worker may have taken the first jobs before the one at the caret came in.
+        QVERIFY2(order.indexOf(QStringLiteral("y")) <= 2, qPrintable(order.join(u' ')));
+    }
+
+    void cachesTypesetMathOnDisk() {
+        QTemporaryDir cache;
+        QVERIFY(cache.isValid());
+        const QString tex = QStringLiteral("\\sqrt{x^2+1}");
+        MathRenderer::Result typeset;
+        {
+            MathRenderer renderer(cache.path());
+            QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+            QVERIFY(!renderer.result(tex, true));
+            QTRY_COMPARE_WITH_TIMEOUT(renderedSpy.count(), 1, 20000);
+            typeset = *renderer.result(tex, true);
+            QVERIFY(typeset.ok);
+        }
+        QCOMPARE(QDir(cache.path()).entryList(QDir::Files).size(), 1);
+
+        // A new session reads the formula back instead of typesetting it.
+        MathRenderer renderer(cache.path());
+        QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+        QElapsedTimer timer;
+        timer.start();
+        QVERIFY(!renderer.result(tex, true));
+        QTRY_COMPARE(renderedSpy.count(), 1);
+        QVERIFY2(timer.elapsed() < 150, "the cached formula waited for MathJax to start");
+        const auto cached = renderer.result(tex, true);
+        QVERIFY(cached && cached->ok);
+        QCOMPARE(cached->svg, typeset.svg);
+        QCOMPARE(cached->width, typeset.width);
+        QCOMPARE(cached->depth, typeset.depth);
+    }
+
+    void typesetsMathAfterItsMacroDefinitions() {
+        QTemporaryDir cache;
+        QVERIFY(cache.isValid());
+        const QString use = QStringLiteral("\\R^n");
+        const QStringList preamble{QStringLiteral("\\newcommand{\\R}{\\mathbb{R}}")};
+        const auto typeset = [&](MathRenderer &renderer) {
+            QSignalSpy renderedSpy(&renderer, &MathRenderer::rendered);
+            if (const auto done = renderer.result(use, false))
+                return *done;
+            [&] { QTRY_VERIFY_WITH_TIMEOUT(renderedSpy.count() > 0, 20000); }();
+            return renderer.result(use, false).value_or(MathRenderer::Result());
+        };
+
+        MathRenderer defined(cache.path());
+        QVERIFY(defined.setPreamble(preamble));
+        QVERIFY(!defined.setPreamble(preamble));
+        QVERIFY(typeset(defined).ok);
+
+        // Cached under its definitions, the formula is not served without them.
+        MathRenderer undefined(cache.path());
+        QVERIFY(!typeset(undefined).ok);
+        QVERIFY(undefined.setPreamble(preamble));
+        QVERIFY(typeset(undefined).ok);
+    }
+
+    void retypesetsMathWhenAMacroDefinitionChanges() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const QString text = QStringLiteral("$\\newcommand{\\R}{\\mathbb{R}}$ so $\\R^n$ is a space.\nend");
+        editor->setProperty("text", text);
+        const int away = int(text.size());
+        editor->setProperty("cursorPosition", away);
+        const auto useSvg = [&backend]() {
+            const auto placements = backend.mathPlacements();
+            return placements.size() == 2 ? placements.at(1).svg : QByteArray();
+        };
+        QTRY_VERIFY_WITH_TIMEOUT(!useSvg().isEmpty(), 20000);
+        const QByteArray reals = useSvg();
+
+        // Editing the definition leaves its uses alone until the caret leaves it.
+        const int letter = int(text.indexOf(QStringLiteral("{R}"))) + 1;
+        editor->setProperty("cursorPosition", letter);
+        QVERIFY(QMetaObject::invokeMethod(editor, "remove", Q_ARG(int, letter), Q_ARG(int, letter + 1)));
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, letter), Q_ARG(QString, QStringLiteral("Q"))));
+        QTest::qWait(300);
+        QTRY_COMPARE(backend.mathPlacements().size(), 1);
+        QCOMPARE(backend.mathPlacements().at(0).svg, reals);
+
+        editor->setProperty("cursorPosition", away);
+        QTRY_VERIFY_WITH_TIMEOUT(!useSvg().isEmpty() && useSvg() != reals, 20000);
+    }
+
+    void showsMathSourceUnderTheCaret() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const QString text = QStringLiteral("Euler: $e^{i\\pi}+1=0$ and $a_1 + b_2$ _it_\n\n"
+                                            "$$\nx\n$$\n");
+        editor->setProperty("text", text);
+        editor->setProperty("cursorPosition", 0);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.mathPlacements().size(), 3, 20000);
+        QCOMPARE(backend.mathPlacements().at(0).position, 7);
+
+        // Underscores in math are not italic markers for the caret to skip.
+        const QVariantList hidden = backend.hiddenRangesAt(0);
+        QCOMPARE(hidden.size(), 2);
+        QCOMPARE(hidden.at(0).toMap().value(QStringLiteral("start")).toInt(),
+                 int(text.indexOf(QStringLiteral("_it_"))));
+
+        // The caret inside a formula shows its source; leaving renders it again.
+        editor->setProperty("cursorPosition", 12);
+        QTRY_COMPARE(backend.mathPlacements().size(), 2);
+        editor->setProperty("cursorPosition", 0);
+        QTRY_COMPARE(backend.mathPlacements().size(), 3);
+
+        // Editing a later line of display math re-typesets it from its first line.
+        const QByteArray before = backend.mathPlacements().at(2).svg;
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert",
+                                          Q_ARG(int, int(text.indexOf(QStringLiteral("x\n$$")))),
+                                          Q_ARG(QString, QStringLiteral("y+"))));
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
+        QTRY_VERIFY_WITH_TIMEOUT(backend.mathPlacements().size() == 3
+                                 && backend.mathPlacements().at(2).svg != before, 20000);
+
+        // An opening code fence above turns everything after it into code.
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 0), Q_ARG(QString, QStringLiteral("```\n"))));
+        QTRY_VERIFY(backend.mathPlacements().isEmpty());
+    }
+
+    void opensMathSourceOnClick() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        auto *overlay = window->findChild<QQuickItem *>(QStringLiteral("mathOverlay"));
+        QVERIFY(editor);
+        QVERIFY(overlay);
+
+        // Inline math, a display line with a trailing space, and a display block.
+        const QString text = QStringLiteral("Inline $x^2$ here\n\n$$\\int f$$ \n\n"
+                                            "$$\nx+1\n$$\n\nend");
+        editor->setProperty("text", text);
+        const int away = int(text.size());
+        editor->setProperty("cursorPosition", away);
+        QTRY_COMPARE_WITH_TIMEOUT(backend.mathPlacements().size(), 3, 20000);
+
+        const auto isRendered = [&backend](int position) {
+            const auto placements = backend.mathPlacements();
+            return std::any_of(placements.cbegin(), placements.cend(),
+                               [position](const auto &placement) {
+                                   return placement.position == position;
+                               });
+        };
+        for (int formula = 0; formula < 3; ++formula) {
+            const auto placement = backend.mathPlacements().at(formula);
+            const QPointF click = overlay->mapToScene(placement.image.center());
+            QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, click.toPoint());
+            QTRY_VERIFY2(!isRendered(placement.position),
+                         qPrintable(QStringLiteral("formula %1 did not open; caret at %2")
+                                        .arg(formula)
+                                        .arg(editor->property("cursorPosition").toInt())));
+
+            editor->setProperty("cursorPosition", away);
+            QTRY_COMPARE(backend.mathPlacements().size(), 3);
+        }
     }
 
     void loadsCurrentOmarchyTheme() {

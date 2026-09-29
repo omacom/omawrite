@@ -1,0 +1,12 @@
+<RCC>
+    <qresource prefix="/mathjax">
+        <file alias="driver.js">mathjax-driver.js</file>
+        <file alias="loader.js">../mathjax/es5/loader.js</file>
+        <file alias="core.js">../mathjax/es5/core.js</file>
+        <file alias="adaptors/liteDOM.js">../mathjax/es5/adaptors/liteDOM.js</file>
+        <file alias="input/tex-base.js">../mathjax/es5/input/tex-base.js</file>
+        <file alias="input/tex-full.js">../mathjax/es5/input/tex-full.js</file>
+        <file alias="output/svg.js">../mathjax/es5/output/svg.js</file>
+        <file alias="output/svg/fonts/tex.js">../mathjax/es5/output/svg/fonts/tex.js</file>
+    </qresource>
+</RCC>
