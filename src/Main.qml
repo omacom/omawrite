@@ -4,6 +4,7 @@ import QtQuick.Controls.Material
 import QtQuick.Dialogs as Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
+import Omawrite
 import "EditorMutations.js" as EditorMutations
 
 ApplicationWindow {
@@ -559,6 +560,8 @@ ApplicationWindow {
                     color: win.strongTextColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                // A formula shows its TeX source while the caret is in it.
+                onCursorPositionChanged: backend.setMathCaret(cursorPosition)
 
                 function replaceSelectionWith(replacement) {
                     var start = Math.min(selectionStart, selectionEnd);
@@ -776,6 +779,17 @@ ApplicationWindow {
                     var contentChanged = backend.editorTextChanged();
                     if (win.searchOpen && contentChanged)
                         win.updateSearch();
+                }
+
+                MathOverlay {
+                    objectName: "mathOverlay"
+                    x: editor.leftPadding
+                    y: editor.topPadding
+                    source: backend
+                    color: win.textColor
+                    selectionColor: win.selectionFill
+                    selectionStart: editor.selectionStart
+                    selectionEnd: editor.selectionEnd
                 }
 
                 Text {

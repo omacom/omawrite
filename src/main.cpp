@@ -11,6 +11,7 @@
 #include <QFile>
 
 #include "backend.h"
+#include "mathoverlay.h"
 #include "systemtheme.h"
 
 int main(int argc, char *argv[]) {
@@ -53,6 +54,8 @@ int main(int argc, char *argv[]) {
         applyInterfaceFont(textScale);
         backend.setTextScale(textScale);
     });
+
+    qmlRegisterType<MathOverlay>("Omawrite", 1, 0, "MathOverlay");
 
     QQmlApplicationEngine engine;
     QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,

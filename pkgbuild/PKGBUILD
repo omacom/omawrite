@@ -8,8 +8,8 @@ arch=('x86_64')
 url='https://github.com/omacom-io/omawrite'
 license=('MIT')
 install='omawrite.install'
-depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
-makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
+depends=('qt6-base' 'qt6-declarative' 'qt6-svg' 'xdg-desktop-portal')
+makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative' 'qt6-svg')
 source=()
 sha256sums=()
 
@@ -23,6 +23,7 @@ package() {
   /usr/bin/install -Dm755 build/omawrite "$pkgdir/usr/bin/omawrite"
   /usr/bin/install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
   /usr/bin/install -Dm644 fonts/OFL.txt "$pkgdir/usr/share/licenses/$pkgname/OFL.txt"
+  /usr/bin/install -Dm644 mathjax/LICENSE "$pkgdir/usr/share/licenses/$pkgname/MathJax-LICENSE"
   /usr/bin/install -Dm644 "$startdir/omawrite.svg" "$pkgdir/usr/share/icons/hicolor/scalable/apps/omawrite.svg"
   /usr/bin/install -Dm644 "$startdir/omawrite.desktop" "$pkgdir/usr/share/applications/omawrite.desktop"
 }

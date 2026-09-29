@@ -181,6 +181,9 @@ void Backend::attachDocument(QObject *textDocument) {
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setDarkMode(m_darkMode);
     m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
+    m_highlighter->setMathRenderer(&m_mathRenderer);
+    connect(m_highlighter, &MarkdownHighlighter::mathLayoutChanged, this,
+            &Backend::mathPlacementsChanged);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {
@@ -373,8 +376,9 @@ QVariantList Backend::hiddenRangesAt(int position) const {
 
     const int lineStart = block.position();
     QList<QPair<int, int>> spans;
-    const QList<MarkdownHighlighter::InlineMarkup> markup =
-        MarkdownHighlighter::inlineMarkup(block.text());
+    const QList<MarkdownHighlighter::InlineMarkup> markup = MarkdownHighlighter::inlineMarkup(
+        block.text(), m_highlighter ? m_highlighter->mathSegments(block)
+                                    : QList<MarkdownHighlighter::Span>());
     for (const MarkdownHighlighter::InlineMarkup &item : markup) {
         for (const MarkdownHighlighter::Span &marker : item.markers) {
             spans.append({lineStart + marker.start,
@@ -388,6 +392,16 @@ QVariantList Backend::hiddenRangesAt(int position) const {
                                   {QStringLiteral("end"), span.second}});
     }
     return ranges;
+}
+
+void Backend::setMathCaret(int position) {
+    if (m_highlighter)
+        m_highlighter->setMathCaret(position);
+}
+
+QList<MarkdownHighlighter::MathPlacement> Backend::mathPlacements() const {
+    return m_highlighter ? m_highlighter->mathPlacements()
+                         : QList<MarkdownHighlighter::MathPlacement>();
 }
 
 void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {

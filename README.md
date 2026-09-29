@@ -24,6 +24,17 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 
+## Math
+
+LaTeX math renders in place, the way Obsidian's live preview does: `$...$` and
+`\(...\)` inline, `$$...$$` as display math, and `\[...\]` as display math when
+it stands on lines of its own (in prose, `\[` is an escaped bracket). Display
+math on lines of its own may span several lines, up to a blank line. Put the caret in a
+formula, by clicking it or moving onto it with the keyboard, to edit its source;
+move away and it renders again. A formula MathJax cannot typeset keeps showing
+its source in red. Dollar amounts like `$5 and $10`, code spans, and fenced code
+stay text. Printing still shows the TeX source.
+
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
 
@@ -33,9 +44,13 @@ Omawrite at the size it is designed around; larger and smaller sizes scale from 
 
 ## Requirements
 
-- Qt 6: `qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`
+- Qt 6: `qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`, `qt6-svg`
 - `xdg-desktop-portal` and a portal backend
 
 The iA Writer Mono font is bundled under the SIL Open Font License 1.1; see
 `fonts/OFL.txt`. The font is copyright Information Architects Inc. and based on
 IBM Plex, copyright IBM Corp.
+
+MathJax 3.2.2 (the components under `mathjax/es5`) is bundled under the Apache
+License 2.0; see `mathjax/LICENSE`. It runs in Qt's JavaScript engine on a
+background thread, loaded the first time a document contains math.
