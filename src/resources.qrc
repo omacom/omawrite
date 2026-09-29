@@ -4,6 +4,7 @@
         <file alias="SearchIconButton.qml">SearchIconButton.qml</file>
         <file alias="FooterIconButton.qml">FooterIconButton.qml</file>
         <file alias="SquareDialogButton.qml">SquareDialogButton.qml</file>
+        <file alias="TabStrip.qml">TabStrip.qml</file>
         <file alias="UnsavedChangesDialog.qml">UnsavedChangesDialog.qml</file>
         <file alias="ExternalChangeDialog.qml">ExternalChangeDialog.qml</file>
         <file alias="EditorMutations.js">EditorMutations.js</file>

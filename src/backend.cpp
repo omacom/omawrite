@@ -8,33 +8,22 @@
 #include <QFileInfo>
 #include <QDesktopServices>
 #include <QGuiApplication>
-#include <QMimeData>
-#include <QProcess>
-#include <QPrintDialog>
-#include <QPrinter>
-#include <QQuickTextDocument>
-#include <QRegularExpression>
-#include <QSettings>
-#include <QStandardPaths>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
+#include <QMimeData>
+#include <QProcess>
+#include <QRegularExpression>
 #include <QSaveFile>
-#include <QTextBlock>
-#include <QTextBlockFormat>
-#include <QTextCursor>
-#include <QTextDocument>
+#include <QSettings>
+#include <QStandardPaths>
 #include <QTextStream>
 #include <QUrl>
 #include <QVariantMap>
 #include <QWindow>
 
-#include <algorithm>
-
-#include "markdownhighlighter.h"
-
-constexpr qreal typoraLineHeightPercent = 140;
-const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
+#include "documenttab.h"
 
 QString Backend::normalizedLinkUrl(const QString &clipboardText) {
     QString candidate = clipboardText.trimmed();
@@ -72,50 +61,16 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
 }
 
 Backend::Backend(QObject *parent) : QObject(parent) {
-    const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
-    QDir().mkpath(stateDirectory);
-    // Claim an orphaned snapshot before taking an empty slot. This ensures a
-    // crash in window 2 is still recovered even if window 1 exited normally.
-    for (int pass = 0; pass < 2 && !m_recoveryLock; ++pass) {
-        for (int slot = 0; slot < 100; ++slot) {
-            const QString base = QDir(stateDirectory).filePath(
-                QStringLiteral("recovery-%1").arg(slot));
-            const bool snapshotExists = QFileInfo::exists(base + QStringLiteral(".json"));
-            if ((pass == 0) != snapshotExists)
-                continue;
-            auto lock = std::make_unique<QLockFile>(base + QStringLiteral(".lock"));
-            if (lock->tryLock()) {
-                m_recoveryPath = base + QStringLiteral(".json");
-                m_recoveryLock = std::move(lock);
-                break;
-            }
-        }
-    }
-    m_wordCountTimer.setSingleShot(true);
-    m_wordCountTimer.setInterval(120);
-    connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
-    m_recoveryTimer.setSingleShot(true);
-    m_recoveryTimer.setInterval(750);
-    connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
-    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
-            [this](const QString &path) {
-                if (path != m_fileUrl.toLocalFile())
-                    return;
+    m_sessionTimer.setSingleShot(true);
+    m_sessionTimer.setInterval(750);
+    connect(&m_sessionTimer, &QTimer::timeout, this, &Backend::writeSessionFile);
 
-                const bool deleted = !QFileInfo::exists(path);
-                if (!deleted && m_hasKnownFileContents) {
-                    QFile file(path);
-                    if (file.open(QIODevice::ReadOnly)
-                            && file.readAll() == m_lastKnownFileContents) {
-                        // Atomic saves can replace the watched inode. Re-arm the
-                        // watcher, but do not report our own save as an outside edit.
-                        watchCurrentFile();
-                        return;
-                    }
-                }
-
-                emit externalChangeDetected(deleted, m_modified);
-            });
+    claimSessionSlot();
+    loadSessionOrLegacyRecovery();
+    if (m_tabs.isEmpty())
+        m_tabs.append(new DocumentTab(this));
+    m_activeTabIndex = qBound(0, m_activeTabIndex, m_tabs.size() - 1);
+    connectActiveTabSignals();
 
     loadOmarchyTheme();
     watchOmarchyTheme();
@@ -131,22 +86,114 @@ Backend::Backend(QObject *parent) : QObject(parent) {
 
 Backend::~Backend() = default;
 
-void Backend::setParentWindow(QWindow *window) {
-    m_parentWindow = window;
+DocumentTab *Backend::activeTab() const {
+    return m_tabs.value(m_activeTabIndex);
 }
 
-QString Backend::fileName() const {
-    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
-        return QStringLiteral("Untitled.md");
+void Backend::connectActiveTabSignals() {
+    DocumentTab *tab = activeTab();
+    if (!tab)
+        return;
+    m_activeTabConnections
+        << connect(tab, &DocumentTab::fileUrlChanged, this, &Backend::fileUrlChanged)
+        << connect(tab, &DocumentTab::modifiedChanged, this, &Backend::modifiedChanged)
+        << connect(tab, &DocumentTab::statusChanged, this, &Backend::statusChanged)
+        << connect(tab, &DocumentTab::wordCountChanged, this, &Backend::wordCountChanged)
+        << connect(tab, &DocumentTab::closeAfterSave, this, &Backend::closeAfterSave)
+        << connect(tab, &DocumentTab::saveDialogRequested, this, &Backend::saveDialogRequested)
+        << connect(tab, &DocumentTab::saveSucceeded, this, &Backend::saveSucceeded)
+        << connect(tab, &DocumentTab::externalChangeDetected, this,
+                   &Backend::externalChangeDetected)
+        << connect(tab, &DocumentTab::fileUrlChanged, this, &Backend::scheduleSessionWrite)
+        << connect(tab, &DocumentTab::modifiedChanged, this, &Backend::scheduleSessionWrite);
+}
 
-    if (m_fileUrl.isLocalFile()) {
-        const QFileInfo info(m_fileUrl.toLocalFile());
-        if (!info.fileName().isEmpty())
-            return info.fileName();
+void Backend::disconnectActiveTabSignals() {
+    for (const QMetaObject::Connection &connection : std::as_const(m_activeTabConnections))
+        disconnect(connection);
+    m_activeTabConnections.clear();
+}
+
+void Backend::setParentWindow(QWindow *window) {
+    m_parentWindow = window;
+    for (DocumentTab *tab : std::as_const(m_tabs))
+        tab->setParentWindow(window);
+}
+
+QUrl Backend::fileUrl() const { return activeTab() ? activeTab()->fileUrl() : QUrl(); }
+QString Backend::fileName() const {
+    return activeTab() ? activeTab()->fileName() : QStringLiteral("Untitled.md");
+}
+bool Backend::modified() const { return activeTab() && activeTab()->modified(); }
+QString Backend::status() const { return activeTab() ? activeTab()->status() : QString(); }
+int Backend::wordCount() const { return activeTab() ? activeTab()->wordCount() : 0; }
+
+QVariantList Backend::tabs() const {
+    QVariantList result;
+    result.reserve(m_tabs.size());
+    for (DocumentTab *tab : m_tabs)
+        result.append(QVariant::fromValue<QObject *>(tab));
+    return result;
+}
+
+void Backend::setActiveTabIndex(int index) {
+    if (index < 0 || index >= m_tabs.size() || index == m_activeTabIndex)
+        return;
+
+    disconnectActiveTabSignals();
+    m_activeTabIndex = index;
+    connectActiveTabSignals();
+    emit activeTabIndexChanged();
+    emit fileUrlChanged();
+    emit modifiedChanged();
+    emit statusChanged();
+    emit wordCountChanged();
+    scheduleSessionWrite();
+}
+
+DocumentTab *Backend::appendTab() {
+    disconnectActiveTabSignals();
+
+    auto *tab = new DocumentTab(this);
+    tab->setParentWindow(m_parentWindow);
+    tab->applyTheme(m_darkMode, m_themeBackground, m_themeForeground, m_themeAccent);
+    m_tabs.append(tab);
+    m_activeTabIndex = m_tabs.size() - 1;
+
+    connectActiveTabSignals();
+    emit tabsChanged();
+    emit activeTabIndexChanged();
+    emit fileUrlChanged();
+    emit modifiedChanged();
+    emit statusChanged();
+    emit wordCountChanged();
+    scheduleSessionWrite();
+    return tab;
+}
+
+void Backend::removeActiveTab() {
+    if (m_tabs.isEmpty())
+        return;
+
+    disconnectActiveTabSignals();
+    DocumentTab *tab = m_tabs.takeAt(m_activeTabIndex);
+    tab->deleteLater();
+
+    if (m_tabs.isEmpty()) {
+        emit tabsChanged();
+        emit lastTabClosed();
+        return;
     }
 
-    const QString name = m_fileUrl.fileName();
-    return name.isEmpty() ? QStringLiteral("Untitled.md") : name;
+    m_activeTabIndex = qBound(0, m_activeTabIndex, m_tabs.size() - 1);
+    connectActiveTabSignals();
+    emit tabsChanged();
+    emit activeTabIndexChanged();
+    emit fileUrlChanged();
+    emit modifiedChanged();
+    emit statusChanged();
+    emit wordCountChanged();
+    scheduleSessionWrite();
 }
 
 void Backend::setDarkMode(bool darkMode) {
@@ -167,142 +214,80 @@ void Backend::setTextScale(qreal textScale) {
 }
 
 void Backend::attachDocument(QObject *textDocument) {
-    auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
-    if (!quickDocument || !quickDocument->textDocument()) {
-        setStatus(QStringLiteral("Could not attach the Markdown renderer."));
-        return;
-    }
+    if (activeTab())
+        activeTab()->attachDocument(textDocument);
+}
 
-    if (m_highlighter)
-        delete m_highlighter.data();
-
-    m_document = quickDocument->textDocument();
-    m_lastDocumentText = m_document->toPlainText();
-    m_highlighter = new MarkdownHighlighter(m_document);
-    m_highlighter->setDarkMode(m_darkMode);
-    m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
-
-    connect(m_document, &QTextDocument::contentsChange, this,
-            [this](int position, int, int charsAdded) {
-                if (m_formattingTypography || m_loading)
-                    return;
-                m_lastChangePos = position;
-                m_lastChangeAdded = charsAdded;
-            });
-
-    applyDocumentTypography();
-    restoreRecovery();
+void Backend::attachTabDocument(QObject *tabHandle, QObject *textDocument) {
+    if (auto *tab = qobject_cast<DocumentTab *>(tabHandle))
+        tab->attachDocument(textDocument);
 }
 
 void Backend::openDialog() {
     emit openDialogRequested();
 }
 
-void Backend::open(const QUrl &url) {
-    if (!url.isLocalFile()) {
-        setStatus(QStringLiteral("Only local files can be opened."));
+void Backend::open(const QUrl &url) { if (activeTab()) activeTab()->open(url); }
+
+void Backend::activateOrOpenTab(const QUrl &url) {
+    for (int i = 0; i < m_tabs.size(); ++i) {
+        if (m_tabs.at(i)->fileUrl() == url) {
+            setActiveTabIndex(i);
+            return;
+        }
+    }
+    appendTab()->primeNamedRestore(url, -1, -1, -1);
+}
+
+void Backend::newTab() {
+    appendTab();
+}
+
+void Backend::closeActiveTab() {
+    DocumentTab *tab = activeTab();
+    if (!tab)
+        return;
+
+    tab->flushPendingAutosave();
+    if (tab->isNamed() || !tab->modified()) {
+        removeActiveTab();
         return;
     }
+    emit closeActiveTabRequiresConfirmation();
+}
 
-    const QString targetName = QFileInfo(url.toLocalFile()).fileName();
-    QFile file(url.toLocalFile());
-    if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        setStatus(QStringLiteral("Could not open %1.").arg(targetName));
+void Backend::discardActiveTab() {
+    DocumentTab *tab = activeTab();
+    if (!tab)
         return;
-    }
-
-    const QByteArray contents = file.readAll();
-    loadDocumentText(QString::fromUtf8(contents));
-    clearRecovery();
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
-    setFileUrl(url);
-    watchCurrentFile();
-    setModified(false);
-    setStatus(QStringLiteral("Opened %1").arg(fileName()));
+    tab->discardRecovery();
+    removeActiveTab();
 }
 
-void Backend::save() {
-    if (!m_fileUrl.isValid() || m_fileUrl.isEmpty()) {
-        saveAsDialog();
-        return;
-    }
-
-    saveTo(m_fileUrl);
-}
-
-void Backend::saveForClose() {
-    if (!m_modified) {
-        emit closeAfterSave();
-        return;
-    }
-
-    m_closeAfterSave = true;
-    save();
-}
-
-void Backend::saveAsDialog() {
-    emit saveDialogRequested(suggestedSaveUrl());
-}
-
-void Backend::saveAs(const QUrl &url) {
-    saveTo(url);
-}
-
-void Backend::fileDialogCanceled() {
-    m_closeAfterSave = false;
-}
-
-void Backend::discardRecovery() {
-    clearRecovery();
-}
-
-void Backend::reloadFromDisk() {
-    if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
-}
-
-void Backend::keepExternalVersion() {
-    QFile file(m_fileUrl.toLocalFile());
-    if (file.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = file.readAll();
-        m_hasKnownFileContents = true;
-    } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
-    }
-    setModified(true);
-    scheduleRecovery();
-    watchCurrentFile();
-    setStatus(QStringLiteral("Kept your version"));
-}
-
-void Backend::printDocument() {
-    if (!m_document) {
-        setStatus(QStringLiteral("There is no document to print."));
-        return;
-    }
-
-    QPrinter printer(QPrinter::HighResolution);
-    QPrintDialog dialog(&printer);
-    dialog.setWindowTitle(QStringLiteral("Print %1").arg(fileName()));
-    dialog.winId();
-    if (dialog.windowHandle() && m_parentWindow)
-        dialog.windowHandle()->setTransientParent(m_parentWindow);
-
-    if (dialog.exec() == QDialog::Accepted) {
-        QTextDocument rendered;
-        rendered.setDefaultFont(m_document->defaultFont());
-        rendered.setMarkdown(currentDocumentText());
-        rendered.print(&printer);
-    }
-}
+void Backend::save() { if (activeTab()) activeTab()->save(); }
+void Backend::saveForClose() { if (activeTab()) activeTab()->saveForClose(); }
+void Backend::saveAsDialog() { if (activeTab()) activeTab()->saveAsDialog(); }
+void Backend::saveAs(const QUrl &url) { if (activeTab()) activeTab()->saveAs(url); }
+void Backend::fileDialogCanceled() { if (activeTab()) activeTab()->fileDialogCanceled(); }
+void Backend::discardRecovery() { if (activeTab()) activeTab()->discardRecovery(); }
+void Backend::reloadFromDisk() { if (activeTab()) activeTab()->reloadFromDisk(); }
+void Backend::keepExternalVersion() { if (activeTab()) activeTab()->keepExternalVersion(); }
+void Backend::printDocument() { if (activeTab()) activeTab()->printDocument(); }
 
 void Backend::newWindow() {
     const bool started = QProcess::startDetached(QCoreApplication::applicationFilePath(),
                                                  QStringList());
-    if (!started)
-        setStatus(QStringLiteral("Could not open a new window."));
+    if (!started && activeTab())
+        activeTab()->reportStatus(QStringLiteral("Could not open a new window."));
+}
+
+void Backend::flushAllPendingWrites() {
+    for (DocumentTab *tab : std::as_const(m_tabs))
+        tab->flushPendingAutosave();
+    if (m_sessionTimer.isActive()) {
+        m_sessionTimer.stop();
+        writeSessionFile();
+    }
 }
 
 QString Backend::clipboardUrl() const {
@@ -339,60 +324,32 @@ QString Backend::clipboardText() const {
 }
 
 bool Backend::editorTextChanged() {
-    if (m_loading || m_formattingTypography)
-        return false;
+    return activeTab() && activeTab()->editorTextChanged();
+}
 
-    const QString text = currentDocumentText();
-    if (text == m_lastDocumentText)
-        return false;
-    m_lastDocumentText = text;
-
-    if (m_document) {
-        const int blockCount = m_document->blockCount();
-        if (blockCount > m_formattedBlockCount)
-            reapplyTypographyToChange();
-        m_formattedBlockCount = blockCount;
-    }
-
-    scheduleWordCount();
-    setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
-    scheduleRecovery();
-    return true;
+bool Backend::editorTextChangedForTab(QObject *tabHandle) {
+    auto *tab = qobject_cast<DocumentTab *>(tabHandle);
+    return tab && tab->editorTextChanged();
 }
 
 QVariantList Backend::hiddenRangesAt(int position) const {
-    QVariantList ranges;
-    if (!m_document)
-        return ranges;
-
-    const QTextBlock block =
-        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
-    if (!block.isValid())
-        return ranges;
-
-    const int lineStart = block.position();
-    QList<QPair<int, int>> spans;
-    const QList<MarkdownHighlighter::InlineMarkup> markup =
-        MarkdownHighlighter::inlineMarkup(block.text());
-    for (const MarkdownHighlighter::InlineMarkup &item : markup) {
-        for (const MarkdownHighlighter::Span &marker : item.markers) {
-            spans.append({lineStart + marker.start,
-                          lineStart + marker.start + marker.length});
-        }
-    }
-    std::sort(spans.begin(), spans.end());
-
-    for (const auto &span : spans) {
-        ranges.append(QVariantMap{{QStringLiteral("start"), span.first},
-                                  {QStringLiteral("end"), span.second}});
-    }
-    return ranges;
+    return activeTab() ? activeTab()->hiddenRangesAt(position) : QVariantList();
 }
 
 void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
-    if (m_highlighter)
-        m_highlighter->setSearch(query, currentMatchStart);
+    if (activeTab())
+        activeTab()->setSearchHighlight(query, currentMatchStart);
+}
+
+void Backend::updateCursorState(int cursor, int selectionStart, int selectionEnd) {
+    if (!activeTab())
+        return;
+    activeTab()->updateCursorState(cursor, selectionStart, selectionEnd);
+    scheduleSessionWrite();
+}
+
+QVariantMap Backend::consumePendingCursorRestore() {
+    return activeTab() ? activeTab()->consumePendingCursorRestore() : QVariantMap();
 }
 
 void Backend::openExternalUrl(const QUrl &url) {
@@ -420,157 +377,6 @@ void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maxim
         settings.setValue(QStringLiteral("window/height"), height);
     }
     settings.setValue(QStringLiteral("window/maximized"), maximized);
-}
-
-void Backend::loadDocumentText(const QString &text) {
-    if (!m_document) {
-        setStatus(QStringLiteral("Could not attach the Markdown renderer."));
-        return;
-    }
-
-    m_loading = true;
-    m_document->setPlainText(text);
-    m_lastDocumentText = text;
-    m_loading = false;
-
-    applyDocumentTypography();
-    m_wordCountTimer.stop();
-    setWordCount(countWords(text));
-}
-
-void Backend::setFileUrl(const QUrl &url) {
-    if (m_fileUrl == url)
-        return;
-
-    m_fileUrl = url;
-    emit fileUrlChanged();
-    watchCurrentFile();
-}
-
-void Backend::setModified(bool modified) {
-    if (m_modified == modified)
-        return;
-
-    m_modified = modified;
-    emit modifiedChanged();
-}
-
-void Backend::setStatus(const QString &status) {
-    if (m_status == status)
-        return;
-
-    m_status = status;
-    emit statusChanged();
-}
-
-void Backend::saveTo(const QUrl &url) {
-    if (!url.isLocalFile()) {
-        m_closeAfterSave = false;
-        setStatus(QStringLiteral("Only local files can be saved."));
-        return;
-    }
-
-    const QString targetName = QFileInfo(url.toLocalFile()).fileName();
-    QSaveFile file(url.toLocalFile());
-    if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        m_closeAfterSave = false;
-        setStatus(QStringLiteral("Could not save %1.").arg(targetName));
-        return;
-    }
-
-    const QByteArray contents = currentDocumentText().toUtf8();
-    file.write(contents);
-
-    // QSaveFile commits by replacing the target. Stop watching the old inode
-    // before that replacement so our own write is not classified as external.
-    const QStringList watched = m_fileWatcher.files();
-    if (!watched.isEmpty())
-        m_fileWatcher.removePaths(watched);
-
-    // commit() flushes, fsyncs, and atomically renames the temp file into place,
-    // returning false (and leaving the original untouched) on any write error.
-    if (!file.commit()) {
-        watchCurrentFile();
-        m_closeAfterSave = false;
-        setStatus(QStringLiteral("Could not write %1.").arg(targetName));
-        return;
-    }
-
-    const bool shouldClose = m_closeAfterSave;
-    m_closeAfterSave = false;
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
-    setFileUrl(url);
-    watchCurrentFile();
-    QSettings().setValue(lastSaveDirectorySetting,
-                         QFileInfo(url.toLocalFile()).absolutePath());
-    setModified(false);
-    setStatus(QStringLiteral("Saved %1").arg(fileName()));
-    clearRecovery();
-    emit saveSucceeded();
-
-    if (shouldClose)
-        emit closeAfterSave();
-}
-
-void Backend::scheduleRecovery() {
-    m_recoveryTimer.start();
-}
-
-QString Backend::recoveryPath() const {
-    return m_recoveryPath;
-}
-
-void Backend::writeRecovery() {
-    if (!m_modified)
-        return;
-    const QString path = recoveryPath();
-    if (path.isEmpty())
-        return;
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
-        return;
-    const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
-                               {QStringLiteral("text"), currentDocumentText()}};
-    file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
-    file.commit();
-}
-
-void Backend::restoreRecovery() {
-    QFile file(recoveryPath());
-    if (!file.open(QIODevice::ReadOnly))
-        return;
-    const QJsonDocument json = QJsonDocument::fromJson(file.readAll());
-    if (!json.isObject() || !json.object().contains(QStringLiteral("text")))
-        return;
-    const QJsonObject recovery = json.object();
-    loadDocumentText(recovery.value(QStringLiteral("text")).toString());
-    const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
-    QFile diskFile(recoveredUrl.toLocalFile());
-    if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = diskFile.readAll();
-        m_hasKnownFileContents = true;
-    } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
-    }
-    setFileUrl(recoveredUrl);
-    setModified(true);
-    setStatus(QStringLiteral("Recovered unsaved changes"));
-}
-
-void Backend::clearRecovery() {
-    m_recoveryTimer.stop();
-    QFile::remove(recoveryPath());
-}
-
-void Backend::watchCurrentFile() {
-    const QStringList watched = m_fileWatcher.files();
-    if (!watched.isEmpty())
-        m_fileWatcher.removePaths(watched);
-    if (m_fileUrl.isLocalFile() && QFileInfo::exists(m_fileUrl.toLocalFile()))
-        m_fileWatcher.addPath(m_fileUrl.toLocalFile());
 }
 
 void Backend::loadOmarchyTheme() {
@@ -636,10 +442,8 @@ void Backend::loadOmarchyTheme() {
         emit darkModeChanged();
     }
 
-    if (m_highlighter) {
-        m_highlighter->setDarkMode(m_darkMode);
-        m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
-    }
+    for (DocumentTab *tab : std::as_const(m_tabs))
+        tab->applyTheme(m_darkMode, m_themeBackground, m_themeForeground, m_themeAccent);
 
     emit themeColorsChanged();
 }
@@ -662,32 +466,134 @@ void Backend::watchOmarchyTheme() {
         m_themeWatcher.addPath(colorsPath);
 }
 
-QUrl Backend::suggestedSaveUrl() const {
-    if (m_fileUrl.isLocalFile())
-        return m_fileUrl;
-
-    const QString savedDirectory = QSettings().value(lastSaveDirectorySetting).toString();
-    const QDir directory = savedDirectory.isEmpty() || !QDir(savedDirectory).exists()
-        ? QDir::home()
-        : QDir(savedDirectory);
-    return QUrl::fromLocalFile(
-        directory.filePath(suggestedFileName(currentDocumentText())));
-}
-
-QString Backend::currentDocumentText() const {
-    return m_document ? m_document->toPlainText() : QString();
-}
-
-int Backend::countWords(const QString &text) {
-    static const QRegularExpression wordRe(
-        QStringLiteral("[\\p{L}\\p{N}]+(?:['-][\\p{L}\\p{N}]+)*"));
-    int count = 0;
-    QRegularExpressionMatchIterator it = wordRe.globalMatch(text);
-    while (it.hasNext()) {
-        it.next();
-        ++count;
+void Backend::claimSessionSlot() {
+    const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    QDir().mkpath(stateDirectory);
+    // Same two-pass, orphan-preferring claim as DocumentTab's own untitled-N
+    // slots: a session left behind by a crashed process is recovered even if
+    // another window/process exited normally in the meantime.
+    for (int pass = 0; pass < 2 && !m_sessionLock; ++pass) {
+        for (int slot = 0; slot < 100; ++slot) {
+            const QString base = QDir(stateDirectory).filePath(
+                QStringLiteral("session-%1").arg(slot));
+            const bool snapshotExists = QFileInfo::exists(base + QStringLiteral(".json"));
+            if ((pass == 0) != snapshotExists)
+                continue;
+            auto lock = std::make_unique<QLockFile>(base + QStringLiteral(".lock"));
+            if (lock->tryLock()) {
+                m_sessionPath = base + QStringLiteral(".json");
+                m_sessionLock = std::move(lock);
+                break;
+            }
+        }
     }
-    return count;
+}
+
+void Backend::loadSessionOrLegacyRecovery() {
+    const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+
+    QFile sessionFile(m_sessionPath);
+    if (sessionFile.open(QIODevice::ReadOnly)) {
+        const QJsonDocument json = QJsonDocument::fromJson(sessionFile.readAll());
+        const QJsonObject root = json.object();
+        const QJsonArray tabs = root.value(QStringLiteral("tabs")).toArray();
+        for (const QJsonValue &value : tabs) {
+            const QJsonObject tab = value.toObject();
+            auto *documentTab = new DocumentTab(this);
+            const int cursor = tab.value(QStringLiteral("cursor")).toInt(-1);
+            const int selectionStart = tab.value(QStringLiteral("selectionStart")).toInt(-1);
+            const int selectionEnd = tab.value(QStringLiteral("selectionEnd")).toInt(-1);
+            if (tab.value(QStringLiteral("kind")).toString() == QStringLiteral("named")) {
+                documentTab->primeNamedRestore(
+                    QUrl(tab.value(QStringLiteral("fileUrl")).toString()), cursor,
+                    selectionStart, selectionEnd);
+            } else {
+                const QString slot = tab.value(QStringLiteral("slot")).toString();
+                QFile untitledFile(QDir(stateDirectory).filePath(slot + QStringLiteral(".json")));
+                QString text;
+                if (!slot.isEmpty() && untitledFile.open(QIODevice::ReadOnly)) {
+                    text = QJsonDocument::fromJson(untitledFile.readAll())
+                               .object().value(QStringLiteral("text")).toString();
+                }
+                documentTab->primeUntitledRestore(text, cursor, selectionStart, selectionEnd);
+            }
+            m_tabs.append(documentTab);
+        }
+        if (!tabs.isEmpty())
+            m_activeTabIndex = root.value(QStringLiteral("activeIndex")).toInt(0);
+    }
+
+    // Import any leftover recovery-*.json from before tabs/sessions existed,
+    // as additional tabs -- regardless of whether a session was also found
+    // above, since a legacy file's slot number is coincidental and must not
+    // cause it to be silently skipped. Only an ORPHANED snapshot (whose lock
+    // nobody currently holds) is imported: one still held by a live process
+    // running the pre-tabs single-slot scheme is left alone, since that
+    // process is still actively managing it.
+    const QDir dir(stateDirectory);
+    const QStringList legacyFiles =
+        dir.entryList(QStringList() << QStringLiteral("recovery-*.json"), QDir::Files);
+    for (const QString &legacyName : legacyFiles) {
+        const QString legacyBase = legacyName.chopped(5); // strip ".json"
+        const QString legacyLockPath = dir.filePath(legacyBase + QStringLiteral(".lock"));
+        QLockFile legacyLock(legacyLockPath);
+        if (!legacyLock.tryLock())
+            continue;
+
+        QFile legacy(dir.filePath(legacyName));
+        if (!legacy.open(QIODevice::ReadOnly))
+            continue;
+        const QJsonObject legacyObject = QJsonDocument::fromJson(legacy.readAll()).object();
+        legacy.close();
+        QFile::remove(dir.filePath(legacyName));
+        legacyLock.unlock();
+        QFile::remove(legacyLockPath);
+
+        const QUrl fileUrl(legacyObject.value(QStringLiteral("fileUrl")).toString());
+        const QString text = legacyObject.value(QStringLiteral("text")).toString();
+        auto *documentTab = new DocumentTab(this);
+        if (fileUrl.isEmpty())
+            documentTab->primeUntitledRestore(text, -1, -1, -1);
+        else
+            documentTab->primeNamedRestoreWithPendingEdits(fileUrl, text);
+        m_tabs.append(documentTab);
+    }
+}
+
+void Backend::scheduleSessionWrite() {
+    m_sessionTimer.start();
+}
+
+void Backend::writeSessionFile() {
+    if (m_sessionPath.isEmpty())
+        return;
+
+    QJsonArray tabs;
+    for (DocumentTab *tab : std::as_const(m_tabs)) {
+        QJsonObject entry;
+        if (tab->isNamed()) {
+            entry[QStringLiteral("kind")] = QStringLiteral("named");
+            entry[QStringLiteral("fileUrl")] = tab->fileUrl().toString();
+        } else {
+            entry[QStringLiteral("kind")] = QStringLiteral("untitled");
+            entry[QStringLiteral("slot")] = tab->untitledSlotName();
+        }
+        entry[QStringLiteral("cursor")] = tab->cursorPosition();
+        entry[QStringLiteral("selectionStart")] = tab->selectionStart();
+        entry[QStringLiteral("selectionEnd")] = tab->selectionEnd();
+        tabs.append(entry);
+    }
+
+    const QJsonObject root{{QStringLiteral("version"), 1},
+                           {QStringLiteral("activeIndex"), m_activeTabIndex},
+                           {QStringLiteral("tabs"), tabs}};
+
+    QDir().mkpath(QFileInfo(m_sessionPath).absolutePath());
+    QSaveFile file(m_sessionPath);
+    if (!file.open(QIODevice::WriteOnly))
+        return;
+    file.write(QJsonDocument(root).toJson(QJsonDocument::Compact));
+    file.commit();
 }
 
 QString Backend::suggestedFileName(const QString &text) {
@@ -702,65 +608,14 @@ QString Backend::suggestedFileName(const QString &text) {
     return name;
 }
 
-void Backend::setWordCount(int words) {
-    if (m_wordCount == words)
-        return;
-
-    m_wordCount = words;
-    emit wordCountChanged();
-}
-
-void Backend::refreshWordCount() {
-    setWordCount(countWords(currentDocumentText()));
-}
-
-void Backend::scheduleWordCount() {
-    m_wordCountTimer.start();
-}
-
-void Backend::applyDocumentTypography() {
-    if (!m_document)
-        return;
-
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
-
-    // A full pass is only used for freshly loaded/attached documents, so it is
-    // safe to drop undo history here (re-enabling clears the stack anyway).
-    const bool undoEnabled = m_document->isUndoRedoEnabled();
-    m_document->setUndoRedoEnabled(false);
-
-    m_formattingTypography = true;
-    QTextCursor cursor(m_document);
-    cursor.select(QTextCursor::Document);
-    cursor.mergeBlockFormat(blockFormat);
-    m_formattingTypography = false;
-
-    m_document->setUndoRedoEnabled(undoEnabled);
-
-    m_formattedBlockCount = m_document->blockCount();
-}
-
-void Backend::reapplyTypographyToChange() {
-    if (!m_document)
-        return;
-
-    QTextBlockFormat blockFormat;
-    blockFormat.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
-
-    // Format only the block(s) touched by the last edit instead of the whole
-    // document, and fold the change into the preceding edit command so a single
-    // undo reverts both the text and its formatting.
-    const int maxPos = m_document->characterCount() - 1;
-    const int start = qBound(0, m_lastChangePos, maxPos);
-    const int end = qBound(start, m_lastChangePos + m_lastChangeAdded, maxPos);
-
-    m_formattingTypography = true;
-    QTextCursor cursor(m_document);
-    cursor.joinPreviousEditBlock();
-    cursor.setPosition(start);
-    cursor.setPosition(end, QTextCursor::KeepAnchor);
-    cursor.mergeBlockFormat(blockFormat);
-    cursor.endEditBlock();
-    m_formattingTypography = false;
+int Backend::countWords(const QString &text) {
+    static const QRegularExpression wordRe(
+        QStringLiteral("[\\p{L}\\p{N}]+(?:['-][\\p{L}\\p{N}]+)*"));
+    int count = 0;
+    QRegularExpressionMatchIterator it = wordRe.globalMatch(text);
+    while (it.hasNext()) {
+        it.next();
+        ++count;
+    }
+    return count;
 }

@@ -6,12 +6,14 @@ TEMPLATE = app
 
 HEADERS += \
     src/backend.h \
+    src/documenttab.h \
     src/markdownhighlighter.h \
     src/systemtheme.h
 
 SOURCES += \
     src/main.cpp \
     src/backend.cpp \
+    src/documenttab.cpp \
     src/markdownhighlighter.cpp \
     src/systemtheme.cpp
 

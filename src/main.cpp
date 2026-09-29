@@ -71,9 +71,12 @@ int main(int argc, char *argv[]) {
 
     backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
 
+    // Session restore has already populated the window's tabs by this point;
+    // activateOrOpenTab() reuses a tab already open on this path instead of
+    // duplicating it, and otherwise opens it in a new one.
     const QStringList args = app.arguments();
-    if (args.size() > 1 && !backend.modified())
-        backend.open(QUrl::fromLocalFile(args.at(1)));
+    if (args.size() > 1)
+        backend.activateOrOpenTab(QUrl::fromLocalFile(args.at(1)));
 
     return app.exec();
 }
