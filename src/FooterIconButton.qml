@@ -54,6 +54,26 @@ Item {
                 context.lineTo(4.5, 9.5);
                 context.lineTo(11.5, 9.5);
                 context.lineTo(11.5, 13.5);
+            } else if (control.iconName === "preview") {
+                // Eye: outline + pupil, same 1.4px stroke language.
+                context.moveTo(1.5, 8);
+                context.quadraticCurveTo(5, 3.5, 8, 3.5);
+                context.quadraticCurveTo(11, 3.5, 14.5, 8);
+                context.quadraticCurveTo(11, 12.5, 8, 12.5);
+                context.quadraticCurveTo(5, 12.5, 1.5, 8);
+                context.closePath();
+                context.moveTo(10, 8);
+                context.arc(8, 8, 2, 0, Math.PI * 2);
+            } else if (control.iconName === "edit") {
+                // Pencil: diagonal body + tip notch.
+                context.moveTo(11, 2.5);
+                context.lineTo(13.5, 5);
+                context.lineTo(6, 12.5);
+                context.lineTo(2.5, 13.5);
+                context.lineTo(3.5, 10);
+                context.closePath();
+                context.moveTo(9.5, 4);
+                context.lineTo(12, 6.5);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);
