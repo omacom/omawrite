@@ -175,8 +175,17 @@ private slots:
         QVERIFY2(window, qPrintable(component.errorString()));
 
         QVERIFY(window->findChild<QObject *>(QStringLiteral("sourceEditor")));
-        QVERIFY(!window->findChild<QObject *>(QStringLiteral("renderedPreview")));
-        QVERIFY(!window->findChild<QObject *>(QStringLiteral("modeToggle")));
+        QObject *preview = window->findChild<QObject *>(QStringLiteral("renderedPreview"));
+        QObject *modeToggle = window->findChild<QObject *>(QStringLiteral("modeToggle"));
+        QVERIFY(preview);
+        QVERIFY(modeToggle);
+
+        // Starts in Edit; toggle flips to read-only Preview and back.
+        QCOMPARE(window->property("readMode").toBool(), false);
+        QVERIFY(QMetaObject::invokeMethod(modeToggle, "clicked"));
+        QCOMPARE(window->property("readMode").toBool(), true);
+        QVERIFY(QMetaObject::invokeMethod(modeToggle, "clicked"));
+        QCOMPARE(window->property("readMode").toBool(), false);
 
         QObject *saveButton = window->findChild<QObject *>(QStringLiteral("saveButton"));
         QObject *openButton = window->findChild<QObject *>(QStringLiteral("openButton"));
@@ -190,6 +199,79 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void rendersMarkdownPreview() {
+        Backend backend;
+        QVERIFY(backend.markdownPreview(QString()).isEmpty());
+        QVERIFY(backend.markdownPreview(QStringLiteral("   \n  ")).isEmpty());
+
+        const QString html = backend.markdownPreview(
+            QStringLiteral("# Hello\n\nA [link](https://example.com) and `code`.\n\n"
+                           "| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+                           "```\nfenced()\n```\n\n> quoted\n\n"
+                           "```java\nimport java.util.Arrays;\nint x = 1; // one\n```\n"));
+        QVERIFY(html.contains(QStringLiteral("Hello")));
+        QVERIFY(html.contains(QStringLiteral("https://example.com")));
+        QVERIFY(html.contains(QStringLiteral("quoted")));
+        // Theme accent carried into the preview (QColor lowercases hex).
+        QVERIFY(html.contains(backend.themeAccent().mid(1), Qt::CaseInsensitive));
+        // No qrichtext marker: keeps <pre> non-wrapping so code scrolls
+        // horizontally instead of breaking mid-statement.
+        QVERIFY(!html.contains(QStringLiteral("qrichtext")));
+        QVERIFY(html.contains(QStringLiteral("iA Writer Mono S")));
+        // Fence language tag, IDE keyword color, bordered snippet container.
+        QVERIFY(html.contains(QStringLiteral(">java<")));
+        const QString kw = backend.darkMode() ? QStringLiteral("c678dd")
+                                              : QStringLiteral("a626a4");
+        QVERIFY(html.contains(kw, Qt::CaseInsensitive));
+        QVERIFY(html.contains(QStringLiteral("bordercolor")));
+
+        // Cached: identical input + theme returns identical output.
+        QCOMPARE(backend.markdownPreview(
+                     QStringLiteral("# Hello\n\nA [link](https://example.com) and `code`.\n\n"
+                                    "| a | b |\n|---|---|\n| 1 | 2 |\n\n"
+                                    "```\nfenced()\n```\n\n> quoted\n\n"
+                                    "```java\nimport java.util.Arrays;\nint x = 1; // one\n```\n")),
+                 html);
+    }
+
+    void splitsPreviewIntoChunks() {
+        Backend backend;
+        const QString html = backend.markdownPreview(
+            QStringLiteral("# Title\n\nBody text here.\n\n```java\nint x = 1;\n```\n\n"
+                           "- one\n- two\n\n| a | b |\n|---|---|\n| 1 | 2 |\n"));
+        const QStringList chunks = backend.splitPreviewHtml(html);
+        QVERIFY(chunks.size() >= 4);
+        for (const QString &chunk : chunks)
+            QVERIFY(chunk.contains(QStringLiteral("<html>")));
+
+        // Chunking only repartitions: visible text must be identical.
+        // (Drop <head> first: every chunk replays its CSS text. Lazy match:
+        // greedy would span from the first head to the last across chunks.)
+        auto bodyText = [](QString rich) {
+            rich.remove(QRegularExpression(
+                QStringLiteral("<head>.*?</head>"),
+                QRegularExpression::DotMatchesEverythingOption));
+            rich.remove(QRegularExpression(QStringLiteral("<[^<>]*>")));
+            return rich.simplified();
+        };
+        QCOMPARE(bodyText(chunks.join(QString())), bodyText(html));
+        QVERIFY(backend.splitPreviewHtml(QString()).isEmpty());
+    }
+
+    void keepsBracketLeadsVisible() {
+        Backend backend;
+        // Qt drops prose lines starting with `<Tag` as HTML blocks; the
+        // preview escapes them so they (and following lines) still render.
+        const QString html = backend.markdownPreview(
+            QStringLiteral("Notes line.\n\n<Integer> array = new Integer[5];\nFollow-up line.\n"));
+        QVERIFY(html.contains(QStringLiteral("Integer")));
+        QVERIFY(html.contains(QStringLiteral("Follow-up")));
+        // ...but autolinks keep working.
+        const QString linked = backend.markdownPreview(
+            QStringLiteral("Visit <https://example.com> today.\n"));
+        QVERIFY(linked.contains(QStringLiteral("https://example.com")));
     }
 
     void scalesTextWithDesktopTextSize() {

@@ -28,6 +28,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
+    Q_PROPERTY(int previewContentWidth READ previewContentWidth NOTIFY previewContentWidthChanged)
 
 public:
     explicit Backend(QObject *parent = nullptr);
@@ -49,6 +50,7 @@ public:
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
+    int previewContentWidth() const { return m_previewContentWidth; }
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
@@ -72,6 +74,8 @@ public:
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
+    Q_INVOKABLE QString markdownPreview(const QString &markdown);
+    Q_INVOKABLE QStringList splitPreviewHtml(const QString &html) const;
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
 
@@ -83,6 +87,7 @@ signals:
     void darkModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
+    void previewContentWidthChanged();
     void closeAfterSave();
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
@@ -140,4 +145,11 @@ private:
     QString m_themeAccent;
     QString m_themeSelection;
     QFileSystemWatcher m_themeWatcher;
+    int m_previewContentWidth = 0;
+
+    // Read-mode preview cache: rendering Markdown -> HTML walks the whole
+    // document, so skip it when neither the source nor the theme changed.
+    mutable QString m_previewInput;
+    mutable QString m_previewThemeKey;
+    mutable QString m_previewHtml;
 };

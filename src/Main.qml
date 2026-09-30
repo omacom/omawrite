@@ -38,6 +38,11 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    // Read mode: rendered Markdown preview sharing the editor's geometry and
+    // theme. Strictly read-only (select/copy + clickable links), no typing.
+    property bool readMode: false
+    property string previewHtml: ""
+    property var previewChunks: []
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -71,6 +76,22 @@ ApplicationWindow {
             close();
         } else if (action === "open") {
             backend.open(pendingOpenUrl);
+        }
+    }
+
+    function refreshPreview() {
+        previewHtml = backend.markdownPreview(editor.text);
+        previewChunks = backend.splitPreviewHtml(previewHtml);
+    }
+
+    function toggleReadMode() {
+        readMode = !readMode;
+        if (readMode) {
+            searchOpen = false;
+            refreshPreview();
+            editorFlick.scrollTo(0);
+        } else {
+            editor.forceActiveFocus();
         }
     }
 
@@ -147,11 +168,19 @@ ApplicationWindow {
         sequence: "Ctrl+H"
         context: Qt.ApplicationShortcut
         onActivated: {
+            if (win.readMode)
+                win.toggleReadMode();
             searchOpen = true;
             replaceOpen = true;
             searchField.forceActiveFocus();
             searchField.selectAll();
         }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+E"
+        context: Qt.ApplicationShortcut
+        onActivated: win.toggleReadMode()
     }
 
     Shortcut {
@@ -224,6 +253,8 @@ ApplicationWindow {
         sequence: "Ctrl+F"
         context: Qt.ApplicationShortcut
         onActivated: {
+            if (win.readMode)
+                win.toggleReadMode();
             searchOpen = true;
             searchField.forceActiveFocus();
             searchField.selectAll();
@@ -233,8 +264,20 @@ ApplicationWindow {
     Shortcut {
         sequence: "Ctrl+G"
         context: Qt.ApplicationShortcut
-        enabled: win.searchOpen
+        enabled: win.searchOpen && !win.readMode
         onActivated: win.moveSearch(1)
+    }
+
+    // Debounced re-render while in read mode (open/reload/external change).
+    // Editing can't happen in read mode, so no per-keystroke cost in Edit.
+    Timer {
+        id: previewDebounce
+        interval: 250
+        repeat: false
+        onTriggered: {
+            if (win.readMode)
+                win.refreshPreview();
+        }
     }
 
     Connections {
@@ -258,6 +301,16 @@ ApplicationWindow {
             win.awaitingPendingSave = false;
             if (win.pendingAction !== "")
                 win.completePendingAction();
+        }
+
+        function onThemeColorsChanged() {
+            if (win.readMode)
+                win.refreshPreview();
+        }
+
+        function onTextScaleChanged() {
+            if (win.readMode)
+                win.refreshPreview();
         }
 
         function onExternalChangeDetected(deleted, locallyModified) {
@@ -331,7 +384,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+E  Toggle Preview\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -345,9 +398,13 @@ ApplicationWindow {
             anchors.leftMargin: 24
             anchors.rightMargin: 24
             clip: true
-            contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentWidth: win.readMode ? Math.max(width, backend.previewContentWidth) : width
+            contentHeight: Math.max(height, (win.readMode ? renderedPreview.y + renderedPreview.implicitHeight : editor.y + editor.implicitHeight) + 220)
             boundsBehavior: Flickable.StopAtBounds
+            ScrollBar.horizontal: ScrollBar {
+                policy: ScrollBar.AsNeeded
+                active: hovered || pressed
+            }
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
                 // Wheel scrolling moves contentY directly rather than
@@ -516,8 +573,13 @@ ApplicationWindow {
             }
 
             // Keep the editing caret within the viewport so writing past the
-            // bottom edge scrolls the page along with the text.
+            // bottom edge scrolls the page along with the text. Edit mode
+            // only: in read mode the hidden editor's async cursor updates
+            // (e.g. after open(), cursor lands at end of file) must never
+            // yank the preview viewport around.
             function ensureCursorVisible() {
+                if (win.readMode)
+                    return;
                 var margin = win.editorFontPixelSize * 2;
                 var cursorTop = editor.y + editor.cursorRectangle.y;
                 var cursorBottom = cursorTop + editor.cursorRectangle.height;
@@ -532,6 +594,7 @@ ApplicationWindow {
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
+                visible: !win.readMode
                 x: Math.round((editorFlick.width - width) / 2)
                 y: Math.max(42, Math.round(win.height * 0.05))
                 width: win.editorWidth
@@ -776,6 +839,8 @@ ApplicationWindow {
                     var contentChanged = backend.editorTextChanged();
                     if (win.searchOpen && contentChanged)
                         win.updateSearch();
+                    if (win.readMode)
+                        previewDebounce.restart();
                 }
 
                 Text {
@@ -793,6 +858,56 @@ ApplicationWindow {
                     backend.attachDocument(textDocument);
                     forceActiveFocus();
                 }
+            }
+
+            // Read mode: same column width/margins as the editor, same page
+            // colors, proportional serif body + sans headings, mono code.
+            // Rendered as one read-only TextEdit per top-level block (not one
+            // giant item): oversized text nodes can fail to paint on real
+            // GPUs while layout still reports full height, i.e. pages of
+            // blank with a correct scrollbar. Small items paint reliably.
+            // Text.selectByMouse does not exist in this Qt build, so
+            // read-only TextEdits provide selection/copy + clickable links.
+            Column {
+                id: renderedPreview
+                objectName: "renderedPreview"
+                visible: win.readMode
+                x: Math.round((editorFlick.width - width) / 2)
+                y: Math.max(42, Math.round(win.height * 0.05))
+                width: win.editorWidth
+                height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+
+                Repeater {
+                    model: win.previewChunks
+                    TextEdit {
+                        width: renderedPreview.width
+                        readOnly: true
+                        selectByMouse: true
+                        persistentSelection: true
+                        activeFocusOnPress: true
+                        cursorVisible: false
+                        text: modelData
+                        textFormat: TextEdit.RichText
+                        wrapMode: TextEdit.Wrap
+                        color: win.textColor
+                        selectedTextColor: win.strongTextColor
+                        selectionColor: win.selectionFill
+                        font.family: "Liberation Serif"
+                        font.pixelSize: win.editorFontPixelSize
+                        renderType: Screen.devicePixelRatio % 1 === 0 ? TextEdit.NativeRendering : TextEdit.QtRendering
+                        onLinkActivated: function(link) { backend.openExternalUrl(link); }
+                    }
+                }
+            }
+
+            Text {
+                x: renderedPreview.x
+                y: renderedPreview.y
+                text: "Nothing to preview"
+                visible: win.readMode && editor.text.length === 0
+                color: win.mutedColor
+                font.family: "Liberation Serif"
+                font.pixelSize: win.editorFontPixelSize
             }
         }
 
@@ -821,8 +936,16 @@ ApplicationWindow {
                 onClicked: backend.openDialog()
             }
 
+            FooterIconButton {
+                objectName: "modeToggle"
+                iconName: win.readMode ? "edit" : "preview"
+                iconColor: win.mutedColor
+                tooltip: win.readMode ? "Edit (Ctrl+E)" : "Preview (Ctrl+E)"
+                onClicked: win.toggleReadMode()
+            }
+
             Label {
-                text: backend.status
+                text: win.readMode ? "Preview — Ctrl+E to edit" : backend.status
                 color: win.mutedColor
                 font.family: "iA Writer Mono S"
                 font.pixelSize: win.scaledSize(11)
