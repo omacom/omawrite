@@ -138,13 +138,15 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+S"
+        id: saveShortcut
+        sequences: [StandardKey.Save]
         context: Qt.ApplicationShortcut
         onActivated: backend.save()
     }
 
     Shortcut {
-        sequence: "Ctrl+H"
+        id: replaceShortcut
+        sequence: Qt.platform.os === "osx" ? "Ctrl+Alt+F" : "Ctrl+H"
         context: Qt.ApplicationShortcut
         onActivated: {
             searchOpen = true;
@@ -155,73 +157,91 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+B"
+        id: boldShortcut
+        sequences: [StandardKey.Bold]
         context: Qt.WindowShortcut
         onActivated: editor.wrapSelection("**", "**")
     }
 
     Shortcut {
-        sequence: "Ctrl+I"
+        id: italicShortcut
+        sequences: [StandardKey.Italic]
         context: Qt.WindowShortcut
         onActivated: editor.wrapSelection("*", "*")
     }
 
     Shortcut {
+        id: linkShortcut
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
     }
 
     Shortcut {
+        id: helpShortcut
         sequence: "Ctrl+?"
         context: Qt.ApplicationShortcut
         onActivated: shortcutsDialog.open()
     }
 
     Shortcut {
-        sequence: "Ctrl+O"
+        id: openShortcut
+        sequences: [StandardKey.Open]
         context: Qt.ApplicationShortcut
         onActivated: backend.openDialog()
     }
 
     Shortcut {
-        sequence: "Ctrl+N"
+        id: newShortcut
+        sequences: [StandardKey.New]
         context: Qt.ApplicationShortcut
         onActivated: backend.newWindow()
     }
 
     Shortcut {
-        sequence: "Ctrl+Shift+S"
+        id: saveAsShortcut
+        sequences: [StandardKey.SaveAs]
         context: Qt.ApplicationShortcut
         onActivated: backend.saveAsDialog()
     }
 
     Shortcut {
-        sequence: "Ctrl+P"
+        id: printShortcut
+        sequences: [StandardKey.Print]
         context: Qt.ApplicationShortcut
         onActivated: backend.printDocument()
     }
 
     Shortcut {
-        sequences: ["Meta+F", "F11"]
+        id: fullscreenShortcut
+        sequences: Qt.platform.os === "osx"
+            ? ["Ctrl+Meta+F"]
+            : ["Meta+F", "F11"]
         context: Qt.ApplicationShortcut
         onActivated: toggleFullScreen()
     }
 
     Shortcut {
-        sequence: "Ctrl+Z"
+        id: undoShortcut
+        sequences: [StandardKey.Undo]
         context: Qt.WindowShortcut
         onActivated: editor.undo()
     }
 
     Shortcut {
-        sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
+        id: redoShortcut
+        // Qt drops Ctrl+Y from StandardKey.Redo under the GNOME keyboard
+        // scheme, which is the one Omarchy's Qt sessions resolve to.
+        sequences: Qt.platform.os === "osx"
+            ? [StandardKey.Redo]
+            : [StandardKey.Redo, "Ctrl+Y"]
         context: Qt.WindowShortcut
         onActivated: editor.redo()
     }
 
     Shortcut {
-        sequence: "Ctrl+F"
+        id: findShortcut
+        sequences: [StandardKey.Find]
         context: Qt.ApplicationShortcut
         onActivated: {
             searchOpen = true;
@@ -231,6 +251,7 @@ ApplicationWindow {
     }
 
     Shortcut {
+        id: findNextShortcut
         sequence: "Ctrl+G"
         context: Qt.ApplicationShortcut
         enabled: win.searchOpen
@@ -331,7 +352,18 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: saveShortcut.nativeText + "  Save\n"
+                + saveAsShortcut.nativeText + "  Save As\n"
+                + openShortcut.nativeText + "  Open\n"
+                + newShortcut.nativeText + "  New Window\n"
+                + findShortcut.nativeText + "  Find\n"
+                + replaceShortcut.nativeText + "  Find and Replace\n"
+                + boldShortcut.nativeText + "  Bold\n"
+                + italicShortcut.nativeText + "  Italic\n"
+                + linkShortcut.nativeText + "  Link\n"
+                + printShortcut.nativeText + "  Print\n"
+                + fullscreenShortcut.nativeText + "  Fullscreen\n"
+                + helpShortcut.nativeText + "  Shortcuts"
             lineHeight: 1.5
         }
     }

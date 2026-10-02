@@ -1,7 +1,9 @@
 #include <QFont>
 #include <QFontDatabase>
 #include <QApplication>
+#include <QFileOpenEvent>
 #include <QIcon>
+#include <QProcess>
 #include <QQmlApplicationEngine>
 #include <QQmlContext>
 #include <QQmlError>
@@ -10,11 +12,47 @@
 #include <QWindow>
 #include <QFile>
 
+#include <functional>
+#include <utility>
+
 #include "backend.h"
 #include "systemtheme.h"
 
+class OmawriteApplication final : public QApplication {
+public:
+    using QApplication::QApplication;
+    using FileOpenHandler = std::function<void(const QUrl &)>;
+
+    void setFileOpenHandler(FileOpenHandler handler) {
+        m_fileOpenHandler = std::move(handler);
+        QList<QUrl> pendingUrls;
+        pendingUrls.swap(m_pendingFileUrls);
+        for (const QUrl &url : pendingUrls)
+            m_fileOpenHandler(url);
+    }
+
+protected:
+    bool event(QEvent *event) override {
+        if (event->type() == QEvent::FileOpen) {
+            const QUrl url = static_cast<QFileOpenEvent *>(event)->url();
+            if (url.isValid()) {
+                if (m_fileOpenHandler)
+                    m_fileOpenHandler(url);
+                else
+                    m_pendingFileUrls.append(url);
+            }
+            return true;
+        }
+        return QApplication::event(event);
+    }
+
+private:
+    FileOpenHandler m_fileOpenHandler;
+    QList<QUrl> m_pendingFileUrls;
+};
+
 int main(int argc, char *argv[]) {
-    QApplication app(argc, argv);
+    OmawriteApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("omawrite"));
     app.setDesktopFileName(QStringLiteral("omawrite"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
@@ -74,6 +112,21 @@ int main(int argc, char *argv[]) {
     const QStringList args = app.arguments();
     if (args.size() > 1 && !backend.modified())
         backend.open(QUrl::fromLocalFile(args.at(1)));
+
+    // Finder delivers documents through QFileOpenEvent rather than argv. Keep
+    // one document per window, matching the existing New Window behavior.
+    app.setFileOpenHandler([&backend](const QUrl &url) {
+        if (!url.isLocalFile() || url == backend.fileUrl())
+            return;
+        const bool alreadyShowingFile = backend.fileUrl().isValid()
+            && !backend.fileUrl().isEmpty();
+        if (backend.modified() || alreadyShowingFile) {
+            QProcess::startDetached(QCoreApplication::applicationFilePath(),
+                                    QStringList{url.toLocalFile()});
+        } else {
+            backend.open(url);
+        }
+    });
 
     return app.exec();
 }

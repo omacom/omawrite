@@ -1,0 +1,96 @@
+#!/usr/bin/env sh
+set -eu
+
+if [ "$(uname -s)" != "Darwin" ] || [ "$(uname -m)" != "arm64" ]; then
+  echo "This package script must run on an Apple Silicon Mac." >&2
+  exit 1
+fi
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+BUILD_DIR="$ROOT/build"
+APP="$BUILD_DIR/omawrite.app"
+
+if command -v qmake6 >/dev/null 2>&1; then
+  QMAKE=qmake6
+elif command -v qmake >/dev/null 2>&1; then
+  QMAKE=qmake
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qt)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qt)/bin/qmake"
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qtbase)/bin/qmake" ]; then
+  QMAKE="$(brew --prefix qtbase)/bin/qmake"
+else
+  echo "Qt 6 is required. Install it with: brew install qtbase qtdeclarative qttools" >&2
+  exit 1
+fi
+
+case "$QMAKE" in
+  /*) ;;
+  *) QMAKE="$(command -v "$QMAKE")" ;;
+esac
+QT_BIN="$(dirname -- "$QMAKE")"
+if [ -x "$QT_BIN/macdeployqt" ]; then
+  MACDEPLOYQT="$QT_BIN/macdeployqt"
+elif command -v macdeployqt >/dev/null 2>&1; then
+  MACDEPLOYQT="$(command -v macdeployqt)"
+elif command -v brew >/dev/null 2>&1 && [ -x "$(brew --prefix qttools)/bin/macdeployqt" ]; then
+  MACDEPLOYQT="$(brew --prefix qttools)/bin/macdeployqt"
+else
+  MACDEPLOYQT=""
+fi
+if [ ! -x "$MACDEPLOYQT" ]; then
+  echo "macdeployqt was not found. Install it with: brew install qttools" >&2
+  exit 1
+fi
+
+JOBS="$(sysctl -n hw.logicalcpu 2>/dev/null || echo 1)"
+mkdir -p "$BUILD_DIR"
+cd "$BUILD_DIR"
+
+# Never carry frameworks or plugins over from a previous Qt toolchain.
+rm -rf "$APP"
+"$QMAKE" "$ROOT/omawrite.pro" CONFIG+=release QMAKE_APPLE_DEVICE_ARCHS=arm64
+make clean
+make -j"$JOBS"
+
+BINARY="$APP/Contents/MacOS/omawrite"
+if [ ! -x "$BINARY" ]; then
+  echo "The expected application bundle was not produced: $APP" >&2
+  exit 1
+fi
+
+ARCHS="$(lipo -archs "$BINARY")"
+if [ "$ARCHS" != "arm64" ]; then
+  echo "Expected an arm64-only application, but found: $ARCHS" >&2
+  exit 1
+fi
+
+QT_LIBS="$("$QMAKE" -query QT_INSTALL_LIBS)"
+
+# macdeployqt does not always search the SDK's top-level library directory
+# when Qt is installed as split packages (as Homebrew does). Supplying qmake's
+# reported library directory also works with the official Qt SDK.
+rm -f "$BUILD_DIR/omawrite.dmg"
+if [ -d "$QT_LIBS" ]; then
+  "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -libpath="$QT_LIBS" \
+    -appstore-compliant -always-overwrite
+else
+  "$MACDEPLOYQT" "$APP" -qmldir="$ROOT/src" -appstore-compliant \
+    -always-overwrite
+fi
+
+# The official SDK ships a Mimer SQL plugin that links to a proprietary client
+# library outside Qt. Omawrite does not use it; retaining SQLite is sufficient
+# for any Qt Quick local-storage dependency.
+rm -f "$APP/Contents/PlugIns/sqldrivers/libqsqlmimer.dylib"
+codesign --force --deep --sign - "$APP"
+codesign --verify --deep --strict "$APP"
+
+DMG_STAGE="$(mktemp -d "$BUILD_DIR/.omawrite-dmg.XXXXXX")"
+trap 'rm -rf "$DMG_STAGE"' EXIT
+ditto "$APP" "$DMG_STAGE/Omawrite.app"
+ln -s /Applications "$DMG_STAGE/Applications"
+hdiutil create -quiet -fs HFS+ -volname Omawrite -srcfolder "$DMG_STAGE" \
+  -format UDZO "$BUILD_DIR/omawrite.dmg"
+hdiutil verify "$BUILD_DIR/omawrite.dmg" >/dev/null
+
+echo "Packaged $BUILD_DIR/omawrite.dmg"

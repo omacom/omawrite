@@ -10,19 +10,40 @@ A dead-simple Markdown writing app built with Qt Quick and C++ that automaticall
 
 Install via the Omarchy Package Repository via the `omawrite` package. It's installed by default in new installations of Omarchy (from Quattro forward).
 
+### macOS (Apple Silicon)
+
+Install Qt 6 and build an arm64 application bundle:
+
+```sh
+brew install qtbase qtdeclarative qttools
+./bin/build
+```
+
+To bundle the Qt frameworks and create a local DMG:
+
+```sh
+./bin/package-macos-arm64
+```
+
+The package is written to `build/omawrite.dmg`. It is ad-hoc signed for local
+use; public distribution still requires an Apple Developer ID signature and
+notarization.
+
 ## Shortcuts
 
-- `Ctrl+S` saves. Unsaved documents use the XDG desktop portal file picker.
+- `Ctrl+S` saves. Unsaved documents use the system file picker (the XDG
+  desktop portal on Linux).
 - `Ctrl+Shift+S` saves as.
-- `Ctrl+O` opens a Markdown file through the portal picker.
+- `Ctrl+O` opens a Markdown file through the system picker.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new Omawrite window.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
-- `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
+- `Super+F` toggles fullscreen on Linux; macOS uses `Control+Command+F`.
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
-- `Ctrl+H` opens find and replace.
+- `Ctrl+H` opens find and replace on Linux; macOS uses `Command+Option+F`.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
-- `Ctrl+?` shows the keyboard shortcut reference.
+- `Ctrl+?` shows the keyboard shortcut reference. On macOS, Qt maps `Ctrl`
+  shortcuts to their native `Command` equivalents.
 
 Unsaved drafts are recovered after an abnormal exit. Omawrite also watches open files
 and warns before an external change can replace local work.
@@ -34,7 +55,8 @@ Omawrite at the size it is designed around; larger and smaller sizes scale from 
 ## Requirements
 
 - Qt 6: `qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`
-- `xdg-desktop-portal` and a portal backend
+- Linux: `xdg-desktop-portal` and a portal backend
+- macOS 13 or newer: Xcode Command Line Tools
 
 The IBM Plex Mono font is bundled under the SIL Open Font License 1.1; see
 `fonts/OFL.txt`. The font is copyright IBM Corp.

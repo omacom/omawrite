@@ -7,6 +7,7 @@
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "systemtheme.h"
 
 class OmawriteTest : public QObject {
     Q_OBJECT
@@ -42,6 +43,11 @@ private slots:
         QCOMPARE(Backend::suggestedFileName(QString()), QStringLiteral("Untitled.md"));
         QCOMPARE(Backend::suggestedFileName(QStringLiteral("Already.md")),
                  QStringLiteral("Already.md"));
+    }
+
+    void detectsSystemAppearanceWithoutRequiringAPortal() {
+        SystemTheme theme;
+        QVERIFY(theme.textScale() > 0.0);
     }
 
     void findsInlineMarkdownRanges() {
