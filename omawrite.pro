@@ -1,4 +1,6 @@
-QT += core gui widgets printsupport qml quick quickcontrols2 quickdialogs2 dbus
+QT += core gui widgets printsupport qml quick quickcontrols2 quickdialogs2
+
+linux: QT += dbus
 
 CONFIG += c++17 release
 TARGET = omawrite
@@ -16,3 +18,10 @@ SOURCES += \
     src/systemtheme.cpp
 
 RESOURCES += src/resources.qrc
+
+macos {
+    ICON = macos/omawrite.icns
+    QMAKE_TARGET_BUNDLE_PREFIX = io.omacom
+    QMAKE_BUNDLE_DISPLAY_NAME = Omawrite
+    QMAKE_APPLICATION_BUNDLE_NAME = Omawrite
+}

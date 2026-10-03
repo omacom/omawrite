@@ -1,13 +1,16 @@
 #include "systemtheme.h"
 
+#ifdef Q_OS_LINUX
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusReply>
 #include <QDBusVariant>
+#endif
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QVariant>
 
+#ifdef Q_OS_LINUX
 namespace {
 QVariant unwrapVariant(QVariant value) {
     while (value.canConvert<QDBusVariant>())
@@ -82,6 +85,7 @@ bool gsettingsSchemeIsDark(const QVariant &value, bool *known) {
     return false;
 }
 }
+#endif
 
 SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
     m_darkMode = detectDarkMode();
@@ -92,6 +96,7 @@ SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
                 this, &SystemTheme::refresh);
     }
 
+#ifdef Q_OS_LINUX
     QDBusConnection::sessionBus().connect(
         QString(),
         QStringLiteral("/org/freedesktop/portal/desktop"),
@@ -99,6 +104,7 @@ SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
         QStringLiteral("SettingChanged"),
         this,
         SLOT(handlePortalSettingChanged(QString,QString,QDBusVariant)));
+#endif
 }
 
 void SystemTheme::refresh() {
@@ -106,6 +112,7 @@ void SystemTheme::refresh() {
     setTextScale(detectTextScale());
 }
 
+#ifdef Q_OS_LINUX
 void SystemTheme::handlePortalSettingChanged(const QString &nameSpace, const QString &key,
                                              const QDBusVariant &value) {
     if (key == QStringLiteral("text-scaling-factor")) {
@@ -136,13 +143,16 @@ void SystemTheme::handlePortalSettingChanged(const QString &nameSpace, const QSt
     else
         refresh();
 }
+#endif
 
 bool SystemTheme::detectDarkMode() const {
     bool known = false;
 
+#ifdef Q_OS_LINUX
     const bool portalDark = portalDarkMode(&known);
     if (known)
         return portalDark;
+#endif
 
     const bool qtDark = qtDarkMode(&known);
     if (known)
@@ -151,6 +161,7 @@ bool SystemTheme::detectDarkMode() const {
     return true;
 }
 
+#ifdef Q_OS_LINUX
 bool SystemTheme::portalDarkMode(bool *known) const {
     *known = false;
 
@@ -161,8 +172,10 @@ bool SystemTheme::portalDarkMode(bool *known) const {
 
     return colorSchemeIsDark(scheme, known);
 }
+#endif
 
 qreal SystemTheme::detectTextScale() const {
+#ifdef Q_OS_LINUX
     const QVariant factor = portalSetting(QStringLiteral("org.gnome.desktop.interface"),
                                           QStringLiteral("text-scaling-factor"));
     if (!factor.isValid())
@@ -170,6 +183,12 @@ qreal SystemTheme::detectTextScale() const {
 
     bool known = false;
     return sanitizedTextScale(factor, &known);
+#else
+    // macOS has no desktop-wide "apparent text size" knob equivalent to
+    // GNOME's text-scaling-factor; Omawrite renders at its designed size and
+    // lets the user zoom via the app's own controls.
+    return 1.0;
+#endif
 }
 
 bool SystemTheme::qtDarkMode(bool *known) const {

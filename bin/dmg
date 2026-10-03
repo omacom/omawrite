@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+BUILD_DIR="$ROOT/build"
+APP_BUNDLE="$BUILD_DIR/Omawrite.app"
+
+if [ "$(uname -s)" != "Darwin" ]; then
+  echo "bin/dmg only builds a macOS disk image; run it on macOS." >&2
+  exit 1
+fi
+
+if command -v qmake6 >/dev/null 2>&1; then
+  QMAKE_DIR="$(dirname -- "$(command -v qmake6)")"
+elif command -v qmake >/dev/null 2>&1; then
+  QMAKE_DIR="$(dirname -- "$(command -v qmake)")"
+else
+  echo "qmake6 or qmake is required to build omawrite." >&2
+  exit 1
+fi
+
+if [ -x "$QMAKE_DIR/macdeployqt6" ]; then
+  MACDEPLOYQT="$QMAKE_DIR/macdeployqt6"
+elif [ -x "$QMAKE_DIR/macdeployqt" ]; then
+  MACDEPLOYQT="$QMAKE_DIR/macdeployqt"
+else
+  echo "macdeployqt was not found next to qmake in $QMAKE_DIR." >&2
+  exit 1
+fi
+
+"$ROOT/bin/build"
+
+rm -f "$BUILD_DIR/Omawrite.dmg"
+# -qmldir points the QML import scanner at the real source tree (our QML is
+# bundled into a .qrc, so without this macdeployqt can't see which imports
+# are used and fails to resolve rpaths for unrelated optional Qt frameworks).
+"$MACDEPLOYQT" "$APP_BUNDLE" -qmldir="$ROOT/src" -dmg
+
+echo "Built $BUILD_DIR/Omawrite.dmg"

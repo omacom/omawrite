@@ -8,7 +8,38 @@ A dead-simple Markdown writing app built with Qt Quick and C++ that automaticall
 
 ## Install
 
+### Linux (Omarchy)
+
 Install via the Omarchy Package Repository via the `omawrite` package. It's installed by default in new installations of Omarchy (from Quattro forward).
+
+### macOS (Apple Silicon)
+
+Install Qt 6 via Homebrew, then build:
+
+```sh
+brew install qt
+./bin/build
+open build/Omawrite.app
+```
+
+`bin/build` produces a native arm64 `Omawrite.app` bundle in `build/`. Copy it to
+`/Applications` if you want it available outside the build directory.
+
+To build a self-contained, distributable disk image (bundles the Qt frameworks
+so it runs without Homebrew installed):
+
+```sh
+./bin/dmg
+```
+
+This produces `build/Omawrite.dmg`. The app inside it is ad-hoc signed, not
+notarized, so first launches on another Mac need a right-click → Open (or
+`xattr -d com.apple.quarantine` on the copied `.app`) to get past Gatekeeper.
+
+On macOS, dark/light mode follows the system appearance directly (there is no
+desktop portal or Omarchy theme to read from), and the app renders at its
+designed text size since macOS has no system-wide text-scaling knob equivalent
+to GNOME's.
 
 ## Shortcuts
 
@@ -36,8 +67,9 @@ Omawrite at the size it is designed around; larger and smaller sizes scale from 
 
 ## Requirements
 
-- Qt 6: `qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`
-- `xdg-desktop-portal` and a portal backend
+- Linux: Qt 6 (`qt6-base`, `qt6-declarative`, `qt6-quickcontrols2`), `xdg-desktop-portal`
+  and a portal backend
+- macOS: Qt 6 via Homebrew (`brew install qt`), Xcode command line tools
 
 The IBM Plex Mono font is bundled under the SIL Open Font License 1.1; see
 `fonts/OFL.txt`. The font is copyright IBM Corp.
