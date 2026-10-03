@@ -1,0 +1,121 @@
+name: Build
+
+on:
+  push:
+    branches: ['**']
+    tags: ['*.*.*']
+
+permissions:
+  contents: write
+
+jobs:
+  linux:
+    name: Linux (Arch package)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build package with makepkg
+        run: |
+          docker run --rm \
+            -v "$GITHUB_WORKSPACE:/workspace" \
+            -w /workspace \
+            archlinux:latest \
+            bash -c '
+              set -euo pipefail
+              pacman -Sy --noconfirm --needed base-devel git qt6-base qt6-declarative xdg-desktop-portal
+              useradd -m builder
+              chown -R builder:builder /workspace
+              su builder -c "cd /workspace/pkgbuild && makepkg -sf --noconfirm"
+            '
+
+      - name: Upload package
+        uses: actions/upload-artifact@v4
+        with:
+          name: omawrite-arch-linux
+          path: pkgbuild/*.pkg.tar.zst
+
+  macos:
+    name: macOS (.dmg)
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install Qt
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: '6.11.2'
+          host: 'mac'
+          target: 'desktop'
+          arch: 'clang_64'
+          cache: true
+
+      - name: Build
+        run: |
+          mkdir -p build-macos
+          cd build-macos
+          qmake ../omawrite.pro QMAKE_CXXFLAGS+="-Wno-error=implicit-function-declaration"
+          make -j"$(sysctl -n hw.ncpu)"
+
+      - name: Package .app and .dmg
+        run: |
+          cd build-macos
+          if [ ! -d omawrite.app ]; then
+            mkdir -p omawrite.app/Contents/MacOS omawrite.app/Contents/Resources
+            cp omawrite omawrite.app/Contents/MacOS/
+            cp ../pkgbuild/omawrite.icns omawrite.app/Contents/Resources/
+            cat > omawrite.app/Contents/Info.plist <<'EOF'
+          <?xml version="1.0" encoding="UTF-8"?>
+          <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+          <plist version="1.0">
+          <dict>
+              <key>CFBundleName</key>
+              <string>Omawrite</string>
+              <key>CFBundleDisplayName</key>
+              <string>Omawrite</string>
+              <key>CFBundleIdentifier</key>
+              <string>io.omacom.omawrite</string>
+              <key>CFBundleVersion</key>
+              <string>0.5.1</string>
+              <key>CFBundleShortVersionString</key>
+              <string>0.5.1</string>
+              <key>CFBundleExecutable</key>
+              <string>omawrite</string>
+              <key>CFBundleIconFile</key>
+              <string>omawrite.icns</string>
+              <key>CFBundlePackageType</key>
+              <string>APPL</string>
+              <key>NSHighResolutionCapable</key>
+              <true/>
+              <key>LSMinimumSystemVersion</key>
+              <string>11.0</string>
+          </dict>
+          </plist>
+          EOF
+          fi
+          macdeployqt omawrite.app -dmg -always-overwrite -qmldir=../src
+          mv omawrite.dmg omawrite-macos.dmg
+
+      - name: Upload .dmg
+        uses: actions/upload-artifact@v4
+        with:
+          name: omawrite-macos
+          path: build-macos/omawrite-macos.dmg
+
+  release:
+    name: Publish release
+    if: startsWith(github.ref, 'refs/tags/')
+    needs: [linux, macos]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: dist
+
+      - name: Create release
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            dist/omawrite-arch-linux/*.pkg.tar.zst
+            dist/omawrite-macos/*.dmg

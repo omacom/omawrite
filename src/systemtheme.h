@@ -1,9 +1,11 @@
 #pragma once
 
 #include <QObject>
+#include <QVariant>
 
-class QDBusVariant;
-
+// Follows the desktop's dark mode and text size. The platform details live in
+// exactly one of systemtheme_linux.cpp or systemtheme_macos.cpp; this header
+// and the shared systemtheme.cpp stay platform-neutral.
 class SystemTheme : public QObject {
     Q_OBJECT
 
@@ -21,15 +23,19 @@ public slots:
     void refresh();
 
 private slots:
-    void handlePortalSettingChanged(const QString &nameSpace, const QString &key,
-                                    const QDBusVariant &value);
+    // The freedesktop portal's SettingChanged signal lands here on Linux;
+    // D-Bus delivers the variant argument as a plain QVariant.
+    void portalSettingChanged(const QString &nameSpace, const QString &key,
+                              const QVariant &value);
 
 private:
+    // Platform hooks; each systemtheme_<platform>.cpp defines all of them.
     bool detectDarkMode() const;
-    bool portalDarkMode(bool *known) const;
+    qreal detectTextScale() const;
+    void startWatching();
+
     bool qtDarkMode(bool *known) const;
     void setDarkMode(bool darkMode);
-    qreal detectTextScale() const;
     void setTextScale(qreal textScale);
 
     bool m_darkMode = true;

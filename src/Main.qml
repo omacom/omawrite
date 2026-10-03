@@ -203,8 +203,10 @@ ApplicationWindow {
         onActivated: backend.printDocument()
     }
 
+    // On macOS Qt maps Ctrl to Command, so "Meta+F" would collide with the
+    // Cmd+F find shortcut; use the native Control+Command+F there instead.
     Shortcut {
-        sequences: ["Meta+F", "F11"]
+        sequences: Qt.platform.os === "osx" ? ["Ctrl+Meta+F", "F11"] : ["Meta+F", "F11"]
         context: Qt.ApplicationShortcut
         onActivated: toggleFullScreen()
     }

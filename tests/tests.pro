@@ -12,4 +12,8 @@ HEADERS += \
     ../src/backend.h \
     ../src/markdownhighlighter.h
 
-QT += widgets printsupport quickcontrols2 quickdialogs2 dbus
+QT += widgets printsupport quickcontrols2 quickdialogs2
+
+unix:!macx {
+    QT += dbus
+}
