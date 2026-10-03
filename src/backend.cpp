@@ -651,15 +651,28 @@ void Backend::watchCurrentFile() {
         m_fileWatcher.addPath(m_fileUrl.toLocalFile());
 }
 
-void Backend::loadOmarchyTheme() {
-    m_themeBackground = m_darkMode ? QStringLiteral("#101010") : QStringLiteral("#ffffff");
-    m_themeForeground = m_darkMode ? QStringLiteral("#eeeeee") : QStringLiteral("#222324");
-    m_themeAccent = m_darkMode ? QStringLiteral("#5584aa") : QStringLiteral("#2077b2");
-    m_themeSelection = m_darkMode ? QStringLiteral("#186a9a") : QStringLiteral("#2077b2");
+// A quoted TOML value ends at its closing quote; whatever trails it is an inline comment.
+QString Backend::tomlValue(const QString &text) {
+    const QString value = text.trimmed();
+    if (value.isEmpty())
+        return value;
 
+    const QChar quote = value.front();
+    if (quote != QLatin1Char('"') && quote != QLatin1Char('\''))
+        return value;
+
+    const int close = value.indexOf(quote, 1);
+    return close < 0 ? value : value.mid(1, close - 1);
+}
+
+void Backend::loadOmarchyTheme() {
     const QString colorsPath = QDir::homePath()
         + QStringLiteral("/.local/state/omarchy/current/theme/colors.toml");
     QString themeMode;
+    QString background;
+    QString foreground;
+    QString accent;
+    QString selection;
     QFile file(colorsPath);
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QTextStream in(&file);
@@ -673,52 +686,61 @@ void Backend::loadOmarchyTheme() {
                 continue;
 
             const QString key = line.left(equals).trimmed();
-            QString value = line.mid(equals + 1).trimmed();
-            if (value.size() >= 2
-                    && ((value.front() == QLatin1Char('"') && value.back() == QLatin1Char('"'))
-                        || (value.front() == QLatin1Char('\'') && value.back() == QLatin1Char('\''))))
-                value = value.mid(1, value.size() - 2);
+            const QString value = tomlValue(line.mid(equals + 1));
 
             if (key == QStringLiteral("mode"))
                 themeMode = value;
             else if (key == QStringLiteral("background"))
-                m_themeBackground = value;
+                background = value;
             else if (key == QStringLiteral("foreground"))
-                m_themeForeground = value;
+                foreground = value;
             else if (key == QStringLiteral("accent"))
-                m_themeAccent = value;
+                accent = value;
             else if (key == QStringLiteral("selection"))
-                m_themeSelection = value;
+                selection = value;
         }
     }
 
-    bool themeModeKnown = false;
     bool themeIsDark = m_darkMode;
     if (themeMode == QStringLiteral("dark")) {
         themeIsDark = true;
-        themeModeKnown = true;
     } else if (themeMode == QStringLiteral("light")) {
         themeIsDark = false;
-        themeModeKnown = true;
     } else {
-        const QColor background(m_themeBackground);
-        if (background.isValid()) {
-            const double luminance = 0.299 * background.redF()
-                + 0.587 * background.greenF() + 0.114 * background.blueF();
+        const QColor parsedBackground(background);
+        if (parsedBackground.isValid()) {
+            const double luminance = 0.299 * parsedBackground.redF()
+                + 0.587 * parsedBackground.greenF() + 0.114 * parsedBackground.blueF();
             themeIsDark = luminance < 0.5;
-            themeModeKnown = true;
         }
     }
-    if (themeModeKnown && themeIsDark != m_darkMode) {
-        m_darkMode = themeIsDark;
-        emit darkModeChanged();
-    }
+    const bool darkModeFlipped = themeIsDark != m_darkMode;
+    m_darkMode = themeIsDark;
+
+    // The defaults follow the mode the theme resolved to, so a colour we cannot
+    // read costs that one colour rather than the contrast of the whole editor.
+    m_themeBackground = m_darkMode ? QStringLiteral("#101010") : QStringLiteral("#ffffff");
+    m_themeForeground = m_darkMode ? QStringLiteral("#eeeeee") : QStringLiteral("#222324");
+    m_themeAccent = m_darkMode ? QStringLiteral("#5584aa") : QStringLiteral("#2077b2");
+    m_themeSelection = m_darkMode ? QStringLiteral("#186a9a") : QStringLiteral("#2077b2");
+
+    // An unparseable colour reaches QML as black, so keep the default instead.
+    const auto applyColor = [](QString &target, const QString &value) {
+        if (QColor(value).isValid())
+            target = value;
+    };
+    applyColor(m_themeBackground, background);
+    applyColor(m_themeForeground, foreground);
+    applyColor(m_themeAccent, accent);
+    applyColor(m_themeSelection, selection);
 
     if (m_highlighter) {
         m_highlighter->setDarkMode(m_darkMode);
         m_highlighter->setColors(m_themeBackground, m_themeForeground, m_themeAccent);
     }
 
+    if (darkModeFlipped)
+        emit darkModeChanged();
     emit themeColorsChanged();
 }
 

@@ -94,30 +94,13 @@ private slots:
     }
 
     void loadsCurrentOmarchyTheme() {
-        QTemporaryDir homeDirectory;
-        QVERIFY(homeDirectory.isValid());
-
-        const QByteArray originalHome = qgetenv("HOME");
-        struct HomeRestorer {
-            QByteArray value;
-            ~HomeRestorer() { qputenv("HOME", value); }
-        } restoreHome{originalHome};
-        QVERIFY(qputenv("HOME", homeDirectory.path().toUtf8()));
-
-        const QString themeDirectory = homeDirectory.path()
-            + QStringLiteral("/.local/state/omarchy/current/theme");
-        QVERIFY(QDir().mkpath(themeDirectory));
-
-        QFile colorsFile(themeDirectory + QStringLiteral("/colors.toml"));
-        QVERIFY(colorsFile.open(QIODevice::WriteOnly | QIODevice::Text));
-        const QByteArray palette(
+        ScopedTheme theme(
             "mode = \"light\"\n"
             "accent = \"#112233\"\n"
             "selection = \"#445566\"\n"
             "background = \"#fefefe\"\n"
             "foreground = \"#101010\"\n");
-        QCOMPARE(colorsFile.write(palette), qint64(palette.size()));
-        colorsFile.close();
+        QVERIFY(theme.ok);
 
         Backend backend;
         QCOMPARE(backend.themeBackground(), QStringLiteral("#fefefe"));
@@ -125,6 +108,50 @@ private slots:
         QCOMPARE(backend.themeAccent(), QStringLiteral("#112233"));
         QCOMPARE(backend.themeSelection(), QStringLiteral("#445566"));
         QVERIFY(!backend.darkMode());
+    }
+
+    void readsTomlValuesPastInlineComments() {
+        // Every colour in every theme is a quoted "#rrggbb": the hash inside the quotes stays.
+        QCOMPARE(Backend::tomlValue(QStringLiteral(" \"#1a1b26\" ")), QStringLiteral("#1a1b26"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"#EDE6D6\"   # unbleached cloth")),
+                 QStringLiteral("#EDE6D6"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("'#445566'# no space before the hash")),
+                 QStringLiteral("#445566"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"rebecca#purple\"")),
+                 QStringLiteral("rebecca#purple"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral(" #1a1b26 ")), QStringLiteral("#1a1b26"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"#1a1b26")), QStringLiteral("\"#1a1b26"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"\"")), QString());
+        QCOMPARE(Backend::tomlValue(QString()), QString());
+    }
+
+    void keepsDefaultsForColorsItCannotParse() {
+        ScopedTheme theme(
+            "mode = \"dark\"          # warmed ink\r\n"
+            "accent = \"#112233\"     # shell-white pigment\r\n"
+            "selection = '#445566'\r\n"
+            "background = \"#1a1b17\" # ink, warmed\r\n"
+            "foreground = \"unbleached cloth\"\r\n");
+        QVERIFY(theme.ok);
+
+        Backend backend;
+        QCOMPARE(backend.themeBackground(), QStringLiteral("#1a1b17"));
+        QCOMPARE(backend.themeAccent(), QStringLiteral("#112233"));
+        QCOMPARE(backend.themeSelection(), QStringLiteral("#445566"));
+        QCOMPARE(backend.themeForeground(), QStringLiteral("#eeeeee"));
+        QVERIFY(backend.darkMode());
+    }
+
+    void takesItsDefaultsFromTheModeTheThemeAsksFor() {
+        ScopedTheme theme(
+            "mode = \"light\"\n"
+            "background = \"#ffffff\"\n"
+            "foreground = \"unbleached cloth\"\n");
+        QVERIFY(theme.ok);
+
+        Backend backend;
+        QVERIFY(!backend.darkMode());
+        QCOMPARE(backend.themeForeground(), QStringLiteral("#222324"));
     }
 
     void ignoresFileWatcherEventsForSavedContents() {
@@ -286,6 +313,24 @@ private slots:
     }
 
 private:
+    // Points HOME at a scratch tree holding one colors.toml, and puts it back on the way out.
+    struct ScopedTheme {
+        explicit ScopedTheme(const QByteArray &palette) {
+            const QString themeDirectory = home.path()
+                + QStringLiteral("/.local/state/omarchy/current/theme");
+            QFile colorsFile(themeDirectory + QStringLiteral("/colors.toml"));
+            ok = home.isValid() && QDir().mkpath(themeDirectory)
+                && qputenv("HOME", home.path().toUtf8())
+                && colorsFile.open(QIODevice::WriteOnly | QIODevice::Text)
+                && colorsFile.write(palette) == qint64(palette.size());
+        }
+        ~ScopedTheme() { qputenv("HOME", originalHome); }
+
+        QTemporaryDir home;
+        QByteArray originalHome = qgetenv("HOME");
+        bool ok = false;
+    };
+
     QTemporaryDir m_settingsDirectory;
 };
 

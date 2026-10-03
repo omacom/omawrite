@@ -60,6 +60,7 @@ public:
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
+    static QString tomlValue(const QString &text);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     Q_INVOKABLE void openDialog();
