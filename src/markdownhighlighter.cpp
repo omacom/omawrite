@@ -185,15 +185,6 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
-    if (text.contains(QLatin1Char('`'))) {
-        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
-        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
-        while (codeMatches.hasNext()) {
-            const QRegularExpressionMatch match = codeMatches.next();
-            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
-        }
-    }
-
     const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {
         const QTextCharFormat &contentFormat =
@@ -203,6 +194,17 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         setFormat(item.content.start, item.content.length, contentFormat);
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
+    }
+
+    // Last, so a code span keeps its own styling where emphasis encloses it.
+    // setFormat replaces rather than merges, so whichever pass runs last wins.
+    if (text.contains(QLatin1Char('`'))) {
+        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+        while (codeMatches.hasNext()) {
+            const QRegularExpressionMatch match = codeMatches.next();
+            setFormat(match.capturedStart(0), match.capturedLength(0), m_codeFormat);
+        }
     }
 }
 
@@ -217,10 +219,36 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
         return Span{int(match.capturedStart(group)), int(match.capturedLength(group))};
     };
 
+    // A code span makes its own contents literal, so collect the code ranges
+    // first and reject any emphasis/link whose delimiters land inside one. It is
+    // the delimiters that are tested, not the whole match: markup may enclose a
+    // code span (`_a `b` c_`, `[see `code`](url)`) and still be real markup.
+    QList<Span> codeSpans;
+    if (text.contains(QLatin1Char('`'))) {
+        static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
+        QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
+        while (codeMatches.hasNext())
+            codeSpans.append(span(codeMatches.next(), 0));
+    }
+    const auto codeCovers = [&codeSpans](int index) {
+        for (const Span &code : codeSpans) {
+            if (index >= code.start && index < code.start + code.length)
+                return true;
+        }
+        return false;
+    };
+    const auto insideCode = [&codeCovers](const QRegularExpressionMatch &match) {
+        const int start = match.capturedStart(0);
+        const int end = start + match.capturedLength(0);
+        return codeCovers(start) || codeCovers(end - 1);
+    };
+
     static const QRegularExpression boldRe(QStringLiteral("(\\*\\*|__)(.+?)(\\1)"));
     QRegularExpressionMatchIterator boldMatches = boldRe.globalMatch(text);
     while (boldMatches.hasNext()) {
         const QRegularExpressionMatch match = boldMatches.next();
+        if (insideCode(match))
+            continue;
         markup.append({InlineKind::Bold, span(match, 2),
                        {span(match, 1), span(match, 3)}});
     }
@@ -230,6 +258,8 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     QRegularExpressionMatchIterator italicMatches = italicRe.globalMatch(text);
     while (italicMatches.hasNext()) {
         const QRegularExpressionMatch match = italicMatches.next();
+        if (insideCode(match))
+            continue;
         const Span whole = span(match, 0);
         const int contentIndex = match.capturedStart(1) >= 0 ? 1 : 2;
         markup.append({InlineKind::Italic, span(match, contentIndex),
@@ -241,6 +271,8 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
     QRegularExpressionMatchIterator linkMatches = linkRe.globalMatch(text);
     while (linkMatches.hasNext()) {
         const QRegularExpressionMatch match = linkMatches.next();
+        if (insideCode(match))
+            continue;
         const Span whole = span(match, 0);
         const Span content = span(match, 1);
         const int contentEnd = content.start + content.length;

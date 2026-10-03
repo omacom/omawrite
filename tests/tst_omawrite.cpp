@@ -1,5 +1,8 @@
 #include <QtTest>
 #include <QFont>
+#include <QTextBlock>
+#include <QTextDocument>
+#include <QTextLayout>
 #include <QQmlComponent>
 #include <QQmlContext>
 #include <QQmlEngine>
@@ -91,6 +94,82 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void ignoresInlineMarkdownInsideCodeSpans() {
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("`The_brown_fox` jumps")).size(), 0);
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("`a **b** [c](d)` and `e`")).size(), 0);
+
+        const auto mixed = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("`code_span` then *real* emphasis"));
+        QCOMPARE(mixed.size(), 1);
+        QCOMPARE(mixed.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(mixed.at(0).content.start, 18);
+    }
+
+    // A code span makes its own contents literal; it does not stop markup that
+    // merely encloses one. Only a delimiter landing inside the code span does.
+    void keepsMarkupThatEnclosesACodeSpan() {
+        const auto spanning = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("_a `b` c_"));
+        QCOMPARE(spanning.size(), 1);
+        QCOMPARE(spanning.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(spanning.at(0).content.start, 1);
+        QCOMPARE(spanning.at(0).content.length, 7);
+
+        const auto linked = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("[see `code`](url)"));
+        QCOMPARE(linked.size(), 1);
+        QCOMPARE(linked.at(0).kind, MarkdownHighlighter::InlineKind::Link);
+        QCOMPARE(linked.at(0).content.start, 1);
+        QCOMPARE(linked.at(0).content.length, 10);
+
+        const auto wrapped = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("*`code`*"));
+        QCOMPARE(wrapped.size(), 1);
+        QCOMPARE(wrapped.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+
+        const auto bold = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("**a `b` c**"));
+        QCOMPARE(bold.size(), 1);
+        QCOMPARE(bold.at(0).kind, MarkdownHighlighter::InlineKind::Bold);
+        QCOMPARE(bold.at(0).content.start, 2);
+        QCOMPARE(bold.at(0).content.length, 7);
+
+        // The closing underscore is inside the code span, so it is not a marker.
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("_a `b_ c` d_")).size(), 0);
+    }
+
+    // Emphasis may enclose a code span, so the code pass has to run last for the
+    // code span to keep its own styling.
+    void stylesAnEnclosedCodeSpanAsCode() {
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        document.setPlainText(QStringLiteral("_a `b` c_"));
+        // The constructor's own rehighlight is queued, so ask for one directly.
+        highlighter.rehighlight();
+
+        const QTextBlock block = document.firstBlock();
+        QVERIFY(block.isValid());
+        const auto formatAt = [&block](int index) {
+            QTextCharFormat found;
+            for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+                if (index >= range.start && index < range.start + range.length)
+                    found = range.format;
+            }
+            return found;
+        };
+
+        // "a" is italic and carries no code background.
+        QVERIFY(formatAt(1).fontItalic());
+        QCOMPARE(formatAt(1).background().style(), Qt::NoBrush);
+
+        // The code span keeps the code background and is not italicised.
+        QVERIFY(formatAt(4).background().style() != Qt::NoBrush);
+        QVERIFY(!formatAt(4).fontItalic());
     }
 
     void loadsCurrentOmarchyTheme() {
