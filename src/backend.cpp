@@ -139,6 +139,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                     }
                 }
 
+                // Whatever is on disk now, it is not what we last read, so the
+                // baseline is unknown until the writer picks a version. A
+                // deletion counts: the old text is not saved anywhere either.
+                setKnownFileContents(QByteArray(), false);
                 emit externalChangeDetected(deleted, m_modified);
             });
 
@@ -239,8 +243,7 @@ void Backend::open(const QUrl &url) {
     const QByteArray contents = file.readAll();
     loadDocumentText(QString::fromUtf8(contents));
     clearRecovery();
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownFileContents(contents, true);
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
@@ -290,11 +293,9 @@ void Backend::reloadFromDisk() {
 void Backend::keepExternalVersion() {
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = file.readAll();
-        m_hasKnownFileContents = true;
+        setKnownFileContents(file.readAll(), true);
     } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
+        setKnownFileContents(QByteArray(), false);
     }
     setModified(true);
     scheduleRecovery();
@@ -380,9 +381,27 @@ bool Backend::editorTextChanged() {
     }
 
     scheduleWordCount();
-    setModified(true);
-    setStatus(QStringLiteral("Unsaved"));
-    scheduleRecovery();
+
+    const QString &baseline = m_lastKnownFileText;
+    // An empty baseline means a pristine untitled document, but only when there
+    // is no file behind it. Once there is one, an unknown baseline is unknown
+    // rather than empty, and emptying the editor is a change like any other.
+    const bool baselineKnown = m_hasKnownFileContents
+        || !m_fileUrl.isValid() || m_fileUrl.isEmpty();
+
+    if (baselineKnown && text == baseline) {
+        setModified(false);
+        clearRecovery();
+        if (m_hasKnownFileContents)
+            setStatus(QStringLiteral("Saved %1").arg(fileName()));
+        else
+            setStatus(QString());
+    } else {
+        setModified(true);
+        setStatus(QStringLiteral("Unsaved"));
+        scheduleRecovery();
+    }
+
     return true;
 }
 
@@ -576,8 +595,7 @@ void Backend::saveTo(const QUrl &url) {
 
     const bool shouldClose = m_closeAfterSave;
     m_closeAfterSave = false;
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = true;
+    setKnownFileContents(contents, true);
     setFileUrl(url);
     watchCurrentFile();
     QSettings().setValue(lastSaveDirectorySetting,
@@ -597,6 +615,14 @@ void Backend::scheduleRecovery() {
 
 QString Backend::recoveryPath() const {
     return m_recoveryPath;
+}
+
+void Backend::setKnownFileContents(const QByteArray &contents, bool known) {
+    m_lastKnownFileContents = contents;
+    m_hasKnownFileContents = known;
+    m_lastKnownFileText = known
+        ? QString::fromUtf8(contents).replace(QStringLiteral("\r\n"), QStringLiteral("\n"))
+        : QString();
 }
 
 void Backend::writeRecovery() {
@@ -627,11 +653,9 @@ void Backend::restoreRecovery() {
     const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
     QFile diskFile(recoveredUrl.toLocalFile());
     if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
-        m_lastKnownFileContents = diskFile.readAll();
-        m_hasKnownFileContents = true;
+        setKnownFileContents(diskFile.readAll(), true);
     } else {
-        m_lastKnownFileContents.clear();
-        m_hasKnownFileContents = false;
+        setKnownFileContents(QByteArray(), false);
     }
     setFileUrl(recoveredUrl);
     setModified(true);
