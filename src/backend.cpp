@@ -330,6 +330,23 @@ void Backend::newWindow() {
         setStatus(QStringLiteral("Could not open a new window."));
 }
 
+void Backend::copyAsHtml() {
+    QTextDocument rendered;
+    if (m_document)
+        rendered.setDefaultFont(m_document->defaultFont());
+    rendered.setMarkdown(currentDocumentText());
+
+    QString html = rendered.toHtml();
+    static const QRegularExpression paragraphTag(QStringLiteral("<p(?:\\s+[^>]*)?>"));
+    html.replace(paragraphTag, QStringLiteral("<p style=\"margin: 0;\">"));
+
+    auto *mimeData = new QMimeData;
+    mimeData->setHtml(html);
+    mimeData->setText(rendered.toPlainText());
+    QGuiApplication::clipboard()->setMimeData(mimeData);
+    setStatus(QStringLiteral("Copied as HTML."));
+}
+
 QString Backend::clipboardUrl() const {
     const QClipboard *clipboard = QGuiApplication::clipboard();
     if (!clipboard)
