@@ -225,8 +225,11 @@ QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const
                        {span(match, 1), span(match, 3)}});
     }
 
+    // An emphasis delimiter may not be followed (opening) or preceded
+    // (closing) by whitespace, so `* first *important* point` keeps its bullet
+    // and `2 * 3 * 4` stays literal instead of pairing stray asterisks.
     static const QRegularExpression italicRe(
-        QStringLiteral("(?<!\\*)\\*([^*\\n]+)\\*(?!\\*)|(?<!_)_([^_\\n]+)_(?!_)"));
+        QStringLiteral("(?<!\\*)\\*(?![\\s*])([^*\\n]*[^\\s*])\\*(?!\\*)|(?<!_)_([^_\\n]+)_(?!_)"));
     QRegularExpressionMatchIterator italicMatches = italicRe.globalMatch(text);
     while (italicMatches.hasNext()) {
         const QRegularExpressionMatch match = italicMatches.next();

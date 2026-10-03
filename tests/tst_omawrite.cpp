@@ -93,6 +93,42 @@ private slots:
         QCOMPARE(markup.at(2).markers[0].length, 1);
     }
 
+    // A stray asterisk next to whitespace is not an emphasis delimiter, so it
+    // must not swallow a bullet or the operands of arithmetic.
+    void keepsWhitespaceDelimitedAsterisksLiteral() {
+        // Only `*important*` is markup; the bullet stays a bullet.
+        const auto bullet = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("* first *important* point"));
+        QCOMPARE(bullet.size(), 1);
+        QCOMPARE(bullet.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(bullet.at(0).content.start, 9);
+        QCOMPARE(bullet.at(0).content.length, 9);
+        QCOMPARE(bullet.at(0).markers[0].start, 8);
+        QCOMPARE(bullet.at(0).markers[1].start, 18);
+
+        // Multiplication stays exactly as typed.
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(
+                     QStringLiteral("2 * 3 * 4")).size(), 0);
+
+        // Real emphasis is unaffected.
+        const auto shortWord = MarkdownHighlighter::inlineMarkup(QStringLiteral("*a*"));
+        QCOMPARE(shortWord.size(), 1);
+        QCOMPARE(shortWord.at(0).kind, MarkdownHighlighter::InlineKind::Italic);
+        QCOMPARE(shortWord.at(0).content.start, 1);
+        QCOMPARE(shortWord.at(0).content.length, 1);
+
+        const auto longPhrase =
+            MarkdownHighlighter::inlineMarkup(QStringLiteral("*longer text*"));
+        QCOMPARE(longPhrase.size(), 1);
+        QCOMPARE(longPhrase.at(0).content.length, 11);
+
+        const auto mixed = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral("**bold** and *italic*"));
+        QCOMPARE(mixed.size(), 2);
+        QCOMPARE(mixed.at(0).kind, MarkdownHighlighter::InlineKind::Bold);
+        QCOMPARE(mixed.at(1).kind, MarkdownHighlighter::InlineKind::Italic);
+    }
+
     void loadsCurrentOmarchyTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
