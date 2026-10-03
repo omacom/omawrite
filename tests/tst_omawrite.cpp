@@ -201,6 +201,114 @@ private slots:
         QCOMPARE(editor->property("wrappedSelectionEnd").toInt(), 12);
     }
 
+    void stepsOverWholeCharactersWhenTypingAndSaving() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const auto setText = [&](const QString &value) {
+            editor->setProperty("text", value);
+            editor->setProperty("cursorPosition", 0);
+        };
+        const auto move = [&](int direction) -> int {
+            const bool invoked = QMetaObject::invokeMethod(
+                editor, "moveCursorVisibly", Q_ARG(QVariant, direction));
+            return invoked ? editor->property("cursorPosition").toInt() : -1;
+        };
+
+        // Right steps over the whole emoji, so typing keeps it in the file.
+        setText(QStringLiteral("a😀b"));
+        editor->setProperty("cursorPosition", 1);
+        QCOMPARE(move(1), 3);
+        QVERIFY(QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 3),
+                                          Q_ARG(QString, QStringLiteral("x"))));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("a😀xb"));
+
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString savedPath = directory.filePath(QStringLiteral("emoji.md"));
+        backend.saveAs(QUrl::fromLocalFile(savedPath));
+        QFile saved(savedPath);
+        QVERIFY(saved.open(QIODevice::ReadOnly));
+        QCOMPARE(QString::fromUtf8(saved.readAll()), QStringLiteral("a😀xb"));
+
+        // Left steps back over the same cluster.
+        setText(QStringLiteral("a😀b"));
+        editor->setProperty("cursorPosition", 3);
+        QCOMPARE(move(-1), 1);
+
+        // Hidden Markdown markers are still skipped on both sides.
+        setText(QStringLiteral("**bold**"));
+        editor->setProperty("cursorPosition", 0);
+        QCOMPARE(move(1), 2);
+        editor->setProperty("cursorPosition", 8);
+        QCOMPARE(move(-1), 6);
+
+        // Hidden markers next to an emoji combine correctly.
+        setText(QStringLiteral("*😀*x"));
+        editor->setProperty("cursorPosition", 0);
+        QCOMPARE(move(1), 1);
+        QCOMPARE(move(1), 4);
+
+        // Paragraph separators still move one position at a time.
+        setText(QStringLiteral("ab\ncd"));
+        editor->setProperty("cursorPosition", 2);
+        QCOMPARE(move(1), 3);
+        QCOMPARE(move(-1), 2);
+    }
+
+    void stepsCursorByWholeGraphemeClusters() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        const auto step = [&](const QString &text, int from, int direction) {
+            editor->setProperty("text", text);
+            return backend.cursorPositionStep(from, direction);
+        };
+
+        // Qt 6 treats surrogate pairs, skin tone modifiers, ZWJ sequences,
+        // regional indicators and combining marks as single cursor steps.
+        QCOMPARE(step(QStringLiteral("a😀b"), 1, 1), 3);
+        QCOMPARE(step(QStringLiteral("a😀b"), 3, -1), 1);
+        QCOMPARE(step(QStringLiteral("a👍🏽b"), 1, 1), 5);
+        QCOMPARE(step(QStringLiteral("a👍🏽b"), 5, -1), 1);
+        QCOMPARE(step(QStringLiteral("a👨‍👩‍👧b"), 1, 1), 9);
+        QCOMPARE(step(QStringLiteral("a👨‍👩‍👧b"), 9, -1), 1);
+        QCOMPARE(step(QStringLiteral("a🇺🇸b"), 1, 1), 5);
+        QCOMPARE(step(QStringLiteral("a1\u20e3b"), 1, 1), 3);
+        QCOMPARE(step(QStringLiteral("ae\u0301b"), 1, 1), 3);
+
+        // Document limits and paragraph separators are handled explicitly.
+        QCOMPARE(step(QStringLiteral("a😀b"), 0, -1), 0);
+        QCOMPARE(step(QStringLiteral("a😀b"), 4, 1), 4);
+        QCOMPARE(step(QStringLiteral("ab\ncd"), 2, 1), 3);
+        QCOMPARE(step(QStringLiteral("ab\ncd"), 3, -1), 2);
+        QCOMPARE(step(QStringLiteral("ab\ncd"), 5, 1), 5);
+        QCOMPARE(step(QStringLiteral("😀\nb"), 2, 1), 3);
+        QCOMPARE(step(QStringLiteral("😀\nb"), 3, -1), 2);
+    }
+
     void savesAndOpensFromFooterButtons() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
