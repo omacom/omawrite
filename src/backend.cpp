@@ -25,6 +25,7 @@
 #include <QTextBlockFormat>
 #include <QTextCursor>
 #include <QTextDocument>
+#include <QTextLayout>
 #include <QTextStream>
 #include <QUrl>
 #include <QVariantMap>
@@ -413,6 +414,54 @@ QVariantList Backend::hiddenRangesAt(int position) const {
                                   {QStringLiteral("end"), span.second}});
     }
     return ranges;
+}
+
+int Backend::cursorPositionStep(int position, int direction) const
+{
+    if (!m_document || direction == 0)
+        return position;
+
+    const int documentLength = m_document->characterCount() - 1;
+    position = qBound(0, position, documentLength);
+
+    if (direction > 0) {
+        if (position >= documentLength)
+            return documentLength;
+    } else if (position <= 0) {
+        return 0;
+    }
+
+    const QTextBlock block = m_document->findBlock(position);
+    if (!block.isValid())
+        return position;
+
+    const int blockStart = block.position();
+    const int blockTextLength = block.text().size();
+    // A block's text excludes its paragraph separator, so this is the last
+    // cursor position inside the block, just before the separator.
+    const int blockEnd = blockStart + blockTextLength;
+
+    if (direction > 0) {
+        // The separator is the next valid cursor position past a block; the
+        // layout only knows the block's own characters.
+        if (position >= blockEnd)
+            return position + 1;
+    } else if (position <= blockStart) {
+        return position - 1;
+    }
+
+    // A fresh layout over the block's own text is always in sync with the
+    // document, unlike the document's display layout, whose text() cannot be
+    // checked for staleness. Building lines is unnecessary for cursor
+    // stepping and dominates the cost, so the layout is left unformatted.
+    // QTextLayout steps by whole grapheme clusters, so surrogate pairs, skin
+    // tone modifiers and ZWJ sequences are crossed in a single move.
+    QTextLayout layout(block.text());
+    const int local = position - blockStart;
+    const int stepped = direction > 0
+        ? layout.nextCursorPosition(local, QTextLayout::SkipCharacters)
+        : layout.previousCursorPosition(local, QTextLayout::SkipCharacters);
+    return blockStart + qBound(0, stepped, blockTextLength);
 }
 
 void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
