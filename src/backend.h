@@ -98,8 +98,10 @@ signals:
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void externalFileAppeared(bool locallyModified);
 
 private:
+    void openPath(const QUrl &url, bool mayStartNewFile);
     void loadDocumentText(const QString &text);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
@@ -142,6 +144,12 @@ private:
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
     bool m_hasKnownFileContents = false;
+    // Set where this document takes a name without having read what is on it,
+    // and cleared the moment anything settles the question -- a read, a write,
+    // or the writer answering the dialog. It is not the same question as
+    // m_hasKnownFileContents, which asks whether we hold a copy to compare
+    // against; a path we have never looked at is one nothing can watch.
+    bool m_pathNeverRead = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 

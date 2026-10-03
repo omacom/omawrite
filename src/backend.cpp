@@ -224,6 +224,10 @@ void Backend::openDialog() {
 }
 
 void Backend::open(const QUrl &url) {
+    openPath(url, true);
+}
+
+void Backend::openPath(const QUrl &url, bool mayStartNewFile) {
     if (!url.isLocalFile()) {
         setStatus(QStringLiteral("Only local files can be opened."));
         return;
@@ -231,7 +235,37 @@ void Backend::open(const QUrl &url) {
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
+    // A path that is not there yet is a file the writer means to start, so
+    // take the name for a blank document. The first save then lands where
+    // they said it should, instead of asking them again.
+    if (mayStartNewFile && !file.exists()) {
+        // Only where it could be written: a name under a directory that is not
+        // there leaves the first save with nowhere to land and no dialog.
+        const QFileInfo parentDirectory(QFileInfo(url.toLocalFile()).absolutePath());
+        if (!parentDirectory.isDir() || !parentDirectory.isWritable()) {
+            setStatus(QStringLiteral("Could not open %1.").arg(targetName));
+            return;
+        }
+
+        loadDocumentText(QString());
+        clearRecovery();
+        m_lastKnownFileContents.clear();
+        m_hasKnownFileContents = false;
+        m_pathNeverRead = true;
+        setFileUrl(url);
+        setModified(false);
+        setStatus(QStringLiteral("New file %1").arg(fileName()));
+        return;
+    }
+
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
+        // A reload with nothing left to read leaves this document holding a
+        // name and no file, and the watcher let the path go when it went.
+        // That is the state a new file starts in, so say so: if the file
+        // comes back, the next save asks rather than replacing it unseen.
+        if (!mayStartNewFile && !file.exists())
+            m_pathNeverRead = true;
+
         setStatus(QStringLiteral("Could not open %1.").arg(targetName));
         return;
     }
@@ -241,6 +275,7 @@ void Backend::open(const QUrl &url) {
     clearRecovery();
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
+    m_pathNeverRead = false;
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
@@ -250,6 +285,20 @@ void Backend::open(const QUrl &url) {
 void Backend::save() {
     if (!m_fileUrl.isValid() || m_fileUrl.isEmpty()) {
         saveAsDialog();
+        return;
+    }
+
+    // Nothing can watch a file that is not there, so a name taken for a file
+    // that has yet to be written is unguarded until this save: a `git pull` or
+    // a sync client can put something on that path in the meantime and
+    // QSaveFile::commit() would replace it without a word. Ask once, and only
+    // once -- the flag is cleared by every answer the dialog can give, so a
+    // file that turns out to be unreadable cannot leave the writer trapped in
+    // a question they have already answered.
+    if (m_pathNeverRead && m_fileUrl.isLocalFile()
+            && QFileInfo::exists(m_fileUrl.toLocalFile())) {
+        m_closeAfterSave = false;
+        emit externalFileAppeared(m_modified);
         return;
     }
 
@@ -283,8 +332,13 @@ void Backend::discardRecovery() {
 }
 
 void Backend::reloadFromDisk() {
+    // Reload is asked for a file we already have, so it must not go down the
+    // path that takes an absent name for a new document: if the file goes away
+    // between the "File changed" dialog opening and the click, blanking the
+    // editor and clearing recovery would throw away the only copy left. Say
+    // it could not be opened and leave the text where it is.
     if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+        openPath(m_fileUrl, false);
 }
 
 void Backend::keepExternalVersion() {
@@ -296,6 +350,11 @@ void Backend::keepExternalVersion() {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
     }
+    // Answered, whether or not the file could be read. Failing to read it is
+    // not a reason to ask again: the writer said to keep their version, and
+    // the next save must be allowed to try, so the filesystem gets to give
+    // the answer instead of the dialog asking the same question forever.
+    m_pathNeverRead = false;
     setModified(true);
     scheduleRecovery();
     watchCurrentFile();
@@ -578,6 +637,7 @@ void Backend::saveTo(const QUrl &url) {
     m_closeAfterSave = false;
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
+    m_pathNeverRead = false;
     setFileUrl(url);
     watchCurrentFile();
     QSettings().setValue(lastSaveDirectorySetting,
@@ -610,6 +670,7 @@ void Backend::writeRecovery() {
     if (!file.open(QIODevice::WriteOnly))
         return;
     const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
+                               {QStringLiteral("pathNeverRead"), m_pathNeverRead},
                                {QStringLiteral("text"), currentDocumentText()}};
     file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
     file.commit();
@@ -629,9 +690,17 @@ void Backend::restoreRecovery() {
     if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly)) {
         m_lastKnownFileContents = diskFile.readAll();
         m_hasKnownFileContents = true;
+        // Reading it now says what is on the path, not that this document ever
+        // looked: the file can have arrived while Omawrite was gone. Only the
+        // snapshot knows, so a snapshot without the key predates the flag and
+        // names a path something was written to.
+        m_pathNeverRead = recovery.value(QStringLiteral("pathNeverRead")).toBool();
     } else {
         m_lastKnownFileContents.clear();
         m_hasKnownFileContents = false;
+        // A snapshot can name a file that was never written -- the crash came
+        // first. That is the same unverified path a new file starts on.
+        m_pathNeverRead = true;
     }
     setFileUrl(recoveredUrl);
     setModified(true);
