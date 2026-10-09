@@ -98,6 +98,9 @@ signals:
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+#ifdef Q_OS_MACOS
+    void newWindowRequested();
+#endif
 
 private:
     void loadDocumentText(const QString &text);

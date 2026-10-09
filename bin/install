@@ -4,6 +4,12 @@ set -eu
 ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
 PKGBUILD_DIR="$ROOT/pkgbuild"
 
+if [ "$(uname -s)" = Darwin ]; then
+  echo "bin/install builds the Arch package. On macOS run bin/build, then open" >&2
+  echo "build/omawrite.app or copy it to /Applications." >&2
+  exit 1
+fi
+
 if ! command -v makepkg >/dev/null 2>&1; then
   echo "makepkg is required to build and install the Arch package." >&2
   exit 1

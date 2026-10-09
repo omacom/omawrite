@@ -1,0 +1,39 @@
+#!/usr/bin/env sh
+# Regenerates macos/omawrite.icns from pkgbuild/omawrite.svg.
+# Needs rsvg-convert (brew install librsvg) and iconutil (ships with macOS).
+set -eu
+
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+SVG="$ROOT/pkgbuild/omawrite.svg"
+ICNS="$ROOT/macos/omawrite.icns"
+
+for tool in rsvg-convert iconutil; do
+  if ! command -v "$tool" >/dev/null 2>&1; then
+    echo "$tool is required to build the macOS icon." >&2
+    exit 1
+  fi
+done
+
+WORK="$(mktemp -d)"
+trap 'rm -rf "$WORK"' EXIT
+ICONSET="$WORK/omawrite.iconset"
+mkdir -p "$ICONSET"
+
+# macOS icons sit on an 824/1024 body inside a transparent canvas, so the
+# square SVG is padded to line up with its neighbours in the Dock.
+render() {
+  page="$1"
+  body=$((page * 824 / 1024))
+  margin=$(((page - body) / 2))
+  rsvg-convert -w "$body" -h "$body" \
+    --page-width "$page" --page-height "$page" --left "$margin" --top "$margin" \
+    -o "$2" "$SVG"
+}
+
+for size in 16 32 128 256 512; do
+  render "$size" "$ICONSET/icon_${size}x${size}.png"
+  render $((size * 2)) "$ICONSET/icon_${size}x${size}@2x.png"
+done
+
+iconutil -c icns -o "$ICNS" "$ICONSET"
+echo "Wrote $ICNS"

@@ -17,7 +17,13 @@ ApplicationWindow {
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
-    readonly property color textColor: backend.themeForeground
+    // macOS has no Omarchy theme to soften the foreground, so body text steps
+    // back toward the page there, leaving headings and emphasis (which the
+    // highlighter paints in the full foreground) to stand out.
+    readonly property color textColor: isMac
+        ? Qt.tint(backend.themeForeground,
+                  Qt.rgba(pageColor.r, pageColor.g, pageColor.b, darkMode ? 0.3 : 0.15))
+        : backend.themeForeground
     readonly property color strongTextColor: backend.themeForeground
     readonly property color mutedColor: darkMode ? "#909191" : "#aeb1b5"
     readonly property color selectionFill: backend.themeSelection
@@ -39,6 +45,10 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    readonly property bool isMac: Qt.platform.os === "osx" || Qt.platform.os === "macos"
+    // macOS keeps every window in one process, where an application-wide
+    // shortcut would match in each window and Qt would drop it as ambiguous.
+    readonly property int appShortcutContext: isMac ? Qt.WindowShortcut : Qt.ApplicationShortcut
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -140,13 +150,14 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+S"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: backend.save()
     }
 
     Shortcut {
-        sequence: "Ctrl+H"
-        context: Qt.ApplicationShortcut
+        // Cmd+H hides the app on macOS, where Cmd+Option+F is find and replace.
+        sequence: win.isMac ? "Ctrl+Alt+F" : "Ctrl+H"
+        context: win.appShortcutContext
         onActivated: {
             searchOpen = true;
             replaceOpen = true;
@@ -175,37 +186,39 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+?"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: shortcutsDialog.open()
     }
 
     Shortcut {
         sequence: "Ctrl+O"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: backend.openDialog()
     }
 
     Shortcut {
         sequence: "Ctrl+N"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: backend.newWindow()
     }
 
     Shortcut {
         sequence: "Ctrl+Shift+S"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: backend.saveAsDialog()
     }
 
     Shortcut {
         sequence: "Ctrl+P"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: backend.printDocument()
     }
 
     Shortcut {
-        sequences: ["Meta+F", "F11"]
-        context: Qt.ApplicationShortcut
+        // Meta is the Control key on macOS, where Control+F moves the cursor
+        // and F11 shows the desktop; Cmd+Control+F is the native fullscreen key.
+        sequences: win.isMac ? ["Ctrl+Meta+F"] : ["Meta+F", "F11"]
+        context: win.appShortcutContext
         onActivated: toggleFullScreen()
     }
 
@@ -223,7 +236,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+F"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         onActivated: {
             searchOpen = true;
             searchField.forceActiveFocus();
@@ -233,9 +246,30 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+G"
-        context: Qt.ApplicationShortcut
+        context: win.appShortcutContext
         enabled: win.searchOpen
         onActivated: win.moveSearch(1)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+G"
+        context: Qt.WindowShortcut
+        enabled: win.isMac && win.searchOpen
+        onActivated: win.moveSearch(-1)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+W"
+        context: Qt.WindowShortcut
+        enabled: win.isMac
+        onActivated: win.close()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+M"
+        context: Qt.WindowShortcut
+        enabled: win.isMac
+        onActivated: win.showMinimized()
     }
 
     Connections {
@@ -332,7 +366,9 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: win.isMac
+                ? "⌘S  Save\n⇧⌘S  Save As\n⌘O  Open\n⌘N  New Window\n⌘W  Close Window\n⌘F  Find\n⌘G / ⇧⌘G  Next / Previous Match\n⌥⌘F  Find and Replace\n⌘B  Bold\n⌘I  Italic\n⌘K  Link\n⌘P  Print\n⌃⌘F  Fullscreen\n⌘?  Shortcuts"
+                : "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }

@@ -8,6 +8,13 @@
 #include "backend.h"
 #include "markdownhighlighter.h"
 
+#ifdef Q_OS_MACOS
+#include <QFileOpenEvent>
+
+#include "systemtheme.h"
+#include "windowmanager.h"
+#endif
+
 class OmawriteTest : public QObject {
     Q_OBJECT
 
@@ -284,6 +291,63 @@ private slots:
         const QUrl fallbackUrl = fallbackDialogSpy.takeFirst().constFirst().toUrl();
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
     }
+
+    // Windows that share a process (macOS) rely on every Backend holding a
+    // recovery slot of its own and handing it back when it goes away.
+    void claimsSeparateRecoverySlotsPerBackend() {
+        const QDir stateDirectory(
+            QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+        const QStringList lockFilter{QStringLiteral("recovery-*.lock")};
+        const QStringList before = stateDirectory.entryList(lockFilter, QDir::Files);
+
+        {
+            Backend first;
+            Backend second;
+            const QStringList during = stateDirectory.entryList(lockFilter, QDir::Files);
+            QCOMPARE(during.size(), before.size() + 2);
+        }
+
+        QCOMPARE(stateDirectory.entryList(lockFilter, QDir::Files), before);
+    }
+
+#ifdef Q_OS_MACOS
+    void routesFileOpenEvents() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString firstPath = directory.filePath(QStringLiteral("first.md"));
+        const QString secondPath = directory.filePath(QStringLiteral("second.md"));
+        for (const QString &path : {firstPath, secondPath}) {
+            QFile file(path);
+            QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Text));
+            file.write("# Draft\n");
+        }
+
+        SystemTheme systemTheme;
+        WindowManager windows(&systemTheme);
+        qApp->installEventFilter(&windows);
+        QQuickWindow *first = windows.openWindow();
+        QVERIFY(first);
+        QCOMPARE(windows.windowCount(), 1);
+
+        // An untouched Untitled.md takes the file instead of opening a window beside it.
+        QFileOpenEvent openFirst(QUrl::fromLocalFile(firstPath));
+        QCoreApplication::sendEvent(qApp, &openFirst);
+        QCOMPARE(windows.windowCount(), 1);
+        QCOMPARE(first->title(), QStringLiteral("first.md - Omawrite"));
+
+        QFileOpenEvent openSecond(QUrl::fromLocalFile(secondPath));
+        QCoreApplication::sendEvent(qApp, &openSecond);
+        QCOMPARE(windows.windowCount(), 2);
+
+        // A file that is already open only brings its window forward.
+        QFileOpenEvent openFirstAgain(QUrl::fromLocalFile(firstPath));
+        QCoreApplication::sendEvent(qApp, &openFirstAgain);
+        QCOMPARE(windows.windowCount(), 2);
+
+        first->close();
+        QTRY_COMPARE(windows.windowCount(), 1);
+    }
+#endif
 
 private:
     QTemporaryDir m_settingsDirectory;

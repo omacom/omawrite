@@ -1,6 +1,7 @@
 # Maintainer: David Heinemeier Hansson <david@hey.com>
 
 pkgname=omawrite
+# Keep pkgver in step with VERSION in omawrite.pro.
 pkgver=0.1.0
 pkgrel=1
 pkgdesc='Dead-simple Markdown writing app built with Qt Quick'

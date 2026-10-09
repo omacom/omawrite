@@ -1,17 +1,23 @@
 #include "systemtheme.h"
 
+// The desktop portal only exists where Qt is built with D-Bus; elsewhere (macOS)
+// every portal lookup comes back empty and Qt's own color scheme takes over.
+#ifdef QT_DBUS_LIB
 #include <QDBusConnection>
 #include <QDBusMessage>
 #include <QDBusReply>
 #include <QDBusVariant>
+#endif
 #include <QGuiApplication>
 #include <QStyleHints>
 #include <QVariant>
 
 namespace {
 QVariant unwrapVariant(QVariant value) {
+#ifdef QT_DBUS_LIB
     while (value.canConvert<QDBusVariant>())
         value = value.value<QDBusVariant>().variant();
+#endif
     return value;
 }
 
@@ -50,6 +56,11 @@ qreal sanitizedTextScale(const QVariant &value, bool *known) {
 // when the portal is missing or slow to answer; the short timeout keeps a
 // stalled portal from holding up the GUI thread.
 QVariant portalSetting(const QString &nameSpace, const QString &key) {
+#ifndef QT_DBUS_LIB
+    Q_UNUSED(nameSpace);
+    Q_UNUSED(key);
+    return {};
+#else
     const QDBusConnection bus = QDBusConnection::sessionBus();
     if (!bus.isConnected())
         return {};
@@ -66,8 +77,10 @@ QVariant portalSetting(const QString &nameSpace, const QString &key) {
         return {};
 
     return reply.value().variant();
+#endif
 }
 
+#ifdef QT_DBUS_LIB
 bool gsettingsSchemeIsDark(const QVariant &value, bool *known) {
     const QString scheme = unwrapVariant(value).toString();
     if (scheme.contains(QStringLiteral("prefer-dark"))) {
@@ -81,6 +94,7 @@ bool gsettingsSchemeIsDark(const QVariant &value, bool *known) {
 
     return false;
 }
+#endif
 }
 
 SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
@@ -92,6 +106,7 @@ SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
                 this, &SystemTheme::refresh);
     }
 
+#ifdef QT_DBUS_LIB
     QDBusConnection::sessionBus().connect(
         QString(),
         QStringLiteral("/org/freedesktop/portal/desktop"),
@@ -99,6 +114,7 @@ SystemTheme::SystemTheme(QObject *parent) : QObject(parent) {
         QStringLiteral("SettingChanged"),
         this,
         SLOT(handlePortalSettingChanged(QString,QString,QDBusVariant)));
+#endif
 }
 
 void SystemTheme::refresh() {
@@ -106,6 +122,7 @@ void SystemTheme::refresh() {
     setTextScale(detectTextScale());
 }
 
+#ifdef QT_DBUS_LIB
 void SystemTheme::handlePortalSettingChanged(const QString &nameSpace, const QString &key,
                                              const QDBusVariant &value) {
     if (key == QStringLiteral("text-scaling-factor")) {
@@ -136,6 +153,7 @@ void SystemTheme::handlePortalSettingChanged(const QString &nameSpace, const QSt
     else
         refresh();
 }
+#endif
 
 bool SystemTheme::detectDarkMode() const {
     bool known = false;

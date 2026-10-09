@@ -324,10 +324,15 @@ void Backend::printDocument() {
 }
 
 void Backend::newWindow() {
+#ifdef Q_OS_MACOS
+    // macOS keeps every window in one process; the window manager opens it.
+    emit newWindowRequested();
+#else
     const bool started = QProcess::startDetached(QCoreApplication::applicationFilePath(),
                                                  QStringList());
     if (!started)
         setStatus(QStringLiteral("Could not open a new window."));
+#endif
 }
 
 QString Backend::clipboardUrl() const {

@@ -12,4 +12,18 @@ HEADERS += \
     ../src/backend.h \
     ../src/markdownhighlighter.h
 
-QT += widgets printsupport quickcontrols2 quickdialogs2 dbus
+QT += widgets printsupport quickcontrols2 quickdialogs2
+!macx: QT += dbus
+
+macx {
+    # Run as a plain binary from bin/test rather than as an app bundle.
+    CONFIG -= app_bundle
+
+    SOURCES += \
+        ../src/systemtheme.cpp \
+        ../src/windowmanager.cpp
+    HEADERS += \
+        ../src/systemtheme.h \
+        ../src/windowmanager.h
+    RESOURCES += ../src/resources.qrc
+}
