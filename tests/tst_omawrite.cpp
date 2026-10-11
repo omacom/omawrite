@@ -84,6 +84,8 @@ private slots:
         QSettings().setValue(QStringLiteral("editor/font"), QStringLiteral("No Such Font"));
         QCOMPARE(Backend().editorFont(), Backend::defaultEditorFont());
         QSettings().remove(QStringLiteral("editor/font"));
+    }
+
     void restoresOrderedBuffersAndActiveCaret() {
         QTemporaryDir stateDirectory;
         QVERIFY(stateDirectory.isValid());
