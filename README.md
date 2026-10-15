@@ -39,8 +39,10 @@ moment after you stop typing, so `Ctrl+S` is rarely needed. Untitled drafts are
 never auto-saved — they wait for an explicit save so Omawrite never picks a file
 name for you. Unsaved drafts are recovered after an abnormal exit. Omawrite also
 watches open files and warns before an external change can replace local work;
-auto-save pauses until you reload, keep your version, or save. A recovered draft
-is never auto-saved over its file — save it to keep it.
+auto-save pauses until you reload, keep your version, or save. With no unsaved
+edits it reloads the file in place, keeping the caret and scroll position as far as
+the new text reaches, so a file another program is writing can be watched as it
+fills in. A recovered draft is never auto-saved over its file — save it to keep it.
 
 The font button in the footer picks the writing font from any installed text font,
 and Omawrite remembers the choice. IBM Plex Mono is the default.

@@ -157,29 +157,29 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_autoSaveTimer.setSingleShot(true);
     m_autoSaveTimer.setInterval(500);
     connect(&m_autoSaveTimer, &QTimer::timeout, this, &Backend::autoSave);
+    // A program writing the file in pieces raises a burst of changes, and
+    // the file can be caught half written or empty in between. Look once the
+    // burst has settled, but no later than the deadline, so a program that
+    // keeps writing is still shown as it goes.
+    m_externalChangeTimer.setSingleShot(true);
+    m_externalChangeTimer.setInterval(150);
+    m_externalChangeDeadline.setSingleShot(true);
+    m_externalChangeDeadline.setInterval(500);
+    connect(&m_externalChangeTimer, &QTimer::timeout, this, &Backend::checkFileOnDisk);
+    connect(&m_externalChangeDeadline, &QTimer::timeout, this, &Backend::checkFileOnDisk);
     connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
             [this](const QString &path) {
                 if (path != m_fileUrl.toLocalFile())
                     return;
-
-                const bool deleted = !QFileInfo::exists(path);
-                if (!deleted && m_hasKnownFileContents) {
-                    QFile file(path);
-                    if (file.open(QIODevice::ReadOnly | QIODevice::Text)
-                            && file.readAll() == m_lastKnownFileContents) {
-                        // Atomic saves can replace the watched inode. Re-arm the
-                        // watcher, but do not report our own save as an outside edit.
-                        watchCurrentFile();
-                        return;
-                    }
+                // With unsaved edits at stake, ask at once rather than leave
+                // time for a save to write over the change unseen.
+                if (m_modified) {
+                    checkFileOnDisk();
+                    return;
                 }
-
-                // Whatever is on disk now, it is not what we last read, so the
-                // baseline is unknown until the writer picks a version. A
-                // deletion counts: the old text is not saved anywhere either.
-                setKnownFileContents(QByteArray(), false);
-                suspendAutoSave();
-                emit externalChangeDetected(deleted, m_modified);
+                m_externalChangeTimer.start();
+                if (!m_externalChangeDeadline.isActive())
+                    m_externalChangeDeadline.start();
             });
 
     loadOmarchyTheme();
@@ -300,17 +300,22 @@ void Backend::openDialog() {
     emit openDialogRequested();
 }
 
-void Backend::open(const QUrl &url) {
+bool Backend::open(const QUrl &url) {
     if (!url.isLocalFile()) {
         setStatus(QStringLiteral("Only local files can be opened."));
-        return;
+        return false;
     }
+
+    // Reloading, watch before reading: a write that lands while the file is
+    // read is then still reported. A new file is watched once it is current.
+    if (url == m_fileUrl)
+        watchCurrentFile();
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
     if (!file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         setStatus(QStringLiteral("Could not open %1.").arg(targetName));
-        return;
+        return false;
     }
 
     const QByteArray contents = file.readAll();
@@ -319,9 +324,9 @@ void Backend::open(const QUrl &url) {
     setKnownFileContents(contents, true);
     m_autoSaveSuspended = false;
     setFileUrl(url);
-    watchCurrentFile();
     setModified(false);
     setStatus(QStringLiteral("Opened %1").arg(fileName()));
+    return true;
 }
 
 void Backend::save() {
@@ -384,8 +389,36 @@ void Backend::openOrStartFile(const QUrl &url) {
 }
 
 void Backend::reloadFromDisk() {
-    if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+    if (m_fileUrl.isLocalFile() && open(m_fileUrl))
+        setStatus(QStringLiteral("Reloaded %1").arg(fileName()));
+}
+
+void Backend::checkFileOnDisk() {
+    m_externalChangeTimer.stop();
+    m_externalChangeDeadline.stop();
+    const QString path = m_fileUrl.toLocalFile();
+    if (path.isEmpty())
+        return;
+
+    // Watch before reading, so a write that lands after the read is still
+    // reported. Atomic saves also replace the watched inode.
+    watchCurrentFile();
+    const bool deleted = !QFileInfo::exists(path);
+    if (!deleted && m_hasKnownFileContents) {
+        QFile file(path);
+        // Our own save, or a write we have already read. Read as open() does,
+        // so CRLF files compare equal to what we loaded.
+        if (file.open(QIODevice::ReadOnly | QIODevice::Text)
+                && file.readAll() == m_lastKnownFileContents)
+            return;
+    }
+
+    // Whatever is on disk now, it is not what we last read, so the
+    // baseline is unknown until the writer picks a version. A
+    // deletion counts: the old text is not saved anywhere either.
+    setKnownFileContents(QByteArray(), false);
+    suspendAutoSave();
+    emit externalChangeDetected(deleted, m_modified);
 }
 
 void Backend::keepExternalVersion() {
@@ -758,6 +791,15 @@ void Backend::setModified(bool modified) {
 
     m_modified = modified;
     emit modifiedChanged();
+
+    // Edits that start while an outside change is settling are at stake as
+    // soon as they exist, so look at that change now.
+    if (modified && m_externalChangeTimer.isActive()) {
+        QMetaObject::invokeMethod(this, [this]() {
+            if (m_externalChangeTimer.isActive())
+                checkFileOnDisk();
+        }, Qt::QueuedConnection);
+    }
 }
 
 void Backend::setStatus(const QString &status) {
@@ -937,6 +979,11 @@ void Backend::clearRecovery() {
 
 void Backend::watchCurrentFile() {
     const QStringList watched = m_fileWatcher.files();
+    // A file this user cannot read cannot be watched afresh either, so keep
+    // the watch it already has rather than lose it.
+    const QString path = m_fileUrl.toLocalFile();
+    if (watched.contains(path) && !QFileInfo(path).isReadable())
+        return;
     if (!watched.isEmpty())
         m_fileWatcher.removePaths(watched);
     if (m_fileUrl.isLocalFile() && QFileInfo::exists(m_fileUrl.toLocalFile()))

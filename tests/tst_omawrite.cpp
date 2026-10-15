@@ -13,6 +13,9 @@
 #include <QClipboard>
 #include <QMimeData>
 #include "cli.h"
+#include <QElapsedTimer>
+#include <QProcess>
+#include <QSaveFile>
 
 #include "backend.h"
 #include "markdownhighlighter.h"
@@ -899,7 +902,8 @@ private slots:
         QFile sameContents(path);
         QVERIFY(sameContents.open(QIODevice::WriteOnly | QIODevice::Truncate));
         sameContents.close();
-        QTest::qWait(100);
+        // Long enough for the watcher's burst to settle and be looked at.
+        QTest::qWait(500);
         QCOMPARE(externalChangeSpy.count(), 0);
 
         QFile changedContents(path);
@@ -2105,6 +2109,311 @@ private slots:
         quickDocument->textDocument()->setPlainText(QString());
         QVERIFY(backend.editorTextChanged());
         QVERIFY(backend.modified());
+    }
+
+    void reloadsAnUnmodifiedDocumentWithoutAsking() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("watched.md"));
+        auto numberedLines = [](int count, const QString &first) {
+            QStringList lines{first};
+            for (int i = 1; i < count; ++i)
+                lines << QStringLiteral("line %1").arg(i);
+            return lines.join(QLatin1Char('\n'));
+        };
+        writeFile(path, numberedLines(300, QStringLiteral("line 0")).toUtf8());
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorScroll"));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("externalChangeDialog"));
+        QVERIFY(editor);
+        QVERIFY(flick);
+        QVERIFY(dialog);
+
+        auto text = [&] { return editor->property("text").toString(); };
+        auto cursor = [&] { return editor->property("cursorPosition").toInt(); };
+        auto contentY = [&] { return flick->property("contentY").toReal(); };
+        auto bottomY = [&] {
+            return flick->property("contentHeight").toReal() - flick->property("height").toReal();
+        };
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(text(), numberedLines(300, QStringLiteral("line 0")));
+
+        // Put the caret in the middle and scroll somewhere else entirely, as
+        // a writer reading one part of a file while another program edits it.
+        editor->setProperty("cursorPosition", text().indexOf(QStringLiteral("line 150")));
+        const int caret = cursor();
+        flick->setProperty("contentY", qRound(bottomY() * 0.75));
+        const qreal scrolled = contentY();
+        QVERIFY(scrolled > 0);
+        QVERIFY(scrolled < bottomY());
+
+        // With nothing unsaved there is nothing to lose: the new text comes
+        // straight in, and the caret and viewport stay where they were.
+        const QString changed = numberedLines(300, QStringLiteral("line 0, edited elsewhere"));
+        writeFile(path, changed.toUtf8());
+        QTRY_COMPARE(text(), changed);
+        QVERIFY(!dialog->property("visible").toBool());
+        QVERIFY(!backend.modified());
+        QCOMPARE(backend.status(), QStringLiteral("Reloaded watched.md"));
+        QCOMPARE(cursor(), caret);
+        QCOMPARE(contentY(), scrolled);
+
+        // A shorter file pulls the caret and the viewport back inside it.
+        writeFile(path, QStringLiteral("short").toUtf8());
+        QTRY_COMPARE(text(), QStringLiteral("short"));
+        QVERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(cursor(), 5);
+        QCOMPARE(contentY(), 0.0);
+
+        // A document that fit on screen was not scrolled anywhere, so it is
+        // read from the top when it grows.
+        writeFile(path, numberedLines(300, QStringLiteral("line 0")).toUtf8());
+        QTRY_COMPARE(text(), numberedLines(300, QStringLiteral("line 0")));
+        QCOMPARE(contentY(), 0.0);
+
+        // Close to the bottom but not at it, the view stays where it is.
+        flick->setProperty("contentY", qRound(bottomY()) - 10);
+        const qreal nearBottom = contentY();
+        writeFile(path, numberedLines(350, QStringLiteral("line 0")).toUtf8());
+        QTRY_COMPARE(text(), numberedLines(350, QStringLiteral("line 0")));
+        QCOMPARE(contentY(), nearBottom);
+
+        // Scrolled to the bottom, the view follows a file that keeps growing,
+        // the way tail -f does. Scrolling snaps to whole device pixels, so the
+        // bottom is a pixel wide: start just short of it.
+        flick->setProperty("contentY", bottomY() - 0.5);
+        const qreal oldBottom = contentY();
+        QVERIFY(oldBottom > nearBottom);
+
+        writeFile(path, numberedLines(400, QStringLiteral("line 0")).toUtf8());
+        QTRY_COMPARE(text(), numberedLines(400, QStringLiteral("line 0")));
+        QVERIFY(!dialog->property("visible").toBool());
+        QVERIFY(contentY() > oldBottom);
+        QVERIFY2(qAbs(contentY() - bottomY()) < 1,
+                 qPrintable(QStringLiteral("%1 vs %2").arg(contentY()).arg(bottomY())));
+
+        // An atomic save of the same bytes replaces the file under the
+        // watcher. Nothing changed, but the next real change is still seen.
+        QSaveFile sameBytes(path);
+        QVERIFY(sameBytes.open(QIODevice::WriteOnly));
+        sameBytes.write(numberedLines(400, QStringLiteral("line 0")).toUtf8());
+        QVERIFY(sameBytes.commit());
+        QTest::qWait(400);
+        QCOMPARE(text(), numberedLines(400, QStringLiteral("line 0")));
+        writeFile(path, QStringLiteral("after the atomic save").toUtf8());
+        QTRY_COMPARE(text(), QStringLiteral("after the atomic save"));
+
+        // A file that cannot be read when the reload comes keeps the text,
+        // and says so rather than claiming a reload.
+        writeFile(path, QStringLiteral("unreadable").toUtf8());
+        QVERIFY(QFile::setPermissions(path, QFileDevice::WriteOwner));
+        if (QFile(path).open(QIODevice::ReadOnly))
+            QSKIP("Permissions do not stop this user from reading the file.");
+        QTRY_COMPARE(backend.status(), QStringLiteral("Could not open watched.md."));
+        QTest::qWait(300);
+        QCOMPARE(backend.status(), QStringLiteral("Could not open watched.md."));
+        QCOMPARE(text(), QStringLiteral("after the atomic save"));
+        QVERIFY(!dialog->property("visible").toBool());
+
+        // Once it can be read again the file is still being watched.
+        QVERIFY(QFile::setPermissions(path, QFileDevice::ReadOwner | QFileDevice::WriteOwner));
+        QTRY_COMPARE(text(), QStringLiteral("unreadable"));
+        writeFile(path, QStringLiteral("readable again").toUtf8());
+        QTRY_COMPARE(text(), QStringLiteral("readable again"));
+        QCOMPARE(backend.status(), QStringLiteral("Reloaded watched.md"));
+    }
+
+    void keepsUpWithAFileWrittenInPieces() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("growing.md"));
+        QStringList lines;
+        for (int i = 0; i < 300; ++i)
+            lines << QStringLiteral("line %1").arg(i);
+        writeFile(path, (lines.join(QLatin1Char('\n')) + QLatin1Char('\n')).toUtf8());
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *flick = window->findChild<QObject *>(QStringLiteral("editorScroll"));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("externalChangeDialog"));
+        QVERIFY(editor);
+        QVERIFY(flick);
+        QVERIFY(dialog);
+        auto text = [&] { return editor->property("text").toString(); };
+        auto onDisk = [&] {
+            QFile file(path);
+            return file.open(QIODevice::ReadOnly) ? QString::fromUtf8(file.readAll()) : QString();
+        };
+
+        backend.open(QUrl::fromLocalFile(path));
+        editor->setProperty("cursorPosition", text().indexOf(QStringLiteral("line 150")));
+        const int caret = editor->property("cursorPosition").toInt();
+        flick->setProperty("contentY", 400);
+
+        // Another process appends a line at a time. However the writes fall
+        // against the reloads, the editor ends on what is on disk.
+        QProcess writer;
+        writer.start(QStringLiteral("sh"), {
+            QStringLiteral("-c"),
+            QStringLiteral("for i in $(seq 300 499); do printf 'line %s\\n' $i >> \"$1\"; "
+                           "sleep 0.002; done"),
+            QStringLiteral("sh"), path});
+        QVERIFY(writer.waitForStarted());
+        // Keep the event loop running while it writes, so reloads land between
+        // the writes rather than after them.
+        QTRY_VERIFY_WITH_TIMEOUT(writer.state() == QProcess::NotRunning, 20000);
+        QCOMPARE(writer.exitCode(), 0);
+        QVERIFY(onDisk().endsWith(QStringLiteral("line 499\n")));
+        QTRY_COMPARE_WITH_TIMEOUT(text(), onDisk(), 10000);
+        QVERIFY(!dialog->property("visible").toBool());
+        QVERIFY(!backend.modified());
+        QCOMPARE(editor->property("cursorPosition").toInt(), caret);
+        QCOMPARE(flick->property("contentY").toReal(), 400.0);
+
+        // A writer that empties the file first and fills it a moment later is
+        // read once it has finished, so the caret and viewport are not lost to
+        // the empty file in between.
+        QFile rewrite(path);
+        QVERIFY(rewrite.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        rewrite.flush();
+        QTest::qWait(100);
+        const QByteArray rewritten = lines.join(QLatin1Char('\n')).toUtf8();
+        QCOMPARE(rewrite.write(rewritten), qint64(rewritten.size()));
+        rewrite.close();
+        QTRY_COMPARE(text(), QString::fromUtf8(rewritten));
+        QCOMPARE(editor->property("cursorPosition").toInt(), caret);
+        QCOMPARE(flick->property("contentY").toReal(), 400.0);
+
+        // A writer that never pauses long is still shown as it goes, not only
+        // once it stops.
+        const QString before = text();
+        QElapsedTimer sinceStart;
+        QProcess steady;
+        steady.start(QStringLiteral("sh"), {
+            QStringLiteral("-c"),
+            QStringLiteral("for i in $(seq 1 40); do printf 'more %s\\n' $i >> \"$1\"; "
+                           "sleep 0.05; done"),
+            QStringLiteral("sh"), path});
+        QVERIFY(steady.waitForStarted());
+        sinceStart.start();
+        QTRY_VERIFY_WITH_TIMEOUT(text() != before || steady.state() == QProcess::NotRunning,
+                                 10000);
+        QVERIFY2(steady.state() != QProcess::NotRunning,
+                 "The editor only caught up once the writer had stopped.");
+        QVERIFY2(sinceStart.elapsed() < 1200,
+                 qPrintable(QStringLiteral("First update after %1 ms").arg(sinceStart.elapsed())));
+        QTRY_VERIFY_WITH_TIMEOUT(steady.state() == QProcess::NotRunning, 10000);
+        QTRY_COMPARE(text(), onDisk());
+        QVERIFY(onDisk().endsWith(QStringLiteral("more 40\n")));
+    }
+
+    void asksBeforeAnExternalChangeCanReplaceUnsavedEdits() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("watched.md"));
+        writeFile(path, QStringLiteral("on disk").toUtf8());
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("externalChangeDialog"));
+        QVERIFY(editor);
+        QVERIFY(dialog);
+        auto text = [&] { return editor->property("text").toString(); };
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(text(), QStringLiteral("on disk"));
+
+        // Unsaved edits: only the writer knows which version wins. The
+        // question comes at once, before a save could write over the change.
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+        editor->setProperty("text", QStringLiteral("my unsaved edit"));
+        QTRY_VERIFY(backend.modified());
+        writeFile(path, QStringLiteral("changed elsewhere").toUtf8());
+        QTest::qWait(60);
+        QCOMPARE(externalChangeSpy.count(), 1);
+        QVERIFY(dialog->property("visible").toBool());
+        QCOMPARE(dialog->property("deleted").toBool(), false);
+        QCOMPARE(dialog->property("locallyModified").toBool(), true);
+        QCOMPARE(text(), QStringLiteral("my unsaved edit"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+
+        // A removed file has nothing to reload, so the writer is asked even
+        // when nothing is unsaved.
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(text(), QStringLiteral("changed elsewhere"));
+        QVERIFY(!backend.modified());
+        QVERIFY(QFile::remove(path));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(dialog->property("deleted").toBool(), true);
+        QCOMPARE(text(), QStringLiteral("changed elsewhere"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+
+        // Starting to type while a change is still settling makes the edits
+        // unsaved, so that change is asked about at once too.
+        writeFile(path, QStringLiteral("back again").toUtf8());
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(text(), QStringLiteral("back again"));
+        externalChangeSpy.clear();
+        writeFile(path, QStringLiteral("changed while I type").toUtf8());
+        QTest::qWait(30);
+        QCOMPARE(externalChangeSpy.count(), 0);
+        editor->setProperty("text", QStringLiteral("my second edit"));
+        QTRY_VERIFY(backend.modified());
+        QTest::qWait(60);
+        QCOMPARE(externalChangeSpy.count(), 1);
+        QVERIFY(dialog->property("visible").toBool());
+        QCOMPARE(dialog->property("locallyModified").toBool(), true);
+        QCOMPARE(text(), QStringLiteral("my second edit"));
     }
 
 private:
