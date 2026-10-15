@@ -718,6 +718,57 @@ ApplicationWindow {
                     replaceSelectionWith("\n\n");
                 }
 
+                // Tab nests the list items the caret or selection touches one
+                // step under the item above them, and Shift+Tab lifts them a
+                // step back out. Anywhere else, code fences included, Tab is
+                // left alone.
+                function indentListItems(outdent) {
+                    // "* * *" and "- - -" are rules, not items.
+                    var listItem = function(line) {
+                        return /^[ \t]*(?:[-+*]|\d+[.)])[ \t]/.test(line)
+                            && !/^ {0,3}([-*])([ \t]*\1){2,}[ \t]*$/.test(line);
+                    };
+                    var columns = function(line) {
+                        return line.match(/^[ \t]*/)[0].replace(/\t/g, "    ").length;
+                    };
+
+                    // A selection that ends at the start of a line leaves it be.
+                    var start = text.lastIndexOf("\n", selectionStart - 1) + 1;
+                    var end = text.indexOf("\n", Math.max(start, selectionEnd - 1));
+                    if (end < 0)
+                        end = text.length;
+                    var lines = text.slice(start, end).split("\n");
+                    var first = lines.filter(listItem)[0];
+                    if (first === undefined || backend.insideFence(start))
+                        return false;
+
+                    // Tab needs an item above, level with the first or further
+                    // out, to nest under. A paragraph in between means the list
+                    // ended. Shift+Tab needs an indent to take away.
+                    var depth = columns(first);
+                    var above = text.slice(0, start).split("\n").reverse().find(function(line) {
+                        return listItem(line) ? columns(line) <= depth : /^\S/.test(line);
+                    });
+                    if (outdent ? depth === 0 : !(above && listItem(above)))
+                        return true;
+
+                    // Four spaces nest under any marker up to "99.", and every
+                    // line moves by them, so nesting within the selection is kept.
+                    var moved = lines.map(function(line) {
+                        var lead = line.match(/^[ \t]*/)[0];
+                        return /\S/.test(line)
+                            ? " ".repeat(Math.max(0, columns(line) + (outdent ? -4 : 4))) + line.slice(lead.length)
+                            : line;
+                    });
+                    var nested = moved.join("\n");
+                    var from = Math.max(start, selectionStart + moved[0].length - lines[0].length);
+                    var to = Math.max(from, selectionEnd + nested.length - (end - start));
+                    var forward = cursorPosition === selectionEnd;
+                    replaceText(start, end, nested);
+                    select(forward ? from : to, forward ? to : from);
+                    return true;
+                }
+
                 function escapeMarkdownLinkText(linkText) {
                     return linkText.replace(/\\/g, "\\\\")
                                    .replace(/\[/g, "\\[")
@@ -894,6 +945,11 @@ ApplicationWindow {
                     } else if (!commandModifier && !(event.modifiers & Qt.ShiftModifier)
                                && event.key === Qt.Key_Left) {
                         moveCursorVisibly(-1);
+                        event.accepted = true;
+                    } else if (!commandModifier
+                               && (event.key === Qt.Key_Tab || event.key === Qt.Key_Backtab)
+                               && indentListItems(event.key === Qt.Key_Backtab
+                                                  || (event.modifiers & Qt.ShiftModifier))) {
                         event.accepted = true;
                     } else if (!commandModifier
                                && (event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp)) {
