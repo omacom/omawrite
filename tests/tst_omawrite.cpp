@@ -2769,6 +2769,93 @@ private slots:
         QVERIFY(backend.modified());
     }
 
+    void treatsAFileRemovedAndWrittenAgainAsChanged() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("replaced.md"));
+        writeFile(path, "hello");
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.open(QUrl::fromLocalFile(path));
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+
+        // The watcher sees the file gone before it is written again.
+        QVERIFY(QFile::remove(path));
+        QTest::qWait(30);
+        writeFile(path, "theirs");
+        QTRY_COMPARE(externalChangeSpy.count(), 1);
+        QCOMPARE(externalChangeSpy.first().at(0).toBool(), false);
+
+        // The new file is watched, so later edits are noticed too.
+        writeFile(path, "theirs, again");
+        QTRY_COMPARE(externalChangeSpy.count(), 2);
+        backend.reloadFromDisk();
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("theirs, again"));
+    }
+
+    void noticesARemovedFileComingBack() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("back.md"));
+        writeFile(path, "hello");
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.open(QUrl::fromLocalFile(path));
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+
+        QVERIFY(QFile::remove(path));
+        QTRY_COMPARE(externalChangeSpy.count(), 1);
+        QCOMPARE(externalChangeSpy.last().at(0).toBool(), true);
+
+        writeFile(path, "theirs");
+        QTRY_COMPARE(externalChangeSpy.count(), 2);
+        QCOMPARE(externalChangeSpy.last().at(0).toBool(), false);
+
+        // And removed again before the writer answers.
+        QVERIFY(QFile::remove(path));
+        QTRY_COMPARE(externalChangeSpy.count(), 3);
+        QCOMPARE(externalChangeSpy.last().at(0).toBool(), true);
+    }
+
+    void hidesReloadWhileTheFileIsRemoved() {
+        const QString dialogPath = QFINDTESTDATA("../src/ExternalChangeDialog.qml");
+        QVERIFY(!dialogPath.isEmpty());
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick\n"
+                          "Window {\n"
+                          "    width: 600; height: 400; visible: true\n"
+                          "    property alias dialog: dialog\n"
+                          "    ExternalChangeDialog { id: dialog; deleted: true }\n"
+                          "}\n",
+                          QUrl::fromLocalFile(QFileInfo(dialogPath).dir().filePath(
+                              QStringLiteral("Harness.qml"))));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *dialog = window->property("dialog").value<QObject *>();
+        QVERIFY(dialog);
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QObject *reload = dialog->findChild<QObject *>(QStringLiteral("reloadButton"));
+        QVERIFY(reload);
+
+        QVERIFY(!reload->property("visible").toBool());
+        dialog->setProperty("deleted", false);
+        QVERIFY(reload->property("visible").toBool());
+
+        // Removed while Reload has the focus: Enter keeps the text instead.
+        QVERIFY(QMetaObject::invokeMethod(reload, "forceActiveFocus"));
+        QTRY_VERIFY(reload->property("activeFocus").toBool());
+        dialog->setProperty("deleted", true);
+        QObject *keep = dialog->findChild<QObject *>(QStringLiteral("keepButton"));
+        QVERIFY(keep);
+        QTRY_VERIFY(keep->property("activeFocus").toBool());
+    }
+
 private:
     // The character formats the highlighter gives a single line of text.
     static QList<QTextCharFormat> highlightedFormats(const QString &text) {

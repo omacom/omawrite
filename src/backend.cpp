@@ -162,18 +162,15 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_autoSaveTimer.setSingleShot(true);
     m_autoSaveTimer.setInterval(500);
     connect(&m_autoSaveTimer, &QTimer::timeout, this, &Backend::autoSave);
-    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this,
-            [this](const QString &path) {
-                if (path != m_fileUrl.toLocalFile())
-                    return;
-
-                // Atomic saves replace the watched inode, which drops it from
-                // the watcher, so re-arm it either way. Our own save is not an
-                // outside edit.
-                watchCurrentFile();
-                if (!diskMatchesKnownContents())
-                    reportExternalChange(!QFileInfo::exists(path));
-            });
+    // Tools that replace a file by removing it and writing it again leave it
+    // briefly missing, so let the burst settle before deciding what happened.
+    m_fileCheckTimer.setSingleShot(true);
+    m_fileCheckTimer.setInterval(100);
+    connect(&m_fileCheckTimer, &QTimer::timeout, this, &Backend::checkWatchedFile);
+    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, &m_fileCheckTimer,
+            qOverload<>(&QTimer::start));
+    connect(&m_fileWatcher, &QFileSystemWatcher::directoryChanged, &m_fileCheckTimer,
+            qOverload<>(&QTimer::start));
 
     loadOmarchyTheme();
     watchOmarchyTheme();
@@ -1041,15 +1038,39 @@ void Backend::clearRecovery() {
 }
 
 void Backend::unwatchFiles() {
-    const QStringList watched = m_fileWatcher.files();
+    m_fileCheckTimer.stop();
+    const QStringList watched = m_fileWatcher.files() + m_fileWatcher.directories();
     if (!watched.isEmpty())
         m_fileWatcher.removePaths(watched);
 }
 
+// A missing file cannot be watched, so watch its folder instead to notice it
+// coming back.
 void Backend::watchCurrentFile() {
     unwatchFiles();
-    if (m_fileUrl.isLocalFile() && QFileInfo::exists(m_fileUrl.toLocalFile()))
-        m_fileWatcher.addPath(m_fileUrl.toLocalFile());
+    if (!m_fileUrl.isLocalFile())
+        return;
+    const QFileInfo info(m_fileUrl.toLocalFile());
+    m_fileMissing = !info.exists();
+    if (info.exists())
+        m_fileWatcher.addPath(info.filePath());
+    else if (info.dir().exists())
+        m_fileWatcher.addPath(info.dir().path());
+}
+
+void Backend::checkWatchedFile() {
+    // Atomic saves replace the watched inode, which drops it from the
+    // watcher, so re-arm it either way. Our own save is not an outside edit.
+    const bool wasMissing = m_fileMissing;
+    watchCurrentFile();
+    if (diskMatchesKnownContents())
+        return;
+    // A file that was already missing has been reported, or was never there.
+    // One that turns up again is an outside edit like any other, even while
+    // the writer is still looking at the removal.
+    if (m_fileMissing && wasMissing)
+        return;
+    reportExternalChange(m_fileMissing);
 }
 
 // A quoted TOML value ends at its closing quote; whatever trails it is an inline comment.
