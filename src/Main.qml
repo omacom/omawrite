@@ -371,7 +371,7 @@ ApplicationWindow {
         // (Material Dialog.qml:14); as a child, the default content item sizes
         // to it without the feedback.
         Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+=  Increase Text Size\nCtrl+-  Decrease Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
