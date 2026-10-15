@@ -70,7 +70,7 @@ public:
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     Q_INVOKABLE void openDialog();
-    Q_INVOKABLE void open(const QUrl &url);
+    Q_INVOKABLE bool open(const QUrl &url);
     void openOrStartFile(const QUrl &url);
     Q_INVOKABLE void save();
     Q_INVOKABLE void saveForClose();
@@ -141,6 +141,7 @@ private:
     QString recoveryPath() const;
     void setKnownFileContents(const QByteArray &contents, bool known);
     void watchCurrentFile();
+    void checkFileOnDisk();
     void loadOmarchyTheme();
     void watchOmarchyTheme();
 
@@ -160,6 +161,8 @@ private:
     QTimer m_wordCountTimer;
     QTimer m_recoveryTimer;
     QTimer m_autoSaveTimer;
+    QTimer m_externalChangeTimer;
+    QTimer m_externalChangeDeadline;
     QFileSystemWatcher m_fileWatcher;
     QPointer<QTextDocument> m_document;
     QPointer<QWindow> m_parentWindow;

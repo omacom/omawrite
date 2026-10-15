@@ -69,6 +69,20 @@ ApplicationWindow {
         unsavedChangesDialog.open();
     }
 
+    // Takes another program's version of the file without moving the writer:
+    // the caret and viewport stay put, clamped to the new text, and a view
+    // scrolled to the bottom keeps following a file that grows.
+    function reloadKeepingView() {
+        var caret = editor.cursorPosition;
+        var scrolled = editorFlick.contentY;
+        var atBottom = scrolled > 0
+            && scrolled >= editorFlick.contentHeight - editorFlick.height - 1;
+        backend.reloadFromDisk();
+        editor.cursorPosition = Math.min(caret, editor.length);
+        editorFlick.scrollTo(editorFlick.clampContentY(
+            atBottom ? editorFlick.contentHeight : scrolled));
+    }
+
     function completePendingAction() {
         var action = pendingAction;
         pendingAction = "";
@@ -302,6 +316,12 @@ ApplicationWindow {
         }
 
         function onExternalChangeDetected(deleted, locallyModified) {
+            // With nothing unsaved there is nothing to lose, so there is
+            // nothing to ask either.
+            if (!deleted && !locallyModified) {
+                win.reloadKeepingView();
+                return;
+            }
             externalChangeDialog.deleted = deleted;
             externalChangeDialog.locallyModified = locallyModified;
             externalChangeDialog.open();
@@ -359,6 +379,7 @@ ApplicationWindow {
 
     ExternalChangeDialog {
         id: externalChangeDialog
+        objectName: "externalChangeDialog"
         darkMode: win.darkMode
         textScale: win.textScale
         textColor: win.textColor
