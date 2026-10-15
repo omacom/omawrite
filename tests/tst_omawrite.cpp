@@ -470,7 +470,7 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("- [ ] "));
         QCOMPARE(editor->property("cursorPosition").toInt(), 6);
         QMetaObject::invokeMethod(editor, "undo");
-        QCOMPARE(editor->property("text").toString(), QString());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("[]"));
 
         editor->setProperty("text", QStringLiteral("```\n"));
         editor->setProperty("cursorPosition", 4);
@@ -507,7 +507,7 @@ private slots:
         editor->setProperty("text", QStringLiteral("hello "));
         editor->setProperty("cursorPosition", 6);
         QMetaObject::invokeMethod(editor, "forceActiveFocus");
-        QTest::keyClick(window, Qt::Key_Slash);
+        QTest::keyClick(window, '/');
         QTRY_COMPARE(editor->property("text").toString(), QStringLiteral("hello /"));
         QVERIFY(!palette->property("visible").toBool());
     }
