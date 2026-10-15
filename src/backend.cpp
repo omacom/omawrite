@@ -275,6 +275,7 @@ void Backend::attachDocument(QObject *textDocument) {
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setTheme(m_darkMode, m_themeBackground, m_themeForeground, m_themeAccent,
                             m_themeCodeBackground);
+    m_highlighter->setCaret(m_caretPosition);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {
@@ -543,39 +544,10 @@ bool Backend::editorTextChanged() {
     return true;
 }
 
-QVariantList Backend::hiddenRangesAt(int position) const {
-    QVariantList ranges;
-    if (!m_document)
-        return ranges;
-
-    const QTextBlock block =
-        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
-    if (!block.isValid())
-        return ranges;
-
-    // The highlighter leaves fenced code alone, so it hides nothing there. A
-    // closing fence is the line whose previous block is still inside.
-    if (block.userState() >= MarkdownHighlighter::InsideFence
-            || block.previous().userState() >= MarkdownHighlighter::InsideFence)
-        return ranges;
-
-    const int lineStart = block.position();
-    QList<QPair<int, int>> spans;
-    const QList<MarkdownHighlighter::InlineMarkup> markup =
-        MarkdownHighlighter::inlineMarkup(block.text());
-    for (const MarkdownHighlighter::InlineMarkup &item : markup) {
-        for (const MarkdownHighlighter::Span &marker : item.markers) {
-            spans.append({lineStart + marker.start,
-                          lineStart + marker.start + marker.length});
-        }
-    }
-    std::sort(spans.begin(), spans.end());
-
-    for (const auto &span : spans) {
-        ranges.append(QVariantMap{{QStringLiteral("start"), span.first},
-                                  {QStringLiteral("end"), span.second}});
-    }
-    return ranges;
+void Backend::setCaretPosition(int position) {
+    m_caretPosition = position;
+    if (m_highlighter)
+        m_highlighter->setCaret(position);
 }
 
 // The emphasis span of the marker's kind that the caret sits in or against,

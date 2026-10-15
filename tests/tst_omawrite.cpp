@@ -941,7 +941,7 @@ private slots:
         QVERIFY(!MarkdownHighlighter::closesFence(QStringLiteral("``` text"), 3));
     }
 
-    void keepsCaretRangesConsistentWithCode() {
+    void hidesNoMarkersInsideCode() {
         Backend backend;
         QQmlEngine engine;
         QQmlComponent component(&engine);
@@ -952,8 +952,8 @@ private slots:
         auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
         QVERIFY(quickDocument);
         backend.attachDocument(quickDocument);
-        auto *document = quickDocument->textDocument();
-        auto *highlighter = document->findChild<MarkdownHighlighter *>();
+        QTextDocument &document = *quickDocument->textDocument();
+        auto *highlighter = document.findChild<MarkdownHighlighter *>();
         QVERIFY(highlighter);
         editor->setProperty("text", QStringLiteral("``` **opening**\n"
                                                    "# _literal_ [link](url)\n"
@@ -963,19 +963,61 @@ private slots:
                                                    "```\n"
                                                    "_unterminated_"));
         highlighter->rehighlight();
-        for (int blockNumber : {0, 1, 2, 4, 5, 6}) {
-            const auto block = document->findBlockByNumber(blockNumber);
-            QVERIFY(backend.hiddenRangesAt(block.position()).isEmpty());
-        }
-        QCOMPARE(backend.hiddenRangesAt(document->findBlockByNumber(3).position()).size(), 2);
+        const auto hiddenIn = [&](int blockNumber) {
+            int hidden = 0;
+            for (const auto &range : document.findBlockByNumber(blockNumber).layout()->formats()) {
+                if (range.format.fontPointSize() == 1.0)
+                    hidden += range.length;
+            }
+            return hidden;
+        };
+        for (int blockNumber : {0, 1, 2, 4, 5, 6})
+            QCOMPARE(hiddenIn(blockNumber), 0);
+        QCOMPARE(hiddenIn(3), 2);
 
         // Removing a fence rehighlights the following blocks as prose.
-        QTextCursor cursor(document);
-        cursor.setPosition(document->findBlockByNumber(5).position());
+        QTextCursor cursor(&document);
+        cursor.setPosition(document.findBlockByNumber(5).position());
         cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
         cursor.removeSelectedText();
-        QTRY_COMPARE(document->findBlockByNumber(6).userState(), int(MarkdownHighlighter::Prose));
-        QCOMPARE(backend.hiddenRangesAt(document->findBlockByNumber(6).position()).size(), 2);
+        QTRY_COMPARE(document.findBlockByNumber(6).userState(), int(MarkdownHighlighter::Prose));
+        QCOMPARE(hiddenIn(6), 2);
+    }
+
+    void showsMarkersAroundTheCaret() {
+        const QString text = QStringLiteral("a **b** c");
+        // Away from the bold, its markers stay hidden.
+        for (int caret : {0, 1, 8, 9}) {
+            const auto formats = highlightedFormats(text, caret);
+            for (int i : {2, 3, 5, 6})
+                QCOMPARE(formats.at(i).fontPointSize(), 1.0);
+        }
+        // In it or against either end, they show, still in the marker colour.
+        for (int caret : {2, 3, 4, 5, 7}) {
+            const auto formats = highlightedFormats(text, caret);
+            for (int i : {2, 3, 5, 6}) {
+                QVERIFY(formats.at(i).fontPointSize() != 1.0);
+                QCOMPARE(formats.at(i).foreground().color(), QColor(QStringLiteral("#4f525a")));
+            }
+            QCOMPARE(formats.at(4).fontWeight(), int(QFont::Bold));
+        }
+
+        // Everything the caret sits in shows, and nothing beside it.
+        const QString nested = QStringLiteral("*a __b__ c* _d_");
+        const auto formats = highlightedFormats(nested, 5);
+        for (int i : {0, 3, 4, 6, 7, 10})
+            QVERIFY(formats.at(i).fontPointSize() != 1.0);
+        for (int i : {12, 14})
+            QCOMPARE(formats.at(i).fontPointSize(), 1.0);
+
+        // Moving to another line hides them again there.
+        QTextDocument document;
+        document.setPlainText(QStringLiteral("**a**\nb"));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setCaret(1);
+        QVERIFY(document.firstBlock().layout()->formats().constFirst().format.fontPointSize() != 1.0);
+        highlighter.setCaret(7);
+        QCOMPARE(document.firstBlock().layout()->formats().constFirst().format.fontPointSize(), 1.0);
     }
 
     void takesTheCodePanelFromTheTheme() {
@@ -1515,17 +1557,18 @@ private slots:
         editor->setProperty("cursorPosition", 3);
         QCOMPARE(move(-1), 1);
 
-        // Hidden Markdown markers are still skipped on both sides.
+        // Markers show at the caret, so it steps through them like any text.
         setText(QStringLiteral("**bold**"));
         editor->setProperty("cursorPosition", 0);
-        QCOMPARE(move(1), 2);
+        QCOMPARE(move(1), 1);
         editor->setProperty("cursorPosition", 8);
-        QCOMPARE(move(-1), 6);
+        QCOMPARE(move(-1), 7);
 
-        // Hidden markers next to an emoji combine correctly.
+        // Markers next to an emoji still step over the whole emoji.
         setText(QStringLiteral("*😀*x"));
         editor->setProperty("cursorPosition", 0);
         QCOMPARE(move(1), 1);
+        QCOMPARE(move(1), 3);
         QCOMPARE(move(1), 4);
 
         // Paragraph separators still move one position at a time.
@@ -2771,12 +2814,14 @@ private slots:
 
 private:
     // The character formats the highlighter gives a single line of text.
-    static QList<QTextCharFormat> highlightedFormats(const QString &text) {
+    static QList<QTextCharFormat> highlightedFormats(const QString &text, int caret = -1) {
         QTextDocument document;
         document.setPlainText(text);
         MarkdownHighlighter highlighter(&document);
         highlighter.setTheme(true, "#101010", "#eeeeee", "#5584aa", "#23372b");
         highlighter.rehighlight();
+        if (caret >= 0)
+            highlighter.setCaret(caret);
         QList<QTextCharFormat> formats(text.length());
         for (const auto &range : document.firstBlock().layout()->formats()) {
             for (int i = range.start; i < range.start + range.length; ++i)

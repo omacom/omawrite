@@ -68,6 +68,23 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
         rehighlightBlock(entered);
 }
 
+void MarkdownHighlighter::setCaret(int position) {
+    const QTextBlock left = m_caret.isNull() ? QTextBlock() : m_caret.block();
+    if (m_caret.isNull()) {
+        m_caret = QTextCursor(document());
+        // Loading a file inserts at the caret, which must not drag it along
+        // to the end; the editor reports where it really went.
+        m_caret.setKeepPositionOnInsert(true);
+    }
+    m_caret.setPosition(qBound(0, position, document()->characterCount() - 1));
+
+    // Only the lines the caret left and entered can show different markers.
+    const QTextBlock entered = m_caret.block();
+    if (left.isValid() && left != entered)
+        rehighlightBlock(left);
+    rehighlightBlock(entered);
+}
+
 void MarkdownHighlighter::rebuildFormats() {
     const QColor marker = m_darkMode ? QColor(QStringLiteral("#4f525a"))
                                      : QColor(QStringLiteral("#aeb1b5"));
@@ -294,10 +311,20 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         }
     }
 
-    // Last, so no enclosing style shows a marker that the caret skips over.
+    // Last, so no enclosing style shows a marker that should be hidden.
+    const int caret = !m_caret.isNull() && m_caret.block() == currentBlock()
+        ? m_caret.positionInBlock() : -1;
     for (const InlineMarkup &item : markup) {
-        for (const Span &marker : item.markers)
-            setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
+        const bool atCaret = caret >= item.markers[0].start
+            && caret <= item.markers[1].start + item.markers[1].length;
+        for (const Span &marker : item.markers) {
+            if (!atCaret) {
+                setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
+                continue;
+            }
+            for (int i = marker.start; i < marker.start + marker.length; ++i)
+                mergeFormat(i, m_markerFormat);
+        }
     }
 }
 

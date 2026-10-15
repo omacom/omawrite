@@ -637,6 +637,7 @@ ApplicationWindow {
                     color: win.textColor
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                onCursorPositionChanged: backend.setCaretPosition(cursorPosition)
                 onFontChanged: backend.documentFontChanged()
 
                 // One edit command, so a single undo takes the change back.
@@ -763,30 +764,6 @@ ApplicationWindow {
                         replaceSelectionWith(pastedText);
                 }
 
-                function skipHiddenForward(position) {
-                    var pos = position;
-                    var ranges = backend.hiddenRangesAt(pos);
-                    for (var i = 0; i < ranges.length; i++) {
-                        if (pos >= ranges[i].start && pos < ranges[i].end) {
-                            pos = ranges[i].end;
-                            i = -1;
-                        }
-                    }
-                    return pos;
-                }
-
-                function skipHiddenBackward(position) {
-                    var pos = position;
-                    var ranges = backend.hiddenRangesAt(pos);
-                    for (var i = ranges.length - 1; i >= 0; i--) {
-                        if (pos > ranges[i].start && pos <= ranges[i].end) {
-                            pos = ranges[i].start;
-                            i = ranges.length;
-                        }
-                    }
-                    return pos;
-                }
-
                 function moveCursorVisibly(direction) {
                     if (selectionStart !== selectionEnd) {
                         cursorPosition = direction > 0 ? selectionEnd : selectionStart;
@@ -794,10 +771,7 @@ ApplicationWindow {
                     }
 
                     var pos = backend.cursorPositionStep(cursorPosition, direction);
-                    pos = Math.max(0, Math.min(text.length, pos));
-                    cursorPosition = direction > 0
-                        ? skipHiddenForward(pos)
-                        : skipHiddenBackward(pos);
+                    cursorPosition = Math.max(0, Math.min(text.length, pos));
                 }
 
                 function movePage(direction, extendSelection) {

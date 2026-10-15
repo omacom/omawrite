@@ -14,6 +14,7 @@ public:
     void setTheme(bool darkMode, const QString &background, const QString &foreground,
                   const QString &accent, const QString &codeBackground);
     void setSearch(const QString &query, int currentMatchStart);
+    void setCaret(int position);
     void refreshFont();
 
     struct Span {
@@ -24,7 +25,7 @@ public:
     enum class InlineKind { Bold, Italic, Strikethrough, Link };
 
     // Carried from block to block so a fenced run of code knows it is inside
-    // one. Stored on the block, which is where Backend::hiddenRangesAt reads it.
+    // one. Stored on the block, which is where Backend reads it.
     // Inside a fence the state is InsideFence plus twice the fence characters
     // past three that opened it, plus one for tildes, since only a fence of the
     // same character at least that long closes it.
@@ -38,8 +39,8 @@ public:
     };
 
     // Single source of truth for inline markdown spans: the highlighter uses it
-    // to style content and hide markers, and the editor uses it (via
-    // Backend::hiddenRangesAt) to skip the caret over the hidden markers.
+    // to style content and hide markers, and Backend to find what the caret
+    // sits in.
     static QList<InlineMarkup> inlineMarkup(const QString &text);
     static QString linkUrlAt(const QString &text, int position);
 
@@ -78,6 +79,9 @@ private:
     // Moves with edits, so it still finds the block the current match was
     // painted in after text above it changes.
     QTextCursor m_currentMatch;
+    // The markers of whatever markup the caret is in or against are shown,
+    // so they can be seen and edited.
+    QTextCursor m_caret;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };
