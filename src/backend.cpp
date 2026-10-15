@@ -37,11 +37,11 @@
 
 #include "markdownhighlighter.h"
 
-constexpr qreal typoraLineHeightPercent = 140;
+constexpr int defaultLineSpacingPercent = 140;
 
-static QTextBlockFormat lineHeightFormat() {
+static QTextBlockFormat lineHeightFormat(int lineSpacing) {
     QTextBlockFormat format;
-    format.setLineHeight(typoraLineHeightPercent, QTextBlockFormat::ProportionalHeight);
+    format.setLineHeight(lineSpacing, QTextBlockFormat::ProportionalHeight);
     return format;
 }
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
@@ -128,6 +128,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_textZoom = zoomOk && storedZoom > 0 ? qBound(textZoomSteps[0], storedZoom,
                                                    textZoomSteps[textZoomStepCount - 1])
                                           : 1.0;
+    bool spacingOk = false;
+    const int savedSpacing = QSettings().value(QStringLiteral("editor/lineSpacing"),
+                                                defaultLineSpacingPercent).toInt(&spacingOk);
+    m_lineSpacing = spacingOk && savedSpacing >= 100 && savedSpacing <= 200 ? savedSpacing : defaultLineSpacingPercent;
 
     const QString savedFont = QSettings().value(editorFontSetting).toString();
     m_editorFont = !savedFont.isEmpty() && QFontDatabase::hasFamily(savedFont)
@@ -222,6 +226,15 @@ void Backend::setDesktopTextScale(qreal textScale) {
 
     m_desktopTextScale = textScale;
     emit textScaleChanged();
+}
+
+void Backend::setLineSpacing(int percent) {
+    if (percent < 100 || percent > 200 || percent == m_lineSpacing)
+        return;
+    m_lineSpacing = percent;
+    QSettings().setValue(QStringLiteral("editor/lineSpacing"), percent);
+    applyDocumentTypography();
+    emit lineSpacingChanged();
 }
 
 void Backend::increaseTextSize() {
@@ -1284,7 +1297,7 @@ void Backend::applyDocumentTypography() {
     m_formattingTypography = true;
     QTextCursor cursor(m_document);
     cursor.select(QTextCursor::Document);
-    cursor.mergeBlockFormat(lineHeightFormat());
+    cursor.mergeBlockFormat(lineHeightFormat(m_lineSpacing));
     m_formattingTypography = false;
 
     m_document->setUndoRedoEnabled(undoEnabled);
@@ -1309,7 +1322,7 @@ void Backend::reapplyTypographyToChange() {
          block.isValid() && block.position() <= end; block = block.next()) {
         const QTextBlockFormat format = block.blockFormat();
         if (format.lineHeightType() != QTextBlockFormat::ProportionalHeight
-                || format.lineHeight() != typoraLineHeightPercent) {
+                || format.lineHeight() != m_lineSpacing) {
             needed = true;
             break;
         }
@@ -1322,7 +1335,7 @@ void Backend::reapplyTypographyToChange() {
     cursor.joinPreviousEditBlock();
     cursor.setPosition(start);
     cursor.setPosition(end, QTextCursor::KeepAnchor);
-    cursor.mergeBlockFormat(lineHeightFormat());
+    cursor.mergeBlockFormat(lineHeightFormat(m_lineSpacing));
     cursor.endEditBlock();
     m_formattingTypography = false;
 }

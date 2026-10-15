@@ -26,6 +26,7 @@ class Backend : public QObject {
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(qreal textScale READ textScale NOTIFY textScaleChanged)
+    Q_PROPERTY(int lineSpacing READ lineSpacing WRITE setLineSpacing NOTIFY lineSpacingChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
@@ -50,6 +51,8 @@ public:
     void setDarkMode(bool darkMode);
     // What the desktop asks for, times what the user asked for on top of it.
     qreal textScale() const { return m_desktopTextScale * m_textZoom; }
+    int lineSpacing() const { return m_lineSpacing; }
+    void setLineSpacing(int percent);
     void setDesktopTextScale(qreal textScale);
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
@@ -107,6 +110,7 @@ signals:
     void wordCountChanged();
     void darkModeChanged();
     void textScaleChanged();
+    void lineSpacingChanged();
     void themeColorsChanged();
     void editorFontChanged();
     void saveFailed();
@@ -157,6 +161,7 @@ private:
     bool m_systemDarkMode = true;
     qreal m_desktopTextScale = 1.0;
     qreal m_textZoom = 1.0;
+    int m_lineSpacing = 140;
     bool m_loading = false;
     bool m_formattingTypography = false;
     int m_lastChangePos = 0;

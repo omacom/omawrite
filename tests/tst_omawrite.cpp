@@ -165,6 +165,16 @@ private slots:
         QSettings().remove(QStringLiteral("editor/font"));
     }
 
+    void remembersAndAppliesLineSpacing() {
+        Backend backend;
+        QCOMPARE(backend.lineSpacing(), 140);
+        backend.setLineSpacing(160);
+        QCOMPARE(Backend().lineSpacing(), 160);
+        backend.setLineSpacing(99);
+        QCOMPARE(backend.lineSpacing(), 160);
+        QSettings().remove(QStringLiteral("editor/lineSpacing"));
+    }
+
     void findsStrikethroughOutsideCode() {
         const auto markup = MarkdownHighlighter::inlineMarkup(QStringLiteral("a ~~gone~~ b"));
         QCOMPARE(markup.size(), 1);
