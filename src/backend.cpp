@@ -46,6 +46,7 @@ static QTextBlockFormat lineHeightFormat() {
 }
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 const QString textZoomSetting = QStringLiteral("text/zoom");
+const QString vimModeSetting = QStringLiteral("editor/vimMode");
 
 // The user's own text size, multiplied onto the desktop's text scale.
 // Chromium's zoom ladder, trimmed to the range the whole window still reads
@@ -120,6 +121,7 @@ QString Backend::normalizedLinkUrl(const QString &clipboardText) {
 }
 
 Backend::Backend(QObject *parent) : QObject(parent) {
+    m_vimMode = QSettings().value(vimModeSetting, false).toBool();
     // A settings file truncated by a crash reads back as an empty value, and
     // both that and a NaN would clamp to the smallest size rather than fall
     // back to the default.
@@ -214,6 +216,14 @@ QString Backend::fileName() const {
 void Backend::setDarkMode(bool darkMode) {
     m_systemDarkMode = darkMode;
     loadOmarchyTheme();
+}
+
+void Backend::setVimMode(bool enabled) {
+    if (m_vimMode == enabled)
+        return;
+    m_vimMode = enabled;
+    QSettings().setValue(vimModeSetting, enabled);
+    emit vimModeChanged();
 }
 
 void Backend::setDesktopTextScale(qreal textScale) {

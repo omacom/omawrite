@@ -43,6 +43,10 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property bool vimInsertMode: false
+    property bool vimVisualMode: false
+    property bool vimPendingDelete: false
+    property int vimAnchor: 0
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -184,6 +188,11 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Alt+V"
+        onActivated: backend.vimMode = !backend.vimMode
+    }
+
+    Shortcut {
         sequence: "Ctrl+?"
         onActivated: shortcutsDialog.open()
     }
@@ -264,6 +273,15 @@ ApplicationWindow {
 
     Connections {
         target: backend
+
+        function onVimModeChanged() {
+            win.vimInsertMode = false;
+            win.vimVisualMode = false;
+            win.vimPendingDelete = false;
+            editor.deselect();
+            if (backend.vimMode)
+                editor.forceActiveFocus();
+        }
 
         function onOpenDialogRequested() {
             openFileDialog.open();
@@ -371,7 +389,7 @@ ApplicationWindow {
         // (Material Dialog.qml:14); as a child, the default content item sizes
         // to it without the feedback.
         Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nCtrl+Alt+V  Toggle Vim Mode\nVim mode: i/a/o, h/j/k/l, x, dd, v, u, Esc\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -800,6 +818,70 @@ ApplicationWindow {
                         : skipHiddenBackward(pos);
                 }
 
+                function vimMove(direction, vertical) {
+                    var target;
+                    if (vertical) {
+                        var rect = cursorRectangle;
+                        var targetY = rect.y + (direction > 0
+                            ? rect.height * 1.5 : -rect.height / 2);
+                        target = positionAt(rect.x, Math.max(0, targetY));
+                    } else {
+                        var lineStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
+                        var lineEnd = text.indexOf("\n", cursorPosition);
+                        if (lineEnd < 0)
+                            lineEnd = text.length;
+                        target = backend.cursorPositionStep(cursorPosition, direction);
+                        target = Math.max(lineStart, Math.min(lineEnd, target));
+                        target = direction > 0 ? skipHiddenForward(target)
+                                               : skipHiddenBackward(target);
+                    }
+                    target = Math.max(0, Math.min(text.length, target));
+                    if (win.vimVisualMode)
+                        select(win.vimAnchor, target);
+                    else {
+                        deselect();
+                        cursorPosition = target;
+                    }
+                }
+
+                function vimDeleteLine() {
+                    var start = text.lastIndexOf("\n", cursorPosition - 1) + 1;
+                    var end = text.indexOf("\n", cursorPosition);
+                    if (end < 0) {
+                        end = text.length;
+                        if (start > 0)
+                            --start;
+                    } else {
+                        ++end;
+                    }
+                    EditorMutations.replaceRange(editor, start, end, "");
+                    win.vimVisualMode = false;
+                    win.vimPendingDelete = false;
+                }
+
+                function vimDeleteSelectionOrCharacter() {
+                    var start = selectionStart;
+                    var end = selectionEnd;
+                    if (start === end) {
+                        start = cursorPosition;
+                        if (start >= text.length)
+                            return;
+                        end = backend.cursorPositionStep(start, 1);
+                    }
+                    EditorMutations.replaceRange(editor, start, end, "");
+                    win.vimVisualMode = false;
+                    win.vimPendingDelete = false;
+                }
+
+                function vimOpenLine() {
+                    win.vimVisualMode = false;
+                    deselect();
+                    var end = text.indexOf("\n", cursorPosition);
+                    cursorPosition = end < 0 ? text.length : end;
+                    smartReturn(false);
+                    win.vimInsertMode = true;
+                }
+
                 function movePage(direction, extendSelection) {
                     var pageStep = Math.max(win.editorFontPixelSize,
                                             editorFlick.height - win.editorFontPixelSize * 2);
@@ -873,6 +955,77 @@ ApplicationWindow {
                         return;
                     }
 
+                    if (backend.vimMode && event.key === Qt.Key_Escape) {
+                        win.vimPendingDelete = false;
+                        if (win.vimVisualMode) {
+                            win.vimVisualMode = false;
+                            deselect();
+                        } else if (win.vimInsertMode) {
+                            win.vimInsertMode = false;
+                            if (cursorPosition > 0)
+                                moveCursorVisibly(-1);
+                        }
+                        event.accepted = true;
+                        return;
+                    }
+
+                    var commandModifier = event.modifiers
+                        & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier);
+                    if (backend.vimMode && !win.vimInsertMode && !commandModifier) {
+                        if (event.modifiers & Qt.ShiftModifier) {
+                            event.accepted = true;
+                            return;
+                        }
+                        if (win.vimPendingDelete) {
+                            win.vimPendingDelete = false;
+                            if (event.key === Qt.Key_D) {
+                                vimDeleteLine();
+                                event.accepted = true;
+                                return;
+                            }
+                        }
+                        if (win.vimVisualMode
+                                && (event.key === Qt.Key_D || event.key === Qt.Key_X)) {
+                            vimDeleteSelectionOrCharacter();
+                        } else if (event.key === Qt.Key_H) {
+                            vimMove(-1, false);
+                        } else if (event.key === Qt.Key_L) {
+                            vimMove(1, false);
+                        } else if (event.key === Qt.Key_J) {
+                            vimMove(1, true);
+                        } else if (event.key === Qt.Key_K) {
+                            vimMove(-1, true);
+                        } else if (event.key === Qt.Key_I) {
+                            win.vimVisualMode = false;
+                            deselect();
+                            win.vimInsertMode = true;
+                        } else if (event.key === Qt.Key_A) {
+                            win.vimVisualMode = false;
+                            deselect();
+                            vimMove(1, false);
+                            win.vimInsertMode = true;
+                        } else if (event.key === Qt.Key_O) {
+                            vimOpenLine();
+                        } else if (event.key === Qt.Key_V) {
+                            win.vimVisualMode = !win.vimVisualMode;
+                            win.vimAnchor = cursorPosition;
+                            if (win.vimVisualMode)
+                                select(cursorPosition, cursorPosition);
+                            else
+                                deselect();
+                        } else if (event.key === Qt.Key_D) {
+                            win.vimPendingDelete = true;
+                        } else if (event.key === Qt.Key_X) {
+                            vimDeleteSelectionOrCharacter();
+                        } else if (event.key === Qt.Key_U) {
+                            win.vimVisualMode = false;
+                            deselect();
+                            undo();
+                        }
+                        event.accepted = true;
+                        return;
+                    }
+
                     var pageKey = event.key === Qt.Key_PageDown || event.key === Qt.Key_PageUp;
                     var documentEdgeKey = (event.key === Qt.Key_Home || event.key === Qt.Key_End)
                         && (event.modifiers & Qt.ControlModifier);
@@ -880,7 +1033,6 @@ ApplicationWindow {
                         scrollLinger.restart();
 
                     var returnKey = event.key === Qt.Key_Return || event.key === Qt.Key_Enter;
-                    var commandModifier = event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier);
                     if (returnKey && !commandModifier) {
                         smartReturn(event.modifiers & Qt.ShiftModifier);
                         event.accepted = true;
@@ -992,6 +1144,29 @@ ApplicationWindow {
             anchors.bottomMargin: 10
             spacing: 12
             opacity: 0.55
+
+            ToolButton {
+                objectName: "vimModeButton"
+                text: backend.vimMode ? "VIM ON" : "VIM"
+                ToolTip.visible: hovered
+                ToolTip.text: "Toggle Vim mode (Ctrl+Alt+V)"
+                onClicked: {
+                    backend.vimMode = !backend.vimMode;
+                    editor.forceActiveFocus();
+                }
+            }
+
+            Label {
+                objectName: "vimModeIndicator"
+                text: !backend.vimMode ? ""
+                    : win.vimInsertMode ? "INSERT"
+                    : win.vimVisualMode ? "VISUAL" : "NORMAL"
+                color: backend.themeAccent
+                font.family: "IBM Plex Mono"
+                font.pixelSize: win.scaledSize(11)
+                visible: backend.vimMode
+                verticalAlignment: Text.AlignVCenter
+            }
 
             FooterIconButton {
                 objectName: "saveButton"

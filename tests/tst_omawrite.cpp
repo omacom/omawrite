@@ -11,6 +11,7 @@
 #include <QQuickItem>
 #include <QQuickTextDocument>
 #include <QStandardPaths>
+#include <QSettings>
 #include <QClipboard>
 #include <QMimeData>
 #include "cli.h"
@@ -163,6 +164,21 @@ private slots:
         QSettings().setValue(QStringLiteral("editor/font"), QStringLiteral("No Such Font"));
         QCOMPARE(Backend().editorFont(), Backend::defaultEditorFont());
         QSettings().remove(QStringLiteral("editor/font"));
+    }
+
+    void remembersVimMode() {
+        QSettings().remove(QStringLiteral("editor/vimMode"));
+        {
+            Backend backend;
+            QVERIFY(!backend.vimMode());
+            backend.setVimMode(true);
+            QVERIFY(backend.vimMode());
+        }
+        Backend reopened;
+        QVERIFY(reopened.vimMode());
+        reopened.setVimMode(false);
+        QVERIFY(!Backend().vimMode());
+        QSettings().remove(QStringLiteral("editor/vimMode"));
     }
 
     void findsStrikethroughOutsideCode() {
@@ -448,6 +464,54 @@ private slots:
         QTRY_VERIFY(picker->property("opened").toBool());
         QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, center);
         QTRY_VERIFY(!picker->property("visible").toBool());
+    }
+
+    void vimModeTogglesAndEditsModally() {
+        QSettings().remove(QStringLiteral("editor/vimMode"));
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        auto *button = window->findChild<QQuickItem *>(QStringLiteral("vimModeButton"));
+        auto *indicator = window->findChild<QObject *>(QStringLiteral("vimModeIndicator"));
+        QVERIFY(editor && button && indicator);
+
+        const QPoint center = button->mapToScene(
+            QPointF(button->width() / 2, button->height() / 2)).toPoint();
+        QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, center);
+        QVERIFY(backend.vimMode());
+        QCOMPARE(indicator->property("text").toString(), QStringLiteral("NORMAL"));
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTest::keyClick(window, Qt::Key_I);
+        QCOMPARE(indicator->property("text").toString(), QStringLiteral("INSERT"));
+        for (const char key : {'c', 'a', 't'})
+            QTest::keyClick(window, key);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 2);
+        QTest::keyClick(window, Qt::Key_H);
+        QTest::keyClick(window, Qt::Key_X);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("ct"));
+        QTest::keyClick(window, Qt::Key_U);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("cat"));
+        editor->setProperty("cursorPosition", 1);
+        QTest::keyClick(window, Qt::Key_V);
+        QTest::keyClick(window, Qt::Key_H);
+        QTest::keyClick(window, Qt::Key_D);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("at"));
+        QCOMPARE(indicator->property("text").toString(), QStringLiteral("NORMAL"));
+        QTest::keyClick(window, Qt::Key_V, Qt::ControlModifier | Qt::AltModifier);
+        QVERIFY(!backend.vimMode());
+        QTest::keyClick(window, Qt::Key_X);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("xat"));
+        QSettings().remove(QStringLiteral("editor/vimMode"));
     }
 
     void breaksLinesAfterInlineBackticks() {
