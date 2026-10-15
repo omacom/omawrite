@@ -25,6 +25,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
+    Q_PROPERTY(bool vimMode READ vimMode WRITE setVimMode NOTIFY vimModeChanged)
     Q_PROPERTY(qreal textScale READ textScale NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
@@ -48,6 +49,8 @@ public:
     int wordCount() const { return m_wordCount; }
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
+    bool vimMode() const { return m_vimMode; }
+    void setVimMode(bool enabled);
     // What the desktop asks for, times what the user asked for on top of it.
     qreal textScale() const { return m_desktopTextScale * m_textZoom; }
     void setDesktopTextScale(qreal textScale);
@@ -106,6 +109,7 @@ signals:
     void statusChanged();
     void wordCountChanged();
     void darkModeChanged();
+    void vimModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
     void editorFontChanged();
@@ -153,6 +157,7 @@ private:
     QString m_status;
     int m_wordCount = 0;
     bool m_darkMode = true;
+    bool m_vimMode = false;
     // The desktop's light/dark setting, used when the Omarchy theme names none.
     bool m_systemDarkMode = true;
     qreal m_desktopTextScale = 1.0;
