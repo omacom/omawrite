@@ -1018,6 +1018,27 @@ ApplicationWindow {
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
 
+            Button {
+                id: spacingButton
+                objectName: "lineSpacingButton"
+                text: "Line spacing"
+                implicitHeight: win.scaledSize(28)
+                onClicked: spacingMenu.open()
+                Menu {
+                    id: spacingMenu
+                    y: -height - 8
+                    Repeater {
+                        model: [120, 140, 160, 180, 200]
+                        MenuItem {
+                            text: modelData + "%"
+                            checkable: true
+                            checked: backend.lineSpacing === modelData
+                            onTriggered: backend.lineSpacing = modelData
+                        }
+                    }
+                }
+            }
+
             Label {
                 text: backend.status
                 color: win.mutedColor

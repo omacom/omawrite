@@ -45,6 +45,9 @@ is never auto-saved over its file — save it to keep it.
 The font button in the footer picks the writing font from any installed text font,
 and Omawrite remembers the choice. IBM Plex Mono is the default.
 
+The footer line-spacing menu adjusts the editor from 120% to 200% and remembers
+the choice. The default is 140%.
+
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
 Omawrite at the size it is designed around; larger and smaller sizes scale from there.
