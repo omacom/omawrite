@@ -605,6 +605,43 @@ ApplicationWindow {
                     scrollTo(Math.max(0, cursorTop - margin));
             }
 
+            Popup {
+                id: slashPalette
+                objectName: "slashPalette"
+                x: Math.max(16, (editorFlick.width - width) / 2)
+                y: editor.y + editor.cursorRectangle.y + editor.cursorRectangle.height + 4
+                width: 280
+                height: Math.min(260, slashCommands.contentHeight + 16)
+                closePolicy: Popup.NoAutoClose
+                background: Rectangle { color: win.pageColor; border.color: win.mutedColor; radius: 6 }
+                ListView {
+                    id: slashCommands
+                    anchors.fill: parent
+                    anchors.margins: 6
+                    clip: true
+                    model: [
+                        { label: "Heading", markdown: "# ", terms: "heading h1 title" },
+                        { label: "Bullet list", markdown: "- ", terms: "bullet list unordered" },
+                        { label: "Numbered list", markdown: "1. ", terms: "numbered ordered list" },
+                        { label: "Checkbox", markdown: "- [ ] ", terms: "checkbox task todo" },
+                        { label: "Quote", markdown: "> ", terms: "quote blockquote" },
+                        { label: "Code fence", markdown: "```\n\n```", terms: "code fence block", cursorOffset: 4 }
+                    ].filter(function(command) {
+                        return editor.slashFilter.length === 0
+                            || command.label.toLowerCase().indexOf(editor.slashFilter) >= 0
+                            || command.terms.indexOf(editor.slashFilter) >= 0;
+                    })
+                    currentIndex: 0
+                    delegate: ItemDelegate {
+                        required property var modelData
+                        width: slashCommands.width
+                        text: modelData.label
+                        property var command: modelData
+                        onClicked: editor.applySlashCommand(command)
+                    }
+                }
+            }
+
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
@@ -646,6 +683,15 @@ ApplicationWindow {
 
                 function replaceSelectionWith(replacement) {
                     EditorMutations.replaceRange(editor, selectionStart, selectionEnd, replacement);
+                }
+
+                function applySlashCommand(command) {
+                    var start = text.lastIndexOf("\n", cursorPosition - 1) + 1;
+                    EditorMutations.replaceRange(editor, start, cursorPosition,
+                                                 command.markdown,
+                                                 command.cursorOffset, command.cursorOffset);
+                    slashPalette.close();
+                    forceActiveFocus();
                 }
 
                 function wrapSelection(marker) {
@@ -860,6 +906,66 @@ ApplicationWindow {
 
                 Keys.priority: Keys.BeforeItem
                 Keys.onPressed: function(event) {
+                    if (!slashPalette.visible && event.key === Qt.Key_Slash
+                            && cursorPosition === selectionStart
+                            && text.slice(text.lastIndexOf("\n", cursorPosition - 1) + 1,
+                                          cursorPosition).trim().length === 0
+                            && !backend.insideFence(cursorPosition)) {
+                        slashFilter = "";
+                        slashPalette.open();
+                        event.accepted = true;
+                        return;
+                    }
+                    if (!slashPalette.visible && event.key === Qt.Key_Space
+                            && selectionStart === selectionEnd
+                            && !backend.insideFence(cursorPosition)) {
+                        var checkboxStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
+                        if (text.slice(checkboxStart, cursorPosition) === "[]") {
+                            EditorMutations.replaceRange(editor, checkboxStart,
+                                                         cursorPosition, "- [ ] ");
+                            event.accepted = true;
+                            return;
+                        }
+                    }
+                    if (slashPalette.visible) {
+                        if (event.key === Qt.Key_Escape) {
+                            EditorMutations.replaceRange(editor, cursorPosition, cursorPosition,
+                                                         "/" + slashFilter);
+                            slashPalette.close();
+                            forceActiveFocus();
+                            event.accepted = true;
+                            return;
+                        }
+                        if (event.key === Qt.Key_Return || event.key === Qt.Key_Enter) {
+                            if (slashCommands.currentItem)
+                                applySlashCommand(slashCommands.currentItem.command);
+                            event.accepted = true;
+                            return;
+                        }
+                        if (event.key === Qt.Key_Up || event.key === Qt.Key_Down) {
+                            slashCommands.currentIndex = Math.max(0, Math.min(
+                                slashCommands.count - 1,
+                                slashCommands.currentIndex + (event.key === Qt.Key_Down ? 1 : -1)));
+                            event.accepted = true;
+                            return;
+                        }
+                        if (event.key === Qt.Key_Backspace) {
+                            if (slashFilter.length > 0) {
+                                slashFilter = slashFilter.slice(0, -1);
+                            } else {
+                                slashPalette.close();
+                                forceActiveFocus();
+                            }
+                            event.accepted = true;
+                            return;
+                        }
+                        if (event.text.length === 1 && event.text >= " "
+                                && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier))) {
+                            slashFilter += event.text.toLowerCase();
+                            event.accepted = true;
+                            return;
+                        }
+                    }
                     var pasteKey = (event.key === Qt.Key_V)
                         && (event.modifiers & Qt.ControlModifier)
                         && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier));
@@ -923,6 +1029,8 @@ ApplicationWindow {
                     font.weight: editor.font.weight
                 }
 
+                property string slashFilter: ""
+                onSlashFilterChanged: slashCommands.currentIndex = 0
                 property string hoveredLinkUrl: ""
                 property real linkHoverX: 0
                 property real linkHoverY: 0

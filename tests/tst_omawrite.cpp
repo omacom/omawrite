@@ -450,6 +450,68 @@ private slots:
         QTRY_VERIFY(!picker->property("visible").toBool());
     }
 
+    void convertsLineStartCheckboxAndUndo() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        for (const QChar key : QStringLiteral("[] "))
+            QTest::keyClick(window, key.toLatin1());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("- [ ] "));
+        QCOMPARE(editor->property("cursorPosition").toInt(), 6);
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("[]"));
+
+        editor->setProperty("text", QStringLiteral("```\n"));
+        editor->setProperty("cursorPosition", 4);
+        for (const QChar key : QStringLiteral("[] "))
+            QTest::keyClick(window, key.toLatin1());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("```\n[] "));
+    }
+
+    void slashPaletteFiltersAndInsertsMarkdown() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTest::keyClick(window, Qt::Key_Slash);
+        QObject *palette = window->findChild<QObject *>(QStringLiteral("slashPalette"));
+        QVERIFY(palette);
+        QVERIFY(palette->property("visible").toBool());
+        QTest::keyClick(window, Qt::Key_Q);
+        QCOMPARE(editor->property("slashFilter").toString(), QStringLiteral("q"));
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("> "));
+        QVERIFY(editor->property("activeFocus").toBool());
+
+        editor->setProperty("text", QStringLiteral("hello "));
+        editor->setProperty("cursorPosition", 6);
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTest::keyClick(window, '/');
+        QTRY_COMPARE(editor->property("text").toString(), QStringLiteral("hello /"));
+        QVERIFY(!palette->property("visible").toBool());
+    }
+
     void breaksLinesAfterInlineBackticks() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
