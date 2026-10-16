@@ -36,6 +36,7 @@ ApplicationWindow {
         Math.max(0, width - 48))
     property bool closeConfirmed: false
     property bool searchOpen: false
+    onSearchOpenChanged: if (searchOpen && spellDialog.opened) spellDialog.close()
     property bool searchUpdating: false
     property var searchMatches: []
     property int searchMatchIndex: -1
@@ -142,6 +143,53 @@ ApplicationWindow {
         searchUpdating = false;
         replaceOpen = false;
         editor.forceActiveFocus();
+    }
+
+    function checkSpelling() {
+        if (spellDialog.opened) {
+            spellDialog.forceActiveFocus();
+            return;
+        }
+        var from = editor.selectionStart;
+        var to = editor.selectionEnd;
+        if (win.searchOpen) win.closeSearch();
+        spellDialog.begin(from === to ? 0 : from, from === to ? -1 : to);
+    }
+
+    Shortcut {
+        sequence: "F7"
+        context: Qt.WindowShortcut
+        onActivated: win.checkSpelling()
+    }
+
+    SpellCheckDialog {
+        id: spellDialog
+        objectName: "spellCheckDialog"
+        parent: Overlay.overlay
+        width: Math.min(win.width - 24, win.scaledSize(800))
+        x: (win.width - width) / 2
+        y: 12
+        maximumHeight: Math.max(100, win.height - height - 60)
+        textScale: win.textScale
+        editorFont: backend.editorFont
+        mutedColor: win.mutedColor
+        accentColor: backend.themeAccent
+        selectionColor: win.selectionFill
+        checker: backend.spelling
+        panelColor: win.darkMode ? "#22221f" : "#fffef2"
+        foregroundColor: win.textColor
+        onClosed: { editor.deselect(); editor.forceActiveFocus(); }
+    }
+
+    Connections {
+        target: backend.spelling
+        function onChanged() {
+            var issue = backend.spelling.current;
+            if (issue.word !== undefined) {
+                editor.select(issue.start, issue.start + issue.length);
+                editorFlick.ensureCursorVisible();
+            }
+        }
     }
 
     Shortcut {
@@ -371,7 +419,7 @@ ApplicationWindow {
         // (Material Dialog.qml:14); as a child, the default content item sizes
         // to it without the feedback.
         Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nF7  Check Spelling\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -388,7 +436,7 @@ ApplicationWindow {
             // Inset the scrolling area by the footer strip at both ends, so
             // scrolled text never runs under the footer buttons, status, or
             // word count, and stops just as far short of the top edge.
-            anchors.topMargin: win.footerHeight
+            anchors.topMargin: spellDialog.opened ? spellDialog.y + spellDialog.height + 12 : win.footerHeight
             anchors.bottomMargin: win.footerHeight
             clip: true
             contentWidth: width
@@ -1016,6 +1064,14 @@ ApplicationWindow {
                 iconColor: win.mutedColor
                 tooltip: "Font"
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
+            }
+
+            FooterIconButton {
+                objectName: "spellCheckButton"
+                iconName: "spelling"
+                iconColor: win.mutedColor
+                tooltip: "Check spelling (F7)"
+                onClicked: win.checkSpelling()
             }
 
             Label {

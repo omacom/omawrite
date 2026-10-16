@@ -8,8 +8,9 @@ arch=('x86_64' 'aarch64')
 url='https://github.com/omacom/omawrite'
 license=('MIT' 'OFL-1.1')
 install='omawrite.install'
-depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal')
-makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative')
+depends=('qt6-base' 'qt6-declarative' 'xdg-desktop-portal' 'hunspell')
+optdepends=('hunspell-en_us: English (US) spelling dictionary')
+makedepends=('gcc' 'make' 'qt6-base' 'qt6-declarative' 'pkgconf')
 source=()
 sha256sums=()
 

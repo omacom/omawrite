@@ -15,3 +15,9 @@ HEADERS += \
     ../src/markdownhighlighter.h
 
 QT += widgets printsupport quickcontrols2 quickdialogs2 dbus
+
+QT += concurrent
+CONFIG += link_pkgconfig
+PKGCONFIG += hunspell
+HEADERS += ../src/spellchecker.h
+SOURCES += ../src/spellchecker.cpp

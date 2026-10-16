@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QObject>
+#include "spellchecker.h"
 #include <QPointer>
 #include <QByteArray>
 #include <QFileSystemWatcher>
@@ -19,6 +20,7 @@ class QLockFile;
 
 class Backend : public QObject {
     Q_OBJECT
+    Q_PROPERTY(SpellChecker *spelling READ spelling CONSTANT)
     Q_PROPERTY(QUrl fileUrl READ fileUrl NOTIFY fileUrlChanged)
     Q_PROPERTY(QString fileName READ fileName NOTIFY fileUrlChanged)
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
@@ -38,6 +40,7 @@ public:
     explicit Backend(QObject *parent = nullptr);
     ~Backend() override;
 
+    SpellChecker *spelling() { return &m_spelling; }
     void setParentWindow(QWindow *window);
 
     QUrl fileUrl() const { return m_fileUrl; }
@@ -117,6 +120,7 @@ signals:
 
 private:
     friend class OmawriteTest;
+    SpellChecker m_spelling{this};
 
     void loadDocumentText(const QString &text);
     qreal steppedTextZoom(int direction) const;

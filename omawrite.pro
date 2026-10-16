@@ -18,3 +18,9 @@ SOURCES += \
     src/systemtheme.cpp
 
 RESOURCES += src/resources.qrc
+
+QT += concurrent
+CONFIG += link_pkgconfig
+PKGCONFIG += hunspell
+HEADERS += src/spellchecker.h
+SOURCES += src/spellchecker.cpp

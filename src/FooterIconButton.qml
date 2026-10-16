@@ -60,6 +60,15 @@ Item {
                 context.lineTo(13, 13.5);
                 context.moveTo(5, 9.5);
                 context.lineTo(11, 9.5);
+            } else if (control.iconName === "spelling") {
+                context.moveTo(2, 9);
+                context.lineTo(5, 2);
+                context.lineTo(8, 9);
+                context.moveTo(3, 6.5);
+                context.lineTo(7, 6.5);
+                context.moveTo(7, 12);
+                context.lineTo(10, 14);
+                context.lineTo(14, 8);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);

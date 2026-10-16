@@ -6,6 +6,7 @@
         <file alias="SquareDialogButton.qml">SquareDialogButton.qml</file>
         <file alias="UnsavedChangesDialog.qml">UnsavedChangesDialog.qml</file>
         <file alias="ExternalChangeDialog.qml">ExternalChangeDialog.qml</file>
+        <file alias="SpellCheckDialog.qml">SpellCheckDialog.qml</file>
         <file alias="FontPicker.qml">FontPicker.qml</file>
         <file alias="EditorMutations.js">EditorMutations.js</file>
         <file alias="fonts/IBMPlexMono-Regular.ttf">../fonts/IBMPlexMono-Regular.ttf</file>

@@ -45,14 +45,238 @@ private:
 class OmawriteTest : public QObject {
     Q_OBJECT
 
+    static bool writeSpellingDictionary(const QString &path, const QString &id, const QStringList &words) {
+        QFile aff(path + "/" + id + ".aff");
+        QFile dic(path + "/" + id + ".dic");
+        if (!aff.open(QIODevice::WriteOnly) || !dic.open(QIODevice::WriteOnly)) return false;
+        aff.write("SET UTF-8\nTRY abcdefghijklmnopqrstuvwxyzæøå\n");
+        dic.write((QString::number(words.size()) + "\n" + words.join('\n') + "\n").toUtf8());
+        return true;
+    }
+
 private slots:
     void initTestCase() {
+        QCoreApplication::setOrganizationName(QStringLiteral("OmawriteTests"));
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(m_settingsDirectory.isValid());
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
+    }
+
+    void spellingRespectsMarkdownAndUnicodeOffsets() {
+        const QString text = QString::fromUtf8(
+            "😀 **tihs** [labell](https://examplle.test) `coode`\n"
+            "~~~cpp\ncoode\n~~~\n"
+            "    indentedcoode\n"
+            "[ref]: https://examplle.test\n"
+            "mail@examplle.test www.examplle.test don't don’t æble øl blå\n");
+        const auto words = SpellChecker::proseWords(text, 0, text.size());
+        QStringList actual;
+        for (const auto &word : words) {
+            actual << word.text;
+            QCOMPARE(text.mid(word.start, word.length), word.text);
+        }
+        QCOMPARE(actual, QStringList({"tihs", "labell", "don't", QString::fromUtf8("don’t"),
+                                      QString::fromUtf8("æble"), QString::fromUtf8("øl"), QString::fromUtf8("blå")}));
+        QCOMPARE(words.first().start, 5); // UTF-16 offset after the emoji and **
+        const auto selected = SpellChecker::proseWords(text, 6, 9);
+        QVERIFY(selected.isEmpty()); // Never check half a selected word.
+        const int code = text.indexOf("coode", text.indexOf("~~~cpp"));
+        QVERIFY(SpellChecker::proseWords(text, code, code + 5).isEmpty());
+    }
+
+    void spellingSupportsMultipleLanguagesAndUndo() {
+        QTemporaryDir dir;
+        QVERIFY(writeSpellingDictionary(dir.path(), "en_US", {"this", "hello", "world", "don't"}));
+        QVERIFY(writeSpellingDictionary(dir.path(), "da_DK", {"æble", "øl", "blå"}));
+        SpellChecker checker(nullptr, {dir.path()});
+        QCOMPARE(checker.dictionaries().size(), 2);
+        checker.setLanguages({"en_US", "da_DK"});
+        QTextDocument document;
+        document.setPlainText(QString::fromUtf8("😀 tihs æble øl blå don’t helo"));
+        checker.attachDocument(&document);
+        checker.start();
+        QTRY_VERIFY_WITH_TIMEOUT(!checker.busy(), 10000);
+        QCOMPARE(checker.current().value("word").toString(), "tihs");
+        QVERIFY(checker.current().value("suggestions").toStringList().contains("this"));
+        checker.replace("this");
+        QCOMPARE(checker.current().value("word").toString(), "helo");
+        checker.replace("hello");
+        QCOMPARE(document.toPlainText(), QString::fromUtf8("😀 this æble øl blå don’t hello"));
+        QVERIFY(checker.current().isEmpty());
+        document.undo();
+        QCOMPARE(document.toPlainText(), QString::fromUtf8("😀 this æble øl blå don’t helo"));
+        document.undo();
+        QCOMPARE(document.toPlainText(), QString::fromUtf8("😀 tihs æble øl blå don’t helo"));
+        checker.setLanguages({"en_US"});
+        checker.start(8, 17);
+        QTRY_VERIFY(!checker.busy());
+        QCOMPARE(checker.current().value("word").toString(), QString::fromUtf8("æble"));
+    }
+
+    void spellingKeepsPersonalWordsPerLanguage() {
+        QTemporaryDir dir;
+        QVERIFY(writeSpellingDictionary(dir.path(), "en_US", {"hello"}));
+        QVERIFY(writeSpellingDictionary(dir.path(), "da_DK", {"æble"}));
+        QSettings().remove("spelling/personal");
+        SpellChecker checker(nullptr, {dir.path()});
+        checker.setLanguages({"en_US", "da_DK"});
+        QTextDocument document("Vestmark Vestmark helo helo");
+        checker.attachDocument(&document);
+        checker.start();
+        QTRY_VERIFY(!checker.busy());
+        QCOMPARE(checker.current().value("word").toString(), "Vestmark");
+        checker.addWord("en_US");
+        QCOMPARE(checker.current().value("word").toString(), "helo");
+        checker.skip(true);
+        QVERIFY(checker.current().isEmpty());
+        SpellChecker reopened(nullptr, {dir.path()});
+        QCOMPARE(reopened.languages(), QStringList({"en_US", "da_DK"}));
+        reopened.attachDocument(&document);
+        reopened.start();
+        QTRY_VERIFY(!reopened.busy());
+        QCOMPARE(reopened.current().value("word").toString(), "helo");
+        reopened.setLanguages({"da_DK"});
+        reopened.start();
+        QTRY_VERIFY(!reopened.busy());
+        QCOMPARE(reopened.current().value("word").toString(), "Vestmark");
+        QSettings().remove("spelling/personal");
+    }
+
+    void spellingRejectsStaleResultsAndMissingLanguages() {
+        QTemporaryDir dir;
+        QVERIFY(writeSpellingDictionary(dir.path(), "en_US", {"hello"}));
+        SpellChecker checker(nullptr, {dir.path()});
+        checker.setLanguages({"en_US"});
+        QTextDocument document("helo");
+        checker.attachDocument(&document);
+        checker.start();
+        QTRY_VERIFY(!checker.busy());
+        QVERIFY(!checker.current().isEmpty());
+        document.setPlainText("world");
+        checker.replace("hello");
+        QCOMPARE(document.toPlainText(), "world");
+        QVERIFY(checker.current().isEmpty());
+        document.setPlainText(QString("helo ").repeated(10000));
+        checker.start();
+        document.setPlainText("hello");
+        checker.start();
+        QTRY_VERIFY_WITH_TIMEOUT(!checker.busy(), 10000);
+        QVERIFY(checker.current().isEmpty());
+        QVERIFY(checker.status().startsWith("Spell check complete"));
+        checker.setLanguages({"missing"});
+        checker.start();
+        QVERIFY(!checker.busy());
+        QVERIFY(checker.status().contains("unavailable"));
+        checker.setLanguages({});
+        checker.start();
+        QVERIFY(checker.status().contains("Choose at least one"));
+    }
+
+    void spellingAdjustsOffsetsAndCancelsPendingWork() {
+        QTemporaryDir dir;
+        QVERIFY(writeSpellingDictionary(dir.path(), "en_US", {"hello", "world"}));
+        SpellChecker checker(nullptr, {dir.path()});
+        checker.setLanguages({"en_US"});
+        QTextDocument document(QString::fromUtf8("😀 helo wrld wrld"));
+        checker.attachDocument(&document);
+        QSignalSpy replaced(&checker, &SpellChecker::replacementApplied);
+        checker.start(3, 12);
+        QTRY_VERIFY(!checker.busy());
+        checker.replace("hello");
+        QCOMPARE(replaced.size(), 1);
+        QCOMPARE(replaced.first().first().toInt(), 1);
+        QCOMPARE(checker.current().value("start").toInt(), 9);
+        QCOMPARE(checker.current().value("word").toString(), "wrld");
+        checker.skip();
+        QVERIFY(checker.current().isEmpty()); // Second wrld is outside the selection.
+        checker.start();
+        QTRY_VERIFY(!checker.busy());
+        checker.skip();
+        QCOMPARE(checker.current().value("word").toString(), "wrld");
+        checker.skip(true);
+        QVERIFY(checker.current().isEmpty());
+        checker.start();
+        checker.cancel();
+        QTest::qWait(200);
+        QVERIFY(!checker.busy());
+        QVERIFY(checker.current().isEmpty());
+        QVERIFY(checker.status().isEmpty());
+        // A saved selection whose dictionary disappears must not silently pass.
+        QVERIFY(QFile::remove(dir.path() + "/en_US.dic"));
+        checker.start();
+        QTRY_VERIFY(!checker.busy());
+        QVERIFY(checker.status().contains("Could not read"));
+        checker.refreshDictionaries();
+        QVERIFY(checker.dictionaries().isEmpty());
+    }
+
+    void spellingDialogOpensWithF7AndUsesRealDocument() {
+        QTemporaryDir dir;
+        QVERIFY(QDir().mkpath(dir.path() + "/hunspell"));
+        QVERIFY(writeSpellingDictionary(dir.path() + "/hunspell", "en_US", {"hello"}));
+        const QByteArray oldDataDirs = qgetenv("XDG_DATA_DIRS");
+        qputenv("XDG_DATA_DIRS", dir.path().toUtf8());
+        const auto restore = qScopeGuard([oldDataDirs] {
+            if (oldDataDirs.isNull()) qunsetenv("XDG_DATA_DIRS");
+            else qputenv("XDG_DATA_DIRS", oldDataDirs);
+        });
+        QSettings().setValue("spelling/languages", QStringList{"en_US"});
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty("backend", &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        auto *editor = root->findChild<QObject *>("sourceEditor");
+        auto *dialog = root->findChild<QObject *>("spellCheckDialog");
+        QVERIFY(editor && dialog);
+        editor->setProperty("text", "helo");
+        window->requestActivate();
+        QTRY_VERIFY(window->isActive());
+        QTest::keyClick(window, Qt::Key_F7);
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QTRY_VERIFY(!backend.spelling()->busy());
+        QVERIFY(!dialog->property("modal").toBool());
+        QVERIFY(dialog->property("height").toReal() < 200);
+        auto *editorItem = qobject_cast<QQuickItem *>(editor);
+        QVERIFY(editorItem);
+        QTRY_VERIFY(editorItem->mapToScene(QPointF(0, 0)).y()
+                    >= dialog->property("y").toReal() + dialog->property("height").toReal());
+        QCOMPARE(backend.spelling()->current().value("word").toString(), "helo");
+        QCOMPARE(editor->property("selectedText").toString(), "helo");
+        auto *replacement = root->findChild<QObject *>("spellingReplacement");
+        QVERIFY(replacement);
+        QCOMPARE(replacement->property("text").toString(), "hello");
+        if (qEnvironmentVariableIsSet("OMAWRITE_SPELLING_PREVIEW")) {
+            QTest::qWait(300);
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWRITE_SPELLING_PREVIEW")));
+            dialog->setProperty("choosingLanguages", true);
+            QTest::qWait(100);
+            QVERIFY(window->grabWindow().save(qEnvironmentVariable("OMAWRITE_SPELLING_PREVIEW") + ".languages.png"));
+            dialog->setProperty("choosingLanguages", false);
+            auto *languages = root->findChild<QObject *>("spellingLanguagesPopup");
+            QVERIFY(languages);
+            QTRY_VERIFY(!languages->property("visible").toBool());
+        }
+        auto *replaceButton = root->findChild<QObject *>("replaceSpelling");
+        QVERIFY(replaceButton);
+        QVERIFY(QMetaObject::invokeMethod(replaceButton, "clicked"));
+        QCOMPARE(editor->property("text").toString(), "hello");
+        // F7 focuses the existing review instead of starting over.
+        const QString status = backend.spelling()->status();
+        QTest::keyClick(window, Qt::Key_F7);
+        QCOMPARE(backend.spelling()->status(), status);
+        QTest::keyClick(window, Qt::Key_Escape);
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(editor->property("text").toString(), "helo");
+        QSettings().remove("spelling");
     }
 
     void countsWords() {
