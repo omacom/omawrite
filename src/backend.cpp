@@ -48,9 +48,8 @@ const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory"
 const QString textZoomSetting = QStringLiteral("text/zoom");
 
 // The user's own text size, multiplied onto the desktop's text scale.
-// Chromium's zoom ladder, trimmed to the range the whole window still reads
-// well at, so Ctrl+wheel here steps like Ctrl+wheel in a browser.
-constexpr qreal textZoomSteps[] = {0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0};
+// Browser-sized steps, with a wider range for small and large displays.
+constexpr qreal textZoomSteps[] = {0.5, 0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2.0, 2.5, 3.0};
 constexpr int textZoomStepCount = int(std::size(textZoomSteps));
 
 const QString editorFontSetting = QStringLiteral("editor/font");

@@ -48,8 +48,8 @@ and Omawrite remembers the choice. IBM Plex Mono is the default.
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
 Omawrite at the size it is designed around; larger and smaller sizes scale from there.
-`Ctrl+=`, `Ctrl+-`, and `Ctrl+scroll` set your own size on top of that, from 67% to
-200% in browser-sized steps. It is remembered for the next window you open.
+`Ctrl+=`, `Ctrl+-`, and `Ctrl+scroll` set your own size on top of that, from 50% to
+300% in browser-sized steps. It is remembered for the next window you open.
 
 ## Requirements
 
