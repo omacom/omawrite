@@ -794,7 +794,7 @@ ApplicationWindow {
                     }
 
                     var pos = backend.cursorPositionStep(cursorPosition, direction);
-                    pos = Math.max(0, Math.min(text.length, pos));
+                    pos = Math.max(0, Math.min(length, pos));
                     cursorPosition = direction > 0
                         ? skipHiddenForward(pos)
                         : skipHiddenBackward(pos);
@@ -916,7 +916,7 @@ ApplicationWindow {
                     anchors.left: parent.left
                     anchors.top: parent.top
                     text: "# Start writing"
-                    visible: editor.text.length === 0 && !editor.activeFocus
+                    visible: editor.length === 0 && !editor.activeFocus
                     color: win.mutedColor
                     font.family: editor.font.family
                     font.pixelSize: editor.font.pixelSize

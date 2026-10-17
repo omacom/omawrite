@@ -364,6 +364,34 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a foo b foo c"));
     }
 
+    void countsWordsAfterEditsWithoutBlocking() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        editor->setProperty("text", QStringLiteral("one two"));
+        QTRY_COMPARE(backend.wordCount(), 2);
+
+        // Edits made while a count runs are counted once it finishes.
+        QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 7), Q_ARG(QString, QStringLiteral(" three")));
+        QMetaObject::invokeMethod(editor, "insert", Q_ARG(int, 13), Q_ARG(QString, QStringLiteral(" four")));
+        QTRY_COMPARE(backend.wordCount(), 4);
+        QMetaObject::invokeMethod(editor, "remove", Q_ARG(int, 0), Q_ARG(int, 4));
+        QTRY_COMPARE(backend.wordCount(), 3);
+    }
+
     void reachesAndLeavesTheReplaceFieldFromTheKeyboard() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

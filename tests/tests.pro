@@ -1,4 +1,4 @@
-QT += core gui quick testlib
+QT += core gui concurrent quick testlib
 CONFIG += testcase c++17
 TEMPLATE = app
 TARGET = tst_omawrite

@@ -1,6 +1,7 @@
 #include "backend.h"
 
 #include <QClipboard>
+#include <QtConcurrent/QtConcurrentRun>
 #include <QColor>
 #include <QCoreApplication>
 #include <QDir>
@@ -156,6 +157,14 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_wordCountTimer.setSingleShot(true);
     m_wordCountTimer.setInterval(120);
     connect(&m_wordCountTimer, &QTimer::timeout, this, &Backend::refreshWordCount);
+    connect(&m_wordCountWatcher, &QFutureWatcher<int>::finished, this, [this] {
+        if (m_wordCountRunning == m_wordCountGeneration)
+            setWordCount(m_wordCountWatcher.result());
+        if (m_wordCountAgain) {
+            m_wordCountAgain = false;
+            refreshWordCount();
+        }
+    });
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
@@ -833,6 +842,8 @@ void Backend::loadDocumentText(const QString &text) {
 
     applyDocumentTypography();
     m_wordCountTimer.stop();
+    ++m_wordCountGeneration;
+    m_wordCountAgain = false;
     setWordCount(countWords(text));
 }
 
@@ -1265,7 +1276,13 @@ void Backend::setWordCount(int words) {
 }
 
 void Backend::refreshWordCount() {
-    setWordCount(countWords(currentDocumentText()));
+    // One count at a time; edits made while it runs get one more after it.
+    if (m_wordCountWatcher.isRunning()) {
+        m_wordCountAgain = true;
+        return;
+    }
+    m_wordCountRunning = ++m_wordCountGeneration;
+    m_wordCountWatcher.setFuture(QtConcurrent::run(&Backend::countWords, currentDocumentText()));
 }
 
 void Backend::scheduleWordCount() {
