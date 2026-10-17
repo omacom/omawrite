@@ -697,18 +697,14 @@ void Backend::setSearchHighlight(const QString &query, int currentMatchStart) {
         m_highlighter->setSearch(query, currentMatchStart);
 }
 
-// Matched the way the highlighter matches, so the offsets agree with what it
-// paints even where lowercasing changes a string's length.
+// Found by the highlighter's own matcher, so the offsets agree with what it
+// paints, diacritics and all.
 QVariantList Backend::searchMatches(const QString &query) const {
     QVariantList matches;
     if (query.isEmpty())
         return matches;
-    const QString text = currentDocumentText();
-    int from = 0;
-    while ((from = text.indexOf(query, from, Qt::CaseInsensitive)) >= 0) {
-        matches.append(from);
-        from += query.length();
-    }
+    for (const int start : MarkdownHighlighter::findMatches(currentDocumentText(), query))
+        matches.append(start);
     return matches;
 }
 

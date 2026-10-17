@@ -70,6 +70,36 @@ private slots:
         QCOMPARE(Backend::countWords(QString()), 0);
     }
 
+    void searchIgnoresDiacriticsTheQueryLeavesOut() {
+        using Matches = QList<int>;
+        const auto find = [](const QString &text, const QString &query) {
+            return MarkdownHighlighter::findMatches(text, query);
+        };
+
+        // Plain letters find their accented forms, in either case.
+        QCOMPARE(find(QStringLiteral("Țară și ŞTIRI"), QStringLiteral("tara")), Matches({0}));
+        QCOMPARE(find(QStringLiteral("Țară și ŞTIRI"), QStringLiteral("si")), Matches({5}));
+        QCOMPARE(find(QStringLiteral("Țară și ŞTIRI"), QStringLiteral("stiri")), Matches({8}));
+        QCOMPARE(find(QStringLiteral("în câmp"), QStringLiteral("in camp")), Matches({0}));
+        QCOMPARE(find(QStringLiteral("élève, Łódź, Straße"), QStringLiteral("eleve")), Matches({0}));
+        QCOMPARE(find(QStringLiteral("élève, Łódź, Straße"), QStringLiteral("lodz")), Matches({7}));
+
+        // An accented letter in the query matches only itself, though the
+        // cedilla and comma-below forms of s and t are one letter.
+        QCOMPARE(find(QStringLiteral("tara țară"), QStringLiteral("țară")), Matches({5}));
+        QCOMPARE(find(QStringLiteral("tara Ţară"), QStringLiteral("țară")), Matches({5}));
+        QCOMPARE(find(QStringLiteral("mama mamă"), QStringLiteral("mamă")), Matches({5}));
+
+        // Scripts whose marks make different letters keep them.
+        QCOMPARE(find(QStringLiteral("й и"), QStringLiteral("и")), Matches({2}));
+        QCOMPARE(find(QStringLiteral("が か"), QStringLiteral("か")), Matches({2}));
+        QCOMPARE(find(QStringLiteral("한 하"), QStringLiteral("하")), Matches({2}));
+
+        // Matches do not overlap, and a near miss does not hide the next one.
+        QCOMPARE(find(QStringLiteral("aaa"), QStringLiteral("aa")), Matches({0}));
+        QCOMPARE(find(QStringLiteral("tțara"), QStringLiteral("țara")), Matches({1}));
+    }
+
     void normalizesLinks() {
         QCOMPARE(Backend::normalizedLinkUrl(QStringLiteral("www.example.com/path")),
                  QStringLiteral("https://www.example.com/path"));
