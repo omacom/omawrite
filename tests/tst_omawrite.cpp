@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QFont>
+#include <QAbstractTextDocumentLayout>
 #include <QTextBlock>
 #include <QTextDocument>
 #include <QTextLayout>
@@ -68,6 +69,34 @@ private slots:
         QCOMPARE(Backend::countWords(QStringLiteral("𠀀𠀁 foo")), 3);
         QCOMPARE(Backend::countWords(QStringLiteral("안녕하세요 세계")), 2);
         QCOMPARE(Backend::countWords(QString()), 0);
+    }
+
+    void restylesTheWholeDocumentWithItsLayoutFinished() {
+        // Qt Quick's render thread lays out any block left without a layout,
+        // starting the layout's timers from the wrong thread.
+        QTextDocument document;
+        document.setTextWidth(600);
+        QStringList lines;
+        for (int i = 0; i < 3000; ++i)
+            lines << QStringLiteral("line %1 with **bold** and a [link](u)").arg(i);
+        document.setPlainText(lines.join(QLatin1Char('\n')));
+        MarkdownHighlighter highlighter(&document);
+        document.documentLayout()->documentSize();
+
+        const auto unlaidBlocks = [&document] {
+            int count = 0;
+            for (QTextBlock block = document.begin(); block.isValid(); block = block.next()) {
+                if (block.layout()->lineCount() == 0)
+                    ++count;
+            }
+            return count;
+        };
+        highlighter.setSearch(QStringLiteral("line"), -1);
+        QCOMPARE(unlaidBlocks(), 0);
+        highlighter.setSearch(QString(), -1);
+        QCOMPARE(unlaidBlocks(), 0);
+        highlighter.setTheme(false, QString(), QString(), QString(), QString());
+        QCOMPARE(unlaidBlocks(), 0);
     }
 
     void normalizesLinks() {
@@ -269,6 +298,7 @@ private slots:
         editor->setProperty("text", QStringLiteral("foo bar foo"));
         QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
         searchField->setProperty("text", QStringLiteral("foo"));
+        QMetaObject::invokeMethod(window, "flushSearch");
         QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("foo"));
 
         // Back in the text, typing goes where the caret is.
@@ -295,7 +325,9 @@ private slots:
         };
         editor->setProperty("text", QStringLiteral("long text\nfoo\nfoo"));
         searchField->setProperty("text", QStringLiteral("x"));
+        QMetaObject::invokeMethod(window, "flushSearch");
         searchField->setProperty("text", QStringLiteral("foo"));
+        QMetaObject::invokeMethod(window, "flushSearch");
         QMetaObject::invokeMethod(window, "moveSearch", Q_ARG(QVariant, 1));
         const QColor current = matchBackground(2);
         const QColor other = matchBackground(1);
@@ -318,6 +350,7 @@ private slots:
         // character whose lowercase is longer.
         editor->setProperty("text", QString::fromUtf8("\xC4\xB0 ab"));
         searchField->setProperty("text", QStringLiteral("ab"));
+        QMetaObject::invokeMethod(window, "flushSearch");
         QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("ab"));
     }
 
@@ -362,6 +395,54 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a x b x c"));
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a foo b foo c"));
+    }
+
+    void searchWaitsForTypingToPause() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *searchField = window->findChild<QObject *>(QStringLiteral("searchField"));
+        QObject *replaceField = window->findChild<QObject *>(QStringLiteral("replaceField"));
+        QObject *replaceAllButton = window->findChild<QObject *>(QStringLiteral("replaceAllButton"));
+        QVERIFY(editor && searchField && replaceField && replaceAllButton);
+
+        // Typing does not search until it pauses.
+        editor->setProperty("text", QStringLiteral("foo bar foo"));
+        QTest::keyClick(window, Qt::Key_H, Qt::ControlModifier);
+        searchField->setProperty("text", QStringLiteral("f"));
+        searchField->setProperty("text", QStringLiteral("fo"));
+        QCOMPARE(window->property("searchMatches").toList().size(), 0);
+        QTRY_COMPARE(window->property("searchMatches").toList().size(), 2);
+        QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("fo"));
+
+        // Return before the pause lands on the new query's first match.
+        searchField->setProperty("text", QStringLiteral("bar"));
+        QMetaObject::invokeMethod(window, "moveSearch", Q_ARG(QVariant, 1));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 0);
+        QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("bar"));
+
+        // Replace All before the pause replaces the new query's matches.
+        searchField->setProperty("text", QStringLiteral("foo"));
+        replaceField->setProperty("text", QStringLiteral("x"));
+        QMetaObject::invokeMethod(replaceAllButton, "clicked");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("x bar x"));
+
+        // Closing the bar drops a search still waiting for the pause.
+        searchField->setProperty("text", QStringLiteral("bar"));
+        QMetaObject::invokeMethod(window, "closeSearch");
+        QTest::qWait(300);
+        QCOMPARE(editor->property("selectedText").toString(), QString());
     }
 
     void reachesAndLeavesTheReplaceFieldFromTheKeyboard() {

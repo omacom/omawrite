@@ -100,6 +100,7 @@ ApplicationWindow {
     // match. When the document changes underneath, the matches follow along
     // without taking the writer's caret.
     function updateSearch(selectMatch) {
+        searchDelay.stop();
         var previous = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : 0;
         searchMatches = backend.searchMatches(searchField.text);
         searchMatchIndex = selectMatch ? (searchMatches.length > 0 ? 0 : -1)
@@ -126,7 +127,20 @@ ApplicationWindow {
         searchUpdating = false;
     }
 
+    // Typing in the search field waits for a pause before searching, so
+    // anything that acts on the matches catches up with the field first.
+    function flushSearch() {
+        if (searchDelay.running)
+            updateSearch(true);
+    }
+
     function moveSearch(direction) {
+        // A pending search lands on its first match, which is where the
+        // writer meant to go, rather than one past it.
+        if (searchDelay.running) {
+            updateSearch(true);
+            return;
+        }
         if (searchMatches.length === 0)
             return;
         searchMatchIndex = (searchMatchIndex + direction + searchMatches.length)
@@ -135,6 +149,7 @@ ApplicationWindow {
     }
 
     function closeSearch() {
+        searchDelay.stop();
         searchOpen = false;
         searchUpdating = true;
         backend.setSearchHighlight("", -1);
@@ -142,6 +157,14 @@ ApplicationWindow {
         searchUpdating = false;
         replaceOpen = false;
         editor.forceActiveFocus();
+    }
+
+    // Restyling a large document for each letter typed makes typing a word
+    // stall, so the search waits until the typing pauses.
+    Timer {
+        id: searchDelay
+        interval: 150
+        onTriggered: win.updateSearch(true)
     }
 
     Shortcut {
@@ -1115,7 +1138,7 @@ ApplicationWindow {
                         selectedTextColor: win.selectionTextColor
                         font.pixelSize: win.scaledSize(17)
                         clip: true
-                        onTextChanged: win.updateSearch(true)
+                        onTextChanged: searchDelay.restart()
                         Keys.onReturnPressed: function(event) {
                             win.moveSearch((event.modifiers & Qt.ShiftModifier) ? -1 : 1);
                             event.accepted = true;
@@ -1176,6 +1199,7 @@ ApplicationWindow {
                     visible: win.replaceOpen
                     text: "Replace"
                     onClicked: {
+                        win.flushSearch();
                         if (win.searchMatchIndex < 0) return;
                         var start = win.searchMatches[win.searchMatchIndex];
                         var replacement = replaceField.text;
@@ -1195,6 +1219,7 @@ ApplicationWindow {
                     visible: win.replaceOpen
                     text: "All"
                     onClicked: {
+                        win.flushSearch();
                         var query = searchField.text;
                         var matches = win.searchMatches;
                         if (query.length === 0 || matches.length === 0) return;
