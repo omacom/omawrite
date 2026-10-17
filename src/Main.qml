@@ -184,7 +184,7 @@ ApplicationWindow {
     }
 
     Shortcut {
-        sequence: "Ctrl+?"
+        sequences: ["Ctrl+?", "Ctrl+/", "F1"]
         onActivated: shortcutsDialog.open()
     }
 
@@ -360,20 +360,15 @@ ApplicationWindow {
         onReloadRequested: backend.reloadFromDisk()
     }
 
-    Dialog {
+    ShortcutsDialog {
         id: shortcutsDialog
-        objectName: "shortcutsDialog"
-        modal: true
-        title: "Keyboard shortcuts"
-        standardButtons: Dialog.Close
-        anchors.centerIn: parent
-        // A bare Label as contentItem trips a Popup implicitWidth binding loop
-        // (Material Dialog.qml:14); as a child, the default content item sizes
-        // to it without the feedback.
-        Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
-            lineHeight: 1.5
-        }
+        darkMode: win.darkMode
+        textScale: win.textScale
+        textColor: win.textColor
+        strongTextColor: win.textColor
+        activeButtonColor: backend.themeAccent
+        containerWidth: win.width
+        containerHeight: win.height
     }
 
     Item {

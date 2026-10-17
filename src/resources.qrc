@@ -1,6 +1,7 @@
 <RCC>
     <qresource prefix="/">
         <file alias="Main.qml">Main.qml</file>
+        <file alias="ShortcutsDialog.qml">ShortcutsDialog.qml</file>
         <file alias="SearchIconButton.qml">SearchIconButton.qml</file>
         <file alias="FooterIconButton.qml">FooterIconButton.qml</file>
         <file alias="SquareDialogButton.qml">SquareDialogButton.qml</file>
