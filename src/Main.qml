@@ -135,13 +135,17 @@ ApplicationWindow {
     }
 
     function closeSearch() {
+        // Hand focus to the editor before hiding the bar. Hiding the field
+        // that holds focus leaves the input method with nothing focused for
+        // a moment, and fcitx5 can then miss the next Ctrl+F.
+        Qt.inputMethod.reset();
+        editor.forceActiveFocus();
         searchOpen = false;
         searchUpdating = true;
         backend.setSearchHighlight("", -1);
         editor.deselect();
         searchUpdating = false;
         replaceOpen = false;
-        editor.forceActiveFocus();
     }
 
     Shortcut {
