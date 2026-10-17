@@ -32,6 +32,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelectionForeground READ themeSelectionForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString editorFont READ editorFont WRITE setEditorFont NOTIFY editorFontChanged)
+    Q_PROPERTY(bool fullWidth READ fullWidth WRITE setFullWidth NOTIFY fullWidthChanged)
     Q_PROPERTY(QStringList availableFonts READ availableFonts CONSTANT)
 
 public:
@@ -59,6 +60,8 @@ public:
     QString themeSelectionForeground() const { return m_themeSelectionForeground; }
     QString editorFont() const { return m_editorFont; }
     void setEditorFont(const QString &family);
+    bool fullWidth() const { return m_fullWidth; }
+    void setFullWidth(bool fullWidth);
     QStringList availableFonts() const;
     static QString defaultEditorFont();
     static QStringList selectableFontFamilies(const QStringList &families);
@@ -109,6 +112,7 @@ signals:
     void textScaleChanged();
     void themeColorsChanged();
     void editorFontChanged();
+    void fullWidthChanged();
     void saveFailed();
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
@@ -153,6 +157,7 @@ private:
     QString m_status;
     int m_wordCount = 0;
     bool m_darkMode = true;
+    bool m_fullWidth = false;
     // The desktop's light/dark setting, used when the Omarchy theme names none.
     bool m_systemDarkMode = true;
     qreal m_desktopTextScale = 1.0;

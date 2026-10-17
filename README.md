@@ -30,6 +30,8 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+=` and `Ctrl+-` change the text size, `Ctrl+0` returns to the default.
   `Ctrl+scroll` does the same.
 - `Ctrl+Shift+C` copies the rendered document as HTML, with plain text as a fallback.
+- `Ctrl+Shift+W` (or `Alt+W` / `Ctrl+Alt+W`) toggles between the standard
+  writing column and full width. The choice is remembered across launches.
 - `Ctrl+?` shows the keyboard shortcut reference.
 - In the unsaved-changes dialog, `Alt+C`, `Alt+D`, and `Alt+S` choose Cancel,
   Discard, and Save.

@@ -54,6 +54,7 @@ constexpr qreal textZoomSteps[] = {0.67, 0.75, 0.9, 1.0, 1.1, 1.25, 1.5, 1.75, 2
 constexpr int textZoomStepCount = int(std::size(textZoomSteps));
 
 const QString editorFontSetting = QStringLiteral("editor/font");
+const QString fullWidthSetting = QStringLiteral("editor/fullWidth");
 
 // Noto ships a separate family per script, which buries every other font in
 // the picker. Offer only the core Latin families; the rest still serve as
@@ -130,6 +131,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
                                           : 1.0;
 
     const QString savedFont = QSettings().value(editorFontSetting).toString();
+    m_fullWidth = QSettings().value(fullWidthSetting, false).toBool();
     m_editorFont = !savedFont.isEmpty() && QFontDatabase::hasFamily(savedFont)
         ? savedFont
         : defaultEditorFont();
@@ -226,6 +228,15 @@ void Backend::setDesktopTextScale(qreal textScale) {
 
 void Backend::increaseTextSize() {
     setTextZoom(steppedTextZoom(1));
+}
+
+void Backend::setFullWidth(bool fullWidth) {
+    if (m_fullWidth == fullWidth)
+        return;
+
+    m_fullWidth = fullWidth;
+    QSettings().setValue(fullWidthSetting, fullWidth);
+    emit fullWidthChanged();
 }
 
 void Backend::decreaseTextSize() {

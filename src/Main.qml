@@ -30,7 +30,11 @@ ApplicationWindow {
     readonly property int footerHeight: scaledSize(32)
     // Never wider than the Flickable's viewport, whatever the floor asks for:
     // a tiling compositor can resize the window below its minimum width.
-    readonly property int editorWidth: Math.min(
+    readonly property bool fullWidth: backend.fullWidth
+    readonly property int fullWidthInset: Math.min(
+        Math.max(42, Math.round(height * 0.05), footerHeight),
+        Math.max(0, Math.floor(Math.min(width, height) / 2)))
+    readonly property int editorWidth: fullWidth ? Math.max(0, width - fullWidthInset * 2) : Math.min(
         Math.round(writerFontMetrics.averageCharacterWidth * 65),
         Math.max(360, width - Math.round(writerFontMetrics.averageCharacterWidth * 20)),
         Math.max(0, width - 48))
@@ -206,6 +210,11 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequences: ["Ctrl+Shift+W", "Alt+W", "Ctrl+Alt+W"]
+        onActivated: backend.fullWidth = !backend.fullWidth
+    }
+
+    Shortcut {
         sequence: "Ctrl+O"
         onActivated: backend.openDialog()
     }
@@ -371,7 +380,7 @@ ApplicationWindow {
         // (Material Dialog.qml:14); as a child, the default content item sizes
         // to it without the feedback.
         Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+Shift+X  Strikethrough\nCtrl+K  Link\nCtrl+Shift+C  Copy as HTML\nCtrl+P  Print\nCtrl+= / Ctrl+-  Text Size\nCtrl+0  Reset Text Size\nCtrl+Shift+W  Full / Standard Width\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -383,16 +392,16 @@ ApplicationWindow {
             id: editorFlick
             objectName: "editorScroll"
             anchors.fill: parent
-            anchors.leftMargin: 24
-            anchors.rightMargin: 24
+            anchors.leftMargin: win.fullWidth ? win.fullWidthInset : 24
+            anchors.rightMargin: win.fullWidth ? win.fullWidthInset : 24
             // Inset the scrolling area by the footer strip at both ends, so
             // scrolled text never runs under the footer buttons, status, or
             // word count, and stops just as far short of the top edge.
-            anchors.topMargin: win.footerHeight
-            anchors.bottomMargin: win.footerHeight
+            anchors.topMargin: win.fullWidth ? win.fullWidthInset : win.footerHeight
+            anchors.bottomMargin: win.fullWidth ? win.fullWidthInset : win.footerHeight
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(height, editor.y + editor.implicitHeight + (win.fullWidth ? 0 : 220))
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -611,9 +620,10 @@ ApplicationWindow {
                 x: Math.round((editorFlick.width - width) / 2)
                 // The resting position counts from the window's top edge, so
                 // take back the top inset the Flickable already adds.
-                y: Math.max(0, Math.max(42, Math.round(win.height * 0.05)) - win.footerHeight)
+                y: win.fullWidth ? 0 : Math.max(0, Math.max(42, Math.round(win.height * 0.05)) - win.footerHeight)
                 width: win.editorWidth
-                height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+                height: win.fullWidth ? Math.max(editorFlick.height, implicitHeight)
+                    : Math.max(editorFlick.height - y - 96, implicitHeight + 20)
                 text: ""
                 textFormat: TextEdit.PlainText
                 wrapMode: TextEdit.Wrap

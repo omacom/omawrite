@@ -2135,6 +2135,81 @@ private slots:
         QVERIFY(editor->property("x").toInt() >= 0);
     }
 
+    void remembersFullWidthAndKeepsItInsideTheViewport() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QVERIFY(!backend.fullWidth());
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        // Establish a wide window explicitly: the offscreen platform can reuse
+        // the preceding narrow-window test's geometry for a new window.
+        window->resize(1280, 820);
+        QCoreApplication::processEvents();
+        QTRY_COMPARE(window->width(), 1280);
+        window->requestActivate();
+        QTRY_VERIFY(window->isActive());
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        auto *viewport = window->findChild<QQuickItem *>(QStringLiteral("editorScroll"));
+        QVERIFY(viewport);
+        const qreal standardWidth = editor->width();
+
+        QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::ShiftModifier);
+        QVERIFY(backend.fullWidth());
+        QTRY_VERIFY2(editor->width() > standardWidth, qPrintable(QStringLiteral("standard=%1 full=%2 window=%3 scale=%4")
+            .arg(standardWidth).arg(editor->width()).arg(window->width()).arg(backend.textScale())));
+        QTRY_COMPARE(editor->width(), viewport->width());
+        QVERIFY(Backend().fullWidth());
+        QVERIFY(!backend.modified());
+
+        // The remembered setting is also used by a newly created QML window.
+        {
+            Backend reopened;
+            QQmlEngine reopenedEngine;
+            reopenedEngine.rootContext()->setContextProperty(QStringLiteral("backend"), &reopened);
+            QQmlComponent reopenedComponent(&reopenedEngine, QUrl::fromLocalFile(mainQmlPath));
+            QScopedPointer<QObject> reopenedWindow(reopenedComponent.create());
+            QVERIFY2(reopenedWindow, qPrintable(reopenedComponent.errorString()));
+            QVERIFY(reopenedWindow->property("fullWidth").toBool());
+        }
+        window->requestActivate();
+        QTRY_VERIFY(window->isActive());
+        QTest::keyClick(window, Qt::Key_W, Qt::AltModifier);
+        QVERIFY(!backend.fullWidth());
+        QTRY_COMPARE(editor->width(), standardWidth);
+        QTest::keyClick(window, Qt::Key_W, Qt::ControlModifier | Qt::AltModifier);
+        QVERIFY(backend.fullWidth());
+
+        // Preserve upstream's narrow-window fix at both ends of the zoom range.
+        window->setWidth(394);
+        QCoreApplication::processEvents();
+        for (int direction : {-1, 1}) {
+            for (int step = 0; step < 20; ++step) {
+                if (direction < 0) backend.decreaseTextSize();
+                else backend.increaseTextSize();
+            }
+            for (bool fullWidth : {false, true}) {
+                backend.setFullWidth(fullWidth);
+                QCoreApplication::processEvents();
+                QVERIFY(editor->width() <= viewport->width());
+                QVERIFY(editor->x() >= 0);
+                QVERIFY(editor->x() + editor->width() <= viewport->width() + 1);
+            }
+        }
+        backend.resetTextSize();
+        backend.setFullWidth(false);
+        QVERIFY(!Backend().fullWidth());
+        QVERIFY(!backend.modified());
+    }
+
     void shortcutsDialogHasNoBindingLoop() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
