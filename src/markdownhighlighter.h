@@ -48,6 +48,10 @@ public:
     static QList<Span> codeSpans(const QString &text);
     static int openingFenceLength(const QString &text);
     static bool isThematicBreak(const QString &text);
+    // Where a task list item's "[ ]" or "[x]" starts: right after the list
+    // marker, followed by whitespace or the line's end, as GitHub reads it.
+    // -1 when the line is no task.
+    static int taskMarker(const QString &text);
     static bool closesFence(const QString &text, int openingLength,
                             QChar marker = QLatin1Char('`'));
 
@@ -82,6 +86,7 @@ private:
     QTextCharFormat m_fenceFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
+    QTextCharFormat m_checkedTaskFormat;
     QString m_searchQuery;
     int m_currentMatchStart = -1;
     // Moves with edits, so it still finds the block the current match was

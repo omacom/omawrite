@@ -960,6 +960,91 @@ private slots:
         QCOMPARE(backend.linkUrlAt(5), QString());
     }
 
+    void togglesTasksOnClick() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        const QString start = QStringLiteral("- [ ] milk\n- [x] done\n```\n- [ ] code\n```");
+        editor->setProperty("text", start);
+        const int end = int(start.length());
+        editor->setProperty("cursorPosition", end);
+
+        auto text = [editor] { return editor->property("text").toString(); };
+        // The middle of the character at position, in window coordinates.
+        const auto pointAt = [editor](int position) {
+            QRectF box;
+            QRectF next;
+            QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, box),
+                                      Q_ARG(int, position));
+            QMetaObject::invokeMethod(editor, "positionToRectangle", Q_RETURN_ARG(QRectF, next),
+                                      Q_ARG(int, position + 1));
+            return editor->mapToScene(QPointF((box.x() + next.x()) / 2,
+                                              box.y() + box.height() / 2)).toPoint();
+        };
+        const auto click = [window](QPoint point, Qt::KeyboardModifiers modifiers = {}) {
+            QTest::mouseClick(window, Qt::LeftButton, modifiers, point);
+        };
+
+        // Only the box itself counts, not the marker or the space after it.
+        QCOMPARE(backend.taskMarkerAt(1), -1);
+        for (int position : {2, 3, 4})
+            QCOMPARE(backend.taskMarkerAt(position), 2);
+        QCOMPARE(backend.taskMarkerAt(5), -1);
+
+        // A click ticks an open box and clears a ticked one, leaving the caret
+        // where it was.
+        click(pointAt(3));
+        QCOMPARE(text(), QStringLiteral("- [x] milk\n- [x] done\n```\n- [ ] code\n```"));
+        QCOMPARE(editor->property("cursorPosition").toInt(), end);
+        click(pointAt(14));
+        QCOMPARE(text(), QStringLiteral("- [x] milk\n- [ ] done\n```\n- [ ] code\n```"));
+
+        // Each toggle is its own undo step.
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(text(), QStringLiteral("- [x] milk\n- [x] done\n```\n- [ ] code\n```"));
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(text(), start);
+
+        // A double-click is one tick, and selects nothing.
+        QTest::mouseDClick(window, Qt::LeftButton, {}, pointAt(3));
+        QCOMPARE(text(), QStringLiteral("- [x] milk\n- [x] done\n```\n- [ ] code\n```"));
+        QCOMPARE(editor->property("selectedText").toString(), QString());
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(text(), start);
+
+        // A box in fenced code is only text.
+        QCOMPARE(backend.taskMarkerAt(29), -1);
+        click(pointAt(29));
+        QCOMPARE(text(), start);
+
+        // Shift+click extends the selection over a box rather than ticking it.
+        editor->setProperty("cursorPosition", 0);
+        click(pointAt(3), Qt::ShiftModifier);
+        QCOMPARE(text(), start);
+        QVERIFY(editor->property("selectionEnd").toInt() > 0);
+
+        // A click on the item's text places the caret as anywhere else, and a
+        // double-click there selects the word.
+        click(pointAt(7));
+        QCOMPARE(text(), start);
+        QVERIFY(qAbs(editor->property("cursorPosition").toInt() - 7) <= 1);
+        QTest::mouseDClick(window, Qt::LeftButton, {}, pointAt(7));
+        QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("milk"));
+    }
+
     void showsLinkTooltipUrlAsPlainText() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -1367,6 +1452,42 @@ private slots:
                 QVERIFY(format.fontPointSize() != 1.0);
             }
         }
+    }
+
+    void stylesTaskMarkers() {
+        const QColor marker(QStringLiteral("#4f525a"));
+        const QColor accent(QStringLiteral("#5584aa"));
+
+        // An open box recedes like the list marker before it.
+        const auto open = highlightedFormats(QStringLiteral("- [ ] milk"));
+        for (int i : {2, 3, 4})
+            QCOMPARE(open.at(i).foreground().color(), marker);
+        QVERIFY(open.at(6).foreground().color() != marker);
+
+        // A ticked one takes the accent, without a link's underline.
+        for (const QString &done : {QStringLiteral("- [x] done"), QStringLiteral("* [X] done"),
+                                    QStringLiteral("  + [x]"), QStringLiteral("1. [x] done")}) {
+            const int box = MarkdownHighlighter::taskMarker(done);
+            QVERIFY2(box >= 0, qPrintable(done));
+            const auto formats = highlightedFormats(done);
+            for (int i = box; i < box + 3; ++i) {
+                QCOMPARE(formats.at(i).foreground().color(), accent);
+                QVERIFY(!formats.at(i).fontUnderline());
+            }
+        }
+
+        // A box needs a list marker before it and whitespace or the line's
+        // end after it.
+        for (const QString &plain : {QStringLiteral("-[ ] no"), QStringLiteral("- [ ]no"),
+                                     QStringLiteral("> [ ] quote"), QStringLiteral("text [ ] here"),
+                                     QStringLiteral("- [y] no"), QStringLiteral("- [x](https://example.com)")}) {
+            QVERIFY2(MarkdownHighlighter::taskMarker(plain) < 0, qPrintable(plain));
+        }
+
+        // So a link right after the list marker stays a link.
+        const auto link = highlightedFormats(QStringLiteral("- [x](https://example.com)"));
+        QCOMPARE(link.at(2).fontPointSize(), 1.0);
+        QVERIFY(link.at(3).fontUnderline());
     }
 
     void mergesInlineStylesWithTheBlock() {
@@ -2021,6 +2142,21 @@ private slots:
         QCOMPARE(text(), QStringLiteral("- item\n- "));
         returnKey();
         QCOMPARE(text(), QStringLiteral("- item\n\n"));
+
+        // A task carries an open box down, ticked or not, and one left empty
+        // ends the list the same way.
+        load(QStringLiteral("- [x] done"), 10);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- [x] done\n- [ ] "));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- [x] done\n\n"));
+        load(QStringLiteral("1. [ ] a"), 8);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("1. [ ] a\n2. [ ] "));
+        // A quote is no list, so it has no tasks.
+        load(QStringLiteral("> [ ] q"), 7);
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("> [ ] q\n> "));
 
         // Inside a code fence every line is its own, blank ones included.
         load(QStringLiteral("```\ncode\n```"), 8);

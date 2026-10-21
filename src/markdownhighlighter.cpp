@@ -167,6 +167,10 @@ void MarkdownHighlighter::rebuildFormats() {
     m_linkFormat.setForeground(link);
     m_linkFormat.setFontUnderline(true);
 
+    // A ticked box stands out from the grey of an open one.
+    m_checkedTaskFormat = QTextCharFormat();
+    m_checkedTaskFormat.setForeground(link);
+
     m_searchFormat = QTextCharFormat();
     m_searchFormat.setBackground(m_darkMode ? QColor(QStringLiteral("#725b18"))
                                             : QColor(QStringLiteral("#ffe58a")));
@@ -388,8 +392,14 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
         static const QRegularExpression listRe(
             QStringLiteral("^(\\s*(?:[-+*]|\\d+[.)])\\s+)(.*)$"));
         const QRegularExpressionMatch list = listRe.match(text);
-        if (list.hasMatch())
+        if (list.hasMatch()) {
             setFormat(0, list.capturedLength(1), m_markerFormat);
+            const int task = taskMarker(text);
+            if (task >= 0) {
+                setFormat(task, 3, text.at(task + 1) == QLatin1Char(' ') ? m_markerFormat
+                                                                         : m_checkedTaskFormat);
+            }
+        }
     }
 
     if (isThematicBreak(text))
@@ -401,6 +411,15 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
 bool MarkdownHighlighter::isThematicBreak(const QString &text) {
     static const QRegularExpression ruleRe(QStringLiteral("^\\s{0,3}([-*_])(?:\\s*\\1){2,}\\s*$"));
     return ruleRe.match(text).hasMatch();
+}
+
+// "- [x](url)" is a link, not a task, so the box needs whitespace or the
+// line's end after it.
+int MarkdownHighlighter::taskMarker(const QString &text) {
+    static const QRegularExpression taskRe(
+        QStringLiteral("^\\s*(?:[-+*]|\\d+[.)])\\s+(\\[[ xX]\\])(?=\\s|$)"));
+    const QRegularExpressionMatch match = taskRe.match(text);
+    return match.hasMatch() ? int(match.capturedStart(1)) : -1;
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {

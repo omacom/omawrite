@@ -621,6 +621,23 @@ QString Backend::linkUrlAt(int position) const {
     return MarkdownHighlighter::linkUrlAt(block.text(), position - block.position());
 }
 
+// Where the "[ ]" or "[x]" of the task the position is on starts, so a click
+// on the box can tick it; -1 anywhere else.
+int Backend::taskMarkerAt(int position) const {
+    if (!m_document)
+        return -1;
+
+    const QTextBlock block =
+        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    if (!block.isValid() || block.userState() >= MarkdownHighlighter::InsideFence
+            || block.previous().userState() >= MarkdownHighlighter::InsideFence)
+        return -1;
+
+    const int task = MarkdownHighlighter::taskMarker(block.text());
+    const int offset = position - block.position();
+    return task >= 0 && offset >= task && offset < task + 3 ? block.position() + task : -1;
+}
+
 int Backend::cursorPositionStep(int position, int direction) const
 {
     if (!m_document || direction == 0)

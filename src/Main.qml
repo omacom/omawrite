@@ -714,14 +714,20 @@ ApplicationWindow {
                     }
                     var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
                     if (match) {
-                        if (match[3].length === 0) {
+                        // A task carries an open box down, and one with
+                        // nothing after its box is as empty as a bare marker.
+                        var task = /^>/.test(match[2]) ? null
+                            : match[3].match(/^\[[ xX]\](?:\s+|$)/);
+                        var content = task ? match[3].slice(task[0].length) : match[3];
+                        if (content.length === 0) {
                             EditorMutations.replaceRange(editor, lineStart,
                                                          cursorPosition, "\n");
                         } else {
                             var marker = match[2];
                             if (/^\d/.test(marker))
                                 marker = (parseInt(marker) + 1) + marker.slice(-1);
-                            replaceSelectionWith("\n" + match[1] + marker + " ");
+                            replaceSelectionWith("\n" + match[1] + marker + " "
+                                                 + (task ? "[ ] " : ""));
                         }
                         return;
                     }
@@ -996,7 +1002,8 @@ ApplicationWindow {
                 // positionAt() snaps to the nearest caret, even past the end of a
                 // line, so only count a character the pointer is inside: the one
                 // on either side of that caret, whichever way the text runs.
-                function linkUrlUnder(x, y) {
+                // -1 when the pointer is over no character.
+                function characterUnder(x, y) {
                     var caret = positionAt(x, y);
                     for (var position = Math.max(0, caret - 1);
                          position <= caret && position < length; ++position) {
@@ -1008,22 +1015,58 @@ ApplicationWindow {
                             ? next.x : box.x + writerFontMetrics.averageCharacterWidth;
                         if (y >= box.y && y < box.y + box.height
                                 && x >= Math.min(box.x, edge) && x < Math.max(box.x, edge))
-                            return backend.linkUrlAt(position);
+                            return position;
                     }
-                    return "";
+                    return -1;
+                }
+
+                function linkUrlUnder(x, y) {
+                    var position = characterUnder(x, y);
+                    return position < 0 ? "" : backend.linkUrlAt(position);
+                }
+
+                // Where the "[ ]" or "[x]" under the pointer starts, or -1.
+                function taskUnder(x, y) {
+                    var position = characterUnder(x, y);
+                    return position < 0 ? -1 : backend.taskMarkerAt(position);
+                }
+
+                // Ticks an open box and clears a ticked one, as one undo step.
+                function toggleTask(start) {
+                    replaceText(start + 1, start + 2,
+                                getText(start + 1, start + 2) === " " ? "x" : " ");
                 }
 
                 MouseArea {
+                    // A press on a task's box ticks it; every other press goes
+                    // through to the text beneath.
+                    property int pressedTask: -1
+
                     anchors.fill: parent
-                    acceptedButtons: Qt.NoButton
+                    acceptedButtons: Qt.LeftButton
                     hoverEnabled: true
                     cursorShape: Qt.IBeamCursor
                     onPositionChanged: (mouse) => {
+                        var position = editor.characterUnder(mouse.x, mouse.y);
                         editor.linkHoverX = mouse.x;
                         editor.linkHoverY = mouse.y;
-                        editor.hoveredLinkUrl = editor.linkUrlUnder(mouse.x, mouse.y);
+                        editor.hoveredLinkUrl = position < 0 ? "" : backend.linkUrlAt(position);
+                        cursorShape = position >= 0 && backend.taskMarkerAt(position) >= 0
+                            ? Qt.PointingHandCursor : Qt.IBeamCursor;
                     }
                     onExited: editor.hoveredLinkUrl = ""
+                    onPressed: (mouse) => {
+                        pressedTask = mouse.modifiers === Qt.NoModifier
+                            ? editor.taskUnder(mouse.x, mouse.y) : -1;
+                        mouse.accepted = pressedTask >= 0;
+                    }
+                    onClicked: (mouse) => {
+                        if (editor.taskUnder(mouse.x, mouse.y) === pressedTask)
+                            editor.toggleTask(pressedTask);
+                    }
+                    // Taking a double-click on a box keeps its second press
+                    // from ticking it back; anywhere else it selects a word.
+                    onDoubleClicked: (mouse) => mouse.accepted = pressedTask >= 0
                 }
 
                 ToolTip {
