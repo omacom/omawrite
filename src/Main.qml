@@ -445,6 +445,12 @@ ApplicationWindow {
             // the new curve, so sustained spinning keeps picking up speed.
             readonly property real wheelStep: win.scaledSize(120)
 
+            // Touchpad deltas arrive as small pixel counts that, taken one to
+            // one, crawl next to browsers and GTK apps under the same
+            // compositor. Scale them up; Qt reports 12 angle units per
+            // touchpad pixel, so 6x is 60px per 120 angle units, as in #42.
+            readonly property real touchpadGain: 6
+
             FrameAnimation {
                 id: wheelScroll
                 running: false
@@ -527,9 +533,11 @@ ApplicationWindow {
                 // Wayland compositors route every pointer's scroll through
                 // one seat device that Qt classifies as a touchpad, so the
                 // device type cannot tell a mouse wheel from two-finger
-                // scrolling. Distinguish by event shape instead: discrete
-                // wheel notches arrive with only angleDelta set, while
-                // finger scrolling carries pixel-precise pixelDelta.
+                // scrolling. Since Qt 6.12 neither can pixelDelta: Wayland
+                // sends a pixel value with every notch (15px beside angleDelta
+                // 120), and Qt now passes it on. Use the scroll phase instead:
+                // Qt wraps finger scrolling in ScrollBegin/Update/End, while
+                // wheel notches have none.
                 acceptedDevices: PointerDevice.Mouse | PointerDevice.TouchPad
                 onWheel: function(wheel) {
                     if (wheel.modifiers & Qt.ControlModifier) {
@@ -539,8 +547,9 @@ ApplicationWindow {
                     }
 
                     scrollLinger.restart();
-                    if (wheel.pixelDelta.y !== 0)
-                        editorFlick.scrollTo(editorFlick.clampContentY(editorFlick.contentY - wheel.pixelDelta.y));
+                    if (editorFlick.isTouchpad(wheel))
+                        editorFlick.scrollTo(editorFlick.clampContentY(
+                            editorFlick.contentY - wheel.pixelDelta.y * editorFlick.touchpadGain));
                     else
                         editorFlick.scrollByWheel(wheel);
                     wheel.accepted = true;
@@ -556,9 +565,7 @@ ApplicationWindow {
             property real zoomNotches: 0
 
             function zoomByWheel(wheel) {
-                // Finger scrolling synthesizes an angleDelta too, so pixelDelta
-                // is the one to test first, as in onWheel.
-                var notches = wheel.pixelDelta.y !== 0
+                var notches = isTouchpad(wheel)
                     ? wheel.pixelDelta.y / 50
                     : wheel.angleDelta.y / 120;
                 if (zoomNotches * notches < 0)
@@ -573,6 +580,10 @@ ApplicationWindow {
                     backend.decreaseTextSize();
                     zoomNotches += 1;
                 }
+            }
+
+            function isTouchpad(wheel) {
+                return wheel.phase !== Qt.NoScrollPhase;
             }
 
             function scrollByWheel(wheel) {
