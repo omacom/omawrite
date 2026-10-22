@@ -1954,6 +1954,55 @@ private slots:
         QCOMPARE(editor->property("cursorPosition").toInt(), 0);
     }
 
+    void scrollsWheelNotchesAndTouchpadByPhase() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *scroll = window->findChild<QObject *>(QStringLiteral("editorScroll"));
+        QVERIFY(editor);
+        QVERIFY(scroll);
+
+        QStringList lines;
+        for (int i = 0; i < 300; ++i)
+            lines << QStringLiteral("line %1").arg(i);
+        editor->setProperty("text", lines.join(QLatin1Char('\n')));
+        editor->setProperty("cursorPosition", 0);
+        QTRY_COMPARE(scroll->property("contentY").toReal(), 0.0);
+
+        const QPointF center(window->width() / 2.0, window->height() / 2.0);
+        const auto wheel = [&](int pixels, int angle, Qt::ScrollPhase phase) {
+            QWheelEvent event(center, window->mapToGlobal(center), QPoint(0, pixels), QPoint(0, angle),
+                              Qt::NoButton, Qt::NoModifier, phase, false);
+            QGuiApplication::sendEvent(window, &event);
+        };
+
+        // Since Qt 6.12 a notch carries Wayland's 15px value as pixelDelta.
+        // It still scrolls a full wheel step, not the 15px.
+        const qreal step = scroll->property("wheelStep").toReal();
+        wheel(-15, -120, Qt::NoScrollPhase);
+        QTRY_COMPARE(scroll->property("contentY").toReal(), step);
+
+        // Finger scrolling, wrapped in a scroll phase, moves by its pixels
+        // times the touchpad gain.
+        const qreal gain = scroll->property("touchpadGain").toReal();
+        wheel(0, 0, Qt::ScrollBegin);
+        wheel(-10, -120, Qt::ScrollUpdate);
+        QCOMPARE(scroll->property("contentY").toReal(), step + 10 * gain);
+    }
+
     void breaksLinesOnReturn() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -2484,23 +2533,25 @@ private slots:
         QObject *scroll = window->findChild<QObject *>(QStringLiteral("editorScroll"));
         QVERIFY(scroll);
 
-        const auto scrollBy = [scroll](int angle, int pixels) {
+        const auto scrollBy = [scroll](int angle, int pixels, Qt::ScrollPhase phase) {
             const QVariant wheel = QVariantMap{
                 {QStringLiteral("angleDelta"), QVariantMap{{QStringLiteral("y"), angle}}},
-                {QStringLiteral("pixelDelta"), QVariantMap{{QStringLiteral("y"), pixels}}}};
+                {QStringLiteral("pixelDelta"), QVariantMap{{QStringLiteral("y"), pixels}}},
+                {QStringLiteral("phase"), int(phase)}};
             QVERIFY(QMetaObject::invokeMethod(scroll, "zoomByWheel", Q_ARG(QVariant, wheel)));
         };
 
         // A touchpad trickles in pixels: a nudge is not a whole step yet. Its
         // events carry a synthesized angleDelta as well, as Wayland sends them.
-        scrollBy(240, 20);
-        scrollBy(240, 20);
+        scrollBy(240, 20, Qt::ScrollUpdate);
+        scrollBy(240, 20, Qt::ScrollUpdate);
         QCOMPARE(backend.textScale(), 1.0);
-        scrollBy(240, 20);
+        scrollBy(240, 20, Qt::ScrollUpdate);
         QCOMPARE(backend.textScale(), 1.1);
 
         // A wheel notch is one step, and reversing drops the banked remainder.
-        scrollBy(-120, 0);
+        // Since Qt 6.12 every notch carries a pixel value too; it must not count.
+        scrollBy(-120, -15, Qt::NoScrollPhase);
         QCOMPARE(backend.textScale(), 1.0);
 
         backend.resetTextSize();
