@@ -13,7 +13,36 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 ## Command line
 
 `omawrite` opens an empty document and `omawrite FILE` opens a Markdown file.
+`omawrite -c PATH` (or `--config PATH`) loads settings from a TOML file.
+`omawrite -g` (or `--generate`) exports the current system settings to `$XDG_CONFIG_HOME/omawrite/omawrite.toml` without overwriting an existing file, prints its absolute path, and exits without opening a window.
 `omawrite --help` and `omawrite --version` answer in the terminal without opening a window.
+
+## Configuration
+
+Omawrite optionally reads a TOML configuration file from `$XDG_CONFIG_HOME/omawrite/omawrite.toml` (falling back to `~/.config/omawrite/omawrite.toml`) or from the path passed to `-c` / `--config`. When neither exists, Omawrite follows the active Omarchy theme and system dark/light mode.
+
+```toml
+mode = "dark"
+background = "#1e1e2e"
+foreground = "#cdd6f4"
+accent = "#89b4fa"
+selection = "#45475a"
+selection_foreground = "#cdd6f4"
+code_background = "#313244"
+code_foreground = "#f5e0dc"
+code_line_numbers = false
+# code_line_numbers_font = "IBM Plex Mono"
+# code_line_numbers_foreground = "#909191"
+# code_line_numbers_background = "#2a2b3c"
+# code_line_numbers_size = 14
+
+background_image = "~/Pictures/wallpaper.png"
+background_opacity = 0.85
+
+font = "IBM Plex Mono"
+code_font = "IBM Plex Mono"
+zoom = 1.0
+```
 
 ## Shortcuts
 

@@ -12,7 +12,10 @@ public:
     explicit MarkdownHighlighter(QTextDocument *document);
 
     void setTheme(bool darkMode, const QString &background, const QString &foreground,
-                  const QString &accent, const QString &codeBackground);
+                  const QString &accent, const QString &codeBackground,
+                  const QString &codeForeground = QString(),
+                  const QString &codeFont = QString());
+    void setCodeFont(const QString &fontFamily);
     void setSearch(const QString &query, int currentMatchStart);
     void setCaret(int position);
     void refreshFont();
@@ -30,6 +33,9 @@ public:
     // past three that opened it, plus one for tildes, since only a fence of the
     // same character at least that long closes it.
     enum BlockState { Prose = 0, InsideFence = 1 };
+
+    bool fenceBoundariesChanged() const { return m_fenceBoundariesChanged; }
+    void resetFenceBoundariesChanged() { m_fenceBoundariesChanged = false; }
 
     struct InlineMarkup {
         InlineKind kind;
@@ -69,10 +75,13 @@ private:
     void highlightSearch(const QString &text);
 
     bool m_darkMode = true;
+    bool m_fenceBoundariesChanged = false;
     QString m_customBackground;
     QString m_customForeground;
     QString m_customAccent;
     QString m_customCodeBackground;
+    QString m_customCodeForeground;
+    QString m_customCodeFont;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
     QTextCharFormat m_headingFormat;

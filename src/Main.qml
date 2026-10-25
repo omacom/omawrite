@@ -404,6 +404,26 @@ ApplicationWindow {
     Item {
         anchors.fill: parent
 
+        Image {
+            id: backgroundArt
+            objectName: "backgroundImage"
+            anchors.fill: parent
+            source: backend.backgroundImage
+            visible: source.toString() !== ""
+            fillMode: Image.PreserveAspectCrop
+            asynchronous: true
+            smooth: true
+        }
+
+        Rectangle {
+            id: backgroundOverlay
+            objectName: "backgroundOverlay"
+            anchors.fill: parent
+            color: win.pageColor
+            visible: backgroundArt.visible
+            opacity: backend.backgroundOpacity
+        }
+
         Flickable {
             id: editorFlick
             objectName: "editorScroll"
@@ -978,6 +998,8 @@ ApplicationWindow {
                         win.updateSearch(false);
                 }
 
+                onWidthChanged: backend.refreshCodeBlockOverlays()
+
                 Text {
                     anchors.left: parent.left
                     anchors.top: parent.top
@@ -987,6 +1009,70 @@ ApplicationWindow {
                     font.family: editor.font.family
                     font.pixelSize: editor.font.pixelSize
                     font.weight: editor.font.weight
+                }
+
+                Item {
+                    id: codeBlockPanelsOverlay
+                    objectName: "codeBlockPanelsOverlay"
+                    anchors.fill: parent
+                    z: -1
+
+                    Repeater {
+                        model: backend.codeBlockPanels
+
+                        Rectangle {
+                            x: 0
+                            y: modelData.y
+                            width: editor.width
+                            height: modelData.height
+                            color: backend.themeCodeBackground
+                        }
+                    }
+                }
+
+                Item {
+                    id: codeLineNumbersOverlay
+                    objectName: "codeLineNumbersOverlay"
+                    anchors.fill: parent
+                    visible: backend.codeLineNumbers
+                    z: 1
+
+                    Repeater {
+                        model: backend.codeLineNumbers ? backend.codeBlockLines : []
+
+                        Item {
+                            objectName: "codeLineNumberItem"
+                            x: -width - 12
+                            y: modelData.y
+                            width: Math.max(24, backend.codeLineNumberMargin) + (backend.codeLineNumberBackground.length > 0 && backend.codeLineNumberBackground !== "transparent" ? 8 : 0)
+                            height: modelData.height
+
+                            Rectangle {
+                                objectName: "codeLineNumberBackground"
+                                anchors.fill: parent
+                                color: backend.codeLineNumberBackground
+                                visible: backend.codeLineNumberBackground.length > 0 && backend.codeLineNumberBackground !== "transparent"
+                            }
+
+                            Text {
+                                objectName: "codeLineNumberText"
+                                anchors.fill: parent
+                                anchors.rightMargin: backend.codeLineNumberBackground.length > 0 && backend.codeLineNumberBackground !== "transparent" ? 4 : 0
+                                anchors.leftMargin: backend.codeLineNumberBackground.length > 0 && backend.codeLineNumberBackground !== "transparent" ? 4 : 0
+                                text: modelData.number
+                                color: backend.codeLineNumberForeground.length > 0 ? backend.codeLineNumberForeground : win.mutedColor
+                                font.family: backend.codeLineNumberFont
+                                font.pixelSize: backend.codeLineNumberSize > 0 ? win.scaledSize(backend.codeLineNumberSize) : editor.font.pixelSize
+                                font.weight: Font.Normal
+                                renderType: editor.renderType
+                                horizontalAlignment: Text.AlignRight
+                                verticalAlignment: Text.AlignTop
+                                topPadding: backend.codeLineNumberSize > 0
+                                    ? Math.max(0, Math.round((editor.font.pixelSize - font.pixelSize) * 0.4))
+                                    : 0
+                            }
+                        }
+                    }
                 }
 
                 property string hoveredLinkUrl: ""

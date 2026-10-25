@@ -18,8 +18,9 @@
 
 int main(int argc, char *argv[]) {
     // Answered before the application exists, so they need no display.
+    Cli::Options options;
     if (const std::optional<int> exitCode =
-            Cli::handleArguments(argc, argv, QStringLiteral(OMAWRITE_VERSION)))
+            Cli::handleArguments(argc, argv, QStringLiteral(OMAWRITE_VERSION), &options))
         return *exitCode;
 
     // Omarchy asks Qt for GTK 3 dialogs, which run inside this process, and a
@@ -44,7 +45,7 @@ int main(int argc, char *argv[]) {
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
 
-    Backend backend(&app);
+    Backend backend(options.configPath, &app);
     SystemTheme systemTheme(&app);
     backend.setDarkMode(systemTheme.darkMode());
     QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
@@ -90,9 +91,8 @@ int main(int argc, char *argv[]) {
 
     backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
 
-    const QStringList args = app.arguments();
-    if (args.size() > 1)
-        backend.openOrStartFile(QUrl::fromLocalFile(args.at(1)));
+    if (!options.filePath.isEmpty())
+        backend.openOrStartFile(QUrl::fromLocalFile(options.filePath));
 
     return app.exec();
 }

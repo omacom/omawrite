@@ -7,6 +7,7 @@
 #include <QFutureWatcher>
 #include <QString>
 #include <QStringList>
+#include <QTextBlockFormat>
 #include <QTimer>
 #include <QUrl>
 #include <QVariantList>
@@ -31,15 +32,35 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeCodeBackground READ themeCodeBackground NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeCodeForeground READ themeCodeForeground NOTIFY themeColorsChanged)
+    Q_PROPERTY(bool codeLineNumbers READ codeLineNumbers NOTIFY codeLineNumbersChanged)
+    Q_PROPERTY(qreal codeLineNumberMargin READ codeLineNumberMargin NOTIFY codeLineNumbersChanged)
+    Q_PROPERTY(QVariantList codeBlockLines READ codeBlockLines NOTIFY codeBlockLinesChanged)
+    Q_PROPERTY(QString codeLineNumberFont READ codeLineNumberFont NOTIFY codeLineNumbersChanged)
+    Q_PROPERTY(QString codeLineNumberForeground READ codeLineNumberForeground NOTIFY codeLineNumbersChanged)
+    Q_PROPERTY(QString codeLineNumberBackground READ codeLineNumberBackground NOTIFY codeLineNumbersChanged)
+    Q_PROPERTY(qreal codeLineNumberSize READ codeLineNumberSize NOTIFY codeLineNumbersChanged)
     Q_PROPERTY(QString themeSelectionForeground READ themeSelectionForeground NOTIFY themeColorsChanged)
+    Q_PROPERTY(QUrl backgroundImage READ backgroundImage NOTIFY backgroundImageChanged)
+    Q_PROPERTY(qreal backgroundOpacity READ backgroundOpacity NOTIFY backgroundImageChanged)
     Q_PROPERTY(QString editorFont READ editorFont WRITE setEditorFont NOTIFY editorFontChanged)
+    Q_PROPERTY(QString codeFont READ codeFont WRITE setCodeFont NOTIFY codeFontChanged)
+    Q_PROPERTY(QVariantList codeBlockPanels READ codeBlockPanels NOTIFY codeBlockPanelsChanged)
     Q_PROPERTY(QStringList availableFonts READ availableFonts CONSTANT)
 
 public:
     explicit Backend(QObject *parent = nullptr);
+    explicit Backend(const QString &configPath, QObject *parent = nullptr);
     ~Backend() override;
 
     void setParentWindow(QWindow *window);
+    void setConfigPath(const QString &configPath);
+    QString configPath() const { return m_explicitConfigPath; }
+    static QString defaultConfigPath();
+    static QString generateSystemConfigToml(bool systemDarkMode = true);
+    static int generateDefaultConfigFile(bool systemDarkMode = true,
+                                         QString *outputMessage = nullptr);
 
     QUrl fileUrl() const { return m_fileUrl; }
     QString fileName() const;
@@ -57,9 +78,28 @@ public:
     QString themeAccent() const { return m_themeAccent; }
     QString themeSelection() const { return m_themeSelection; }
     QString themeCodeBackground() const { return m_themeCodeBackground; }
+    QString themeCodeForeground() const { return m_themeCodeForeground; }
+    bool codeLineNumbers() const { return m_codeLineNumbers; }
+    qreal codeLineNumberMargin() const;
+    Q_INVOKABLE QVariantList codeBlockLines() const;
+    QString codeLineNumberFont() const {
+        return !m_codeLineNumberFont.isEmpty() ? m_codeLineNumberFont : codeFont();
+    }
+    QString codeLineNumberForeground() const { return m_codeLineNumberForeground; }
+    QString codeLineNumberBackground() const { return m_codeLineNumberBackground; }
+    qreal codeLineNumberSize() const { return m_codeLineNumberSize; }
+    void setCodeLineNumberFont(const QString &family);
+    void setCodeLineNumberForeground(const QString &color);
+    void setCodeLineNumberBackground(const QString &color);
+    void setCodeLineNumberSize(qreal size);
     QString themeSelectionForeground() const { return m_themeSelectionForeground; }
+    QUrl backgroundImage() const { return m_backgroundImage; }
+    qreal backgroundOpacity() const { return m_backgroundOpacity; }
     QString editorFont() const { return m_editorFont; }
     void setEditorFont(const QString &family);
+    QString codeFont() const { return !m_codeFont.isEmpty() ? m_codeFont : m_editorFont; }
+    void setCodeFont(const QString &family);
+    Q_INVOKABLE QVariantList codeBlockPanels() const;
     QStringList availableFonts() const;
     static QString defaultEditorFont();
     static QStringList selectableFontFamilies(const QStringList &families);
@@ -100,6 +140,7 @@ public:
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
     Q_INVOKABLE void documentFontChanged();
+    Q_INVOKABLE void refreshCodeBlockOverlays();
 
 signals:
     void fileUrlChanged();
@@ -109,12 +150,17 @@ signals:
     void darkModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
+    void backgroundImageChanged();
     void editorFontChanged();
     void saveFailed();
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
     void externalChangeDetected(bool deleted, bool locallyModified);
+    void codeLineNumbersChanged();
+    void codeBlockLinesChanged();
+    void codeBlockPanelsChanged();
+    void codeFontChanged();
 
 private:
     friend class OmawriteTest;
@@ -131,7 +177,12 @@ private:
     void setWordCount(int words);
     void refreshWordCount();
     void scheduleWordCount();
-    void applyDocumentTypography();
+    QTextBlockFormat proseBlockFormat() const;
+    QTextBlockFormat codeBlockFormat() const;
+    void connectDocumentLayout();
+    int countCodeBlocks() const;
+    bool fenceBoundariesChanged();
+    void applyDocumentTypography(bool preserveUndo = false);
     void reapplyTypographyToChange();
     void scheduleRecovery();
     void writeRecovery();
@@ -147,6 +198,7 @@ private:
     void unwatchFiles();
     void watchCurrentFile();
     void checkWatchedFile();
+    QString activeConfigPath() const;
     void loadOmarchyTheme();
     void watchOmarchyTheme();
 
@@ -163,6 +215,9 @@ private:
     bool m_formattingTypography = false;
     int m_lastChangePos = 0;
     int m_lastChangeAdded = 0;
+    int m_lastChangeRemoved = 0;
+    bool m_hasCodeBlocks = false;
+    int m_codeBlockCount = 0;
     QTimer m_wordCountTimer;
     // Counting a large document stalls typing, so counts run on a worker
     // thread. A load outdates the count in flight, and its result is dropped.
@@ -187,13 +242,26 @@ private:
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 
+    QString m_explicitConfigPath;
+    QString m_lastConfigFont;
+    QString m_lastConfigCodeFont;
+    QString m_lastConfigZoom;
     QString m_themeBackground;
     QString m_themeForeground;
     QString m_themeAccent;
     QString m_themeSelection;
     QString m_themeCodeBackground;
+    QString m_themeCodeForeground;
+    bool m_codeLineNumbers = false;
+    QString m_codeLineNumberFont;
+    QString m_codeLineNumberForeground;
+    QString m_codeLineNumberBackground;
+    qreal m_codeLineNumberSize = 0.0;
     QString m_themeSelectionForeground;
+    QUrl m_backgroundImage;
+    qreal m_backgroundOpacity = 0.85;
     QString m_editorFont;
+    QString m_codeFont;
     QFileSystemWatcher m_themeWatcher;
     QTimer m_themeReloadTimer;
 };

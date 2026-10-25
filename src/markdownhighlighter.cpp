@@ -19,10 +19,14 @@ MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
 // One setter for the whole theme, so a theme change rehighlights once.
 void MarkdownHighlighter::setTheme(bool darkMode, const QString &background,
                                    const QString &foreground, const QString &accent,
-                                   const QString &codeBackground) {
+                                   const QString &codeBackground,
+                                   const QString &codeForeground,
+                                   const QString &codeFont) {
     if (m_darkMode == darkMode && m_customBackground == background
             && m_customForeground == foreground && m_customAccent == accent
-            && m_customCodeBackground == codeBackground)
+            && m_customCodeBackground == codeBackground
+            && m_customCodeForeground == codeForeground
+            && m_customCodeFont == codeFont)
         return;
 
     m_darkMode = darkMode;
@@ -30,6 +34,17 @@ void MarkdownHighlighter::setTheme(bool darkMode, const QString &background,
     m_customForeground = foreground;
     m_customAccent = accent;
     m_customCodeBackground = codeBackground;
+    m_customCodeForeground = codeForeground;
+    m_customCodeFont = codeFont;
+    rebuildFormats();
+    rehighlightAll();
+}
+
+void MarkdownHighlighter::setCodeFont(const QString &fontFamily) {
+    if (m_customCodeFont == fontFamily)
+        return;
+
+    m_customCodeFont = fontFamily;
     rebuildFormats();
     rehighlightAll();
 }
@@ -121,6 +136,7 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
+    const QColor codeText = !m_customCodeForeground.isEmpty() ? QColor(m_customCodeForeground) : text;
 
     m_markerFormat = QTextCharFormat();
     m_markerFormat.setForeground(marker);
@@ -151,13 +167,16 @@ void MarkdownHighlighter::rebuildFormats() {
     m_italicFormat.setFontItalic(true);
 
     m_codeFormat = QTextCharFormat();
-    m_codeFormat.setForeground(text);
+    m_codeFormat.setForeground(codeText);
+    if (!m_customCodeFont.isEmpty())
+        m_codeFormat.setFontFamilies({m_customCodeFont});
     if (!m_customCodeBackground.isEmpty())
         m_codeFormat.setBackground(QColor(m_customCodeBackground));
 
-    // A fence recedes the way a heading's `#` does, over the panel it opens.
     m_fenceFormat = m_codeFormat;
-    m_fenceFormat.setForeground(marker);
+    m_fenceFormat.setForeground(codeText);
+    if (!m_customCodeFont.isEmpty())
+        m_fenceFormat.setFontFamilies({m_customCodeFont});
 
     m_quoteFormat = QTextCharFormat();
     m_quoteFormat.setForeground(quote);
@@ -180,11 +199,19 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
     // closing one, so no markup runs inside it. The state rides from block to
     // block, and Qt rehighlights the rest of the document when it changes.
     const int previous = previousBlockState();
+    const int oldState = currentBlockState();
+    int newState = Prose;
+
     if (previous >= InsideFence) {
         const int fence = previous - InsideFence;
         const bool closing = closesFence(text, fence / 2 + 3,
                                          fence % 2 ? QLatin1Char('~') : QLatin1Char('`'));
-        setCurrentBlockState(closing ? Prose : previous);
+        newState = closing ? Prose : previous;
+        setCurrentBlockState(newState);
+        if ((oldState != -1 && oldState != newState && (oldState >= InsideFence || newState >= InsideFence))
+                || (oldState == -1 && newState >= InsideFence)) {
+            m_fenceBoundariesChanged = true;
+        }
         setFormat(0, text.length(), closing ? m_fenceFormat : m_codeFormat);
         highlightSearch(text);
         return;
@@ -193,12 +220,21 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
     const int opening = openingFenceLength(text);
     if (opening > 0) {
         const bool tildes = text.trimmed().startsWith(QLatin1Char('~'));
-        setCurrentBlockState(InsideFence + (opening - 3) * 2 + (tildes ? 1 : 0));
+        newState = InsideFence + (opening - 3) * 2 + (tildes ? 1 : 0);
+        setCurrentBlockState(newState);
+        if ((oldState != -1 && oldState != newState && (oldState >= InsideFence || newState >= InsideFence))
+                || (oldState == -1 && newState >= InsideFence)) {
+            m_fenceBoundariesChanged = true;
+        }
         setFormat(0, text.length(), m_fenceFormat);
         highlightSearch(text);
         return;
     }
-    setCurrentBlockState(Prose);
+    newState = Prose;
+    setCurrentBlockState(newState);
+    if (oldState != -1 && oldState != newState && (oldState >= InsideFence || newState >= InsideFence)) {
+        m_fenceBoundariesChanged = true;
+    }
 
     if (!text.isEmpty()) {
         highlightMarkers(text);

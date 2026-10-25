@@ -55,6 +55,8 @@ private slots:
         QCoreApplication::setApplicationVersion(QStringLiteral("1.2.3-test"));
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(m_settingsDirectory.isValid());
+        // Isolate tests from any host XDG_CONFIG_HOME/omawrite/omawrite.toml.
+        qputenv("XDG_CONFIG_HOME", m_settingsDirectory.path().toUtf8());
         QQuickStyle::setStyle(QStringLiteral("Material"));
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
@@ -158,14 +160,16 @@ private slots:
 
     void answersHelpBeforeOpeningAWindow() {
         const QString usage = Cli::usage();
-        QVERIFY(usage.contains(QStringLiteral("omawrite [FILE]")));
+        QVERIFY(usage.contains(QStringLiteral("omawrite [OPTIONS] [FILE]")));
+        QVERIFY(usage.contains(QStringLiteral("-c, --config PATH")));
+        QVERIFY(usage.contains(QStringLiteral("-g, --generate")));
         QVERIFY(usage.contains(QStringLiteral("-h, --help")));
         QVERIFY(usage.contains(QStringLiteral("-v, --version")));
 
         const QString version = QStringLiteral("1.2.3");
-        const auto answer = [&](const QStringList &arguments) {
+        const auto answer = [&](const QStringList &arguments, Cli::Options *options = nullptr) {
             return Cli::handleArguments(QStringList{QStringLiteral("omawrite")} + arguments,
-                                        version);
+                                        version, options);
         };
         QCOMPARE(answer({QStringLiteral("--help")}), std::optional<int>(0));
         QCOMPARE(answer({QStringLiteral("-h")}), std::optional<int>(0));
@@ -313,6 +317,121 @@ private slots:
         QMetaObject::invokeMethod(editor, "paste");
         QCOMPARE(editor->property("text").toString(), QStringLiteral("X\nY\ncc"));
         QVERIFY(allLinesSpaced());
+    }
+
+    void preservesUndoHistoryAcrossLiveFontZoomAndThemeChanges() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        const auto restoreSettings = qScopeGuard([] {
+            QSettings().remove(QStringLiteral("text/zoom"));
+            QSettings().remove(QStringLiteral("editor/font"));
+        });
+
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const QString customConfig = scratch.filePath(QStringLiteral("omawrite.toml"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "background = \"#141d17\"\n"
+                  "foreground = \"#dce7e1\"\n"
+                  "code_background = \"#1b2720\"\n"
+                  "font = \"IBM Plex Mono\"\n"
+                  "zoom = 1.0\n");
+
+        Backend backend(customConfig);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        auto *quickDocument = qobject_cast<QQuickTextDocument *>(
+            editor->property("textDocument").value<QObject *>());
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        QVERIFY(document);
+
+        // Edit the document
+        editor->setProperty("text", QStringLiteral("hello world"));
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 0), Q_ARG(int, 5));
+        QMetaObject::invokeMethod(editor, "wrapSelection", Q_ARG(QVariant, QStringLiteral("**")));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("**hello** world"));
+        QVERIFY(document->isUndoAvailable());
+
+        // 1. Changing editor font live preserves undo history
+        backend.setEditorFont(QStringLiteral("DejaVu Sans"));
+        backend.documentFontChanged();
+        QVERIFY(document->isUndoAvailable());
+
+        // 2. Changing code font live preserves undo history
+        backend.setCodeFont(QStringLiteral("DejaVu Sans Mono"));
+        QVERIFY(document->isUndoAvailable());
+
+        // 3. Changing text zoom live preserves undo history
+        backend.setTextZoom(1.25);
+        QVERIFY(document->isUndoAvailable());
+
+        // 4. Live reload of config file (theme, colors, zoom, font) preserves undo history
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "background = \"#1a202c\"\n"
+                  "foreground = \"#edf2f7\"\n"
+                  "code_background = \"#2d3748\"\n"
+                  "font = \"DejaVu Sans\"\n"
+                  "code_font = \"DejaVu Sans Mono\"\n"
+                  "zoom = 1.25\n");
+        backend.loadOmarchyTheme();
+        QVERIFY(document->isUndoAvailable());
+
+        // The earlier edit can still be undone and redone cleanly
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("hello world"));
+        QVERIFY(document->isRedoAvailable());
+        QMetaObject::invokeMethod(editor, "redo");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("**hello** world"));
+
+        // Redo history is also preserved when live updates change code-block formatting on a document with code blocks
+        editor->setProperty("text", QStringLiteral(
+            "Prose start\n"
+            "```js\n"
+            "const x = 1;\n"
+            "```\n"
+            "Prose end\n"));
+        QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 0), Q_ARG(int, 5));
+        QMetaObject::invokeMethod(editor, "wrapSelection", Q_ARG(QVariant, QStringLiteral("**")));
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("**Prose**")));
+        QVERIFY(document->isUndoAvailable());
+
+        // Undo leaves redo available
+        QMetaObject::invokeMethod(editor, "undo");
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("Prose")));
+        QVERIFY(document->isRedoAvailable());
+
+        // Live update that changes code-block formatting must preserve redo availability
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "background = \"#112233\"\n"
+                  "foreground = \"#aabbcc\"\n"
+                  "code_background = \"#445566\"\n"
+                  "code_foreground = \"#ff8800\"\n"
+                  "code_font = \"DejaVu Sans Mono\"\n");
+        backend.loadOmarchyTheme();
+        QVERIFY(document->isRedoAvailable());
+
+        // Redo succeeds after the code-block formatting change
+        QMetaObject::invokeMethod(editor, "redo");
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("**Prose**")));
+        QVERIFY(document->isUndoAvailable());
+        QMetaObject::invokeMethod(editor, "undo");
+        QVERIFY(editor->property("text").toString().startsWith(QStringLiteral("Prose")));
     }
 
     void searchFollowsEditsWithoutTakingTheCaret() {
@@ -1634,6 +1753,24 @@ private slots:
         QCOMPARE(Backend::tomlValue(QStringLiteral("\"#1a1b26")), QStringLiteral("\"#1a1b26"));
         QCOMPARE(Backend::tomlValue(QStringLiteral("\"\"")), QString());
         QCOMPARE(Backend::tomlValue(QString()), QString());
+
+        // Escaped quotes and characters in basic strings
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"wall\\\"paper.png\"")),
+                 QStringLiteral("wall\"paper.png"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"wall\\\"paper.png\"   # inline comment")),
+                 QStringLiteral("wall\"paper.png"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"path\\\\to\\\\image.png\"")),
+                 QStringLiteral("path\\to\\image.png"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"line1\\nline2\\ttab\"")),
+                 QStringLiteral("line1\nline2\ttab"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("\"\\u0041\\u0042\"")),
+                 QStringLiteral("AB"));
+
+        // Single-quoted literal strings do not decode escapes
+        QCOMPARE(Backend::tomlValue(QStringLiteral("'wall\\\"paper.png'")),
+                 QStringLiteral("wall\\\"paper.png"));
+        QCOMPARE(Backend::tomlValue(QStringLiteral("'wall\"paper.png'")),
+                 QStringLiteral("wall\"paper.png"));
     }
 
     void keepsDefaultsForColorsItCannotParse() {
@@ -3356,6 +3493,625 @@ private slots:
         QObject *keep = dialog->findChild<QObject *>(QStringLiteral("keepButton"));
         QVERIFY(keep);
         QTRY_VERIFY(keep->property("activeFocus").toBool());
+    }
+
+    void parsesConfigFlagAndFileFromCommandLine() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString configFile = dir.filePath(QStringLiteral("custom.toml"));
+        writeFile(configFile, "mode = \"dark\"\n");
+
+        Cli::Options options;
+        QString error;
+        QCOMPARE(Cli::parseOptions(
+                     {QStringLiteral("omawrite"), QStringLiteral("-c"), configFile,
+                      QStringLiteral("notes.md")},
+                     &options, &error),
+                 std::nullopt);
+        QCOMPARE(options.configPath, QFileInfo(configFile).absoluteFilePath());
+        QCOMPARE(options.filePath, QStringLiteral("notes.md"));
+
+        options = {};
+        QCOMPARE(Cli::parseOptions(
+                     {QStringLiteral("omawrite"), QStringLiteral("notes.md"),
+                      QStringLiteral("--config=") + configFile},
+                     &options, &error),
+                 std::nullopt);
+        QCOMPARE(options.configPath, QFileInfo(configFile).absoluteFilePath());
+        QCOMPARE(options.filePath, QStringLiteral("notes.md"));
+
+        // Missing path or missing file exits non-zero before opening a window.
+        QCOMPARE(Cli::parseOptions({QStringLiteral("omawrite"), QStringLiteral("-c")},
+                                   &options, &error),
+                 std::optional<int>(1));
+        QVERIFY(!error.isEmpty());
+
+        QCOMPARE(Cli::parseOptions(
+                     {QStringLiteral("omawrite"), QStringLiteral("--config"),
+                      dir.filePath(QStringLiteral("missing.toml"))},
+                     &options, &error),
+                 std::optional<int>(1));
+        QVERIFY(error.contains(QStringLiteral("missing.toml")));
+    }
+
+    void loadsXdgAndExplicitConfigFilesWithFallbackToSystemTheme() {
+        ScopedTheme systemTheme(
+            "mode = \"dark\"\n"
+            "background = \"#111111\"\n"
+            "foreground = \"#eeeeee\"\n"
+            "accent = \"#224466\"\n");
+        QVERIFY(systemTheme.ok);
+
+        QTemporaryDir xdgDir;
+        QVERIFY(xdgDir.isValid());
+        const QByteArray oldXdg = qgetenv("XDG_CONFIG_HOME");
+        const auto restoreXdg = qScopeGuard([&] { qputenv("XDG_CONFIG_HOME", oldXdg); });
+        qputenv("XDG_CONFIG_HOME", xdgDir.path().toUtf8());
+
+        // Without any omawrite.toml or -c flag, the system theme is obeyed.
+        {
+            Backend backend;
+            QCOMPARE(backend.themeBackground(), QStringLiteral("#111111"));
+            QCOMPARE(backend.themeAccent(), QStringLiteral("#224466"));
+            QVERIFY(backend.darkMode());
+        }
+
+        // Creating $XDG_CONFIG_HOME/omawrite/omawrite.toml overrides the system theme.
+        const QString xdgConfigDir = xdgDir.filePath(QStringLiteral("omawrite"));
+        QVERIFY(QDir().mkpath(xdgConfigDir));
+        const QString xdgConfigPath = QDir(xdgConfigDir).filePath(QStringLiteral("omawrite.toml"));
+        const QString bgImageFile = xdgDir.filePath(QStringLiteral("bg.png"));
+        writeFile(bgImageFile, "fake-image");
+
+        writeFile(xdgConfigPath,
+                  "[theme]\n"
+                  "mode = \"light\"\n"
+                  "background = \"#fafafa\"\n"
+                  "foreground = \"#202020\"\n"
+                  "accent = \"#aa3355\"\n"
+                  "code_background = \"#eaeaea\"\n"
+                  "background_image = \"../bg.png\"\n"
+                  "background_opacity = 0.72\n"
+                  "\n"
+                  "[editor]\n"
+                  "zoom = 1.25\n");
+
+        {
+            Backend backend;
+            QVERIFY(!backend.darkMode());
+            QCOMPARE(backend.themeBackground(), QStringLiteral("#fafafa"));
+            QCOMPARE(backend.themeForeground(), QStringLiteral("#202020"));
+            QCOMPARE(backend.themeAccent(), QStringLiteral("#aa3355"));
+            QCOMPARE(backend.themeCodeBackground(), QStringLiteral("#eaeaea"));
+            QCOMPARE(backend.backgroundImage(),
+                     QUrl::fromLocalFile(QFileInfo(bgImageFile).absoluteFilePath()));
+            QCOMPARE(backend.backgroundOpacity(), 0.72);
+            QCOMPARE(backend.textScale(), 1.25);
+        }
+
+        // An explicit -c/--config path takes precedence over $XDG_CONFIG_HOME.
+        const QString customPath = xdgDir.filePath(QStringLiteral("custom.toml"));
+        const QString escapedBgImage = xdgDir.filePath(QStringLiteral("wall\"paper.png"));
+        writeFile(escapedBgImage, "wallpaper-content");
+        writeFile(customPath,
+                  "mode = \"dark\"\n"
+                  "background = \"#223344\"\n"
+                  "foreground = \"#ddeeff\"\n"
+                  "accent = \"#55aaff\"\n"
+                  "background_image = \"wall\\\"paper.png\"\n");
+
+        Backend explicitBackend(customPath);
+        QVERIFY(explicitBackend.darkMode());
+        QCOMPARE(explicitBackend.themeBackground(), QStringLiteral("#223344"));
+        QCOMPARE(explicitBackend.themeForeground(), QStringLiteral("#ddeeff"));
+        QCOMPARE(explicitBackend.themeAccent(), QStringLiteral("#55aaff"));
+        QCOMPARE(explicitBackend.backgroundImage(),
+                 QUrl::fromLocalFile(QFileInfo(escapedBgImage).absoluteFilePath()));
+
+        // Live edits to the explicit config reload automatically.
+        QSignalSpy colorSpy(&explicitBackend, &Backend::themeColorsChanged);
+        writeFile(customPath,
+                  "mode = \"dark\"\n"
+                  "background = \"#334455\"\n"
+                  "foreground = \"#ddeeff\"\n"
+                  "accent = \"#55aaff\"\n");
+        QTRY_VERIFY(colorSpy.count() >= 1);
+        QCOMPARE(explicitBackend.themeBackground(), QStringLiteral("#334455"));
+
+        // Reset zoom setting so subsequent tests start at 1.0.
+        QSettings().remove(QStringLiteral("text/zoom"));
+    }
+
+    void generatesDefaultConfigFromSystemSettingsWithoutOverwriting() {
+        ScopedTheme systemTheme(
+            "mode = \"dark\"\n"
+            "background = \"#16242d\"\n"
+            "foreground = \"#d6e2ee\"\n"
+            "accent = \"#8bc9eb\"\n"
+            "selection = \"#243d56\"\n"
+            "bright_foreground = \"#f2fcff\"\n"
+            "lighter_background = \"#1b2d40\"\n");
+        QVERIFY(systemTheme.ok);
+
+        QTemporaryDir xdgDir;
+        QVERIFY(xdgDir.isValid());
+        const QByteArray oldXdg = qgetenv("XDG_CONFIG_HOME");
+        const auto restoreXdg = qScopeGuard([&] { qputenv("XDG_CONFIG_HOME", oldXdg); });
+        qputenv("XDG_CONFIG_HOME", xdgDir.path().toUtf8());
+
+        QSettings().setValue(QStringLiteral("text/zoom"), 1.25);
+        const auto restoreSettings = qScopeGuard([] {
+            QSettings().remove(QStringLiteral("text/zoom"));
+        });
+
+        const QString expectedPath = QFileInfo(Backend::defaultConfigPath()).absoluteFilePath();
+        QString message;
+        QCOMPARE(Backend::generateDefaultConfigFile(true, &message), 0);
+        QVERIFY(message.contains(expectedPath));
+        QVERIFY(QFileInfo::exists(expectedPath));
+
+        const QString generated = QString::fromUtf8(readFile(expectedPath));
+        QVERIFY(generated.contains(QStringLiteral("mode = \"dark\"")));
+        QVERIFY(generated.contains(QStringLiteral("background = \"#16242d\"")));
+        QVERIFY(generated.contains(QStringLiteral("foreground = \"#d6e2ee\"")));
+        QVERIFY(generated.contains(QStringLiteral("accent = \"#8bc9eb\"")));
+        QVERIFY(generated.contains(QStringLiteral("selection = \"#243d56\"")));
+        QVERIFY(generated.contains(QStringLiteral("selection_foreground = \"#f2fcff\"")));
+        QVERIFY(generated.contains(QStringLiteral("code_background = \"#1b2d40\"")));
+        QVERIFY(generated.contains(QStringLiteral("font = \"IBM Plex Mono\"")));
+        QVERIFY(generated.contains(QStringLiteral("zoom = 1.25")));
+
+        // Calling `-g` / `--generate` again refuses to overwrite an existing file.
+        writeFile(expectedPath, "# custom user config\n");
+        QString secondMessage;
+        QCOMPARE(Backend::generateDefaultConfigFile(true, &secondMessage), 1);
+        QVERIFY(secondMessage.contains(expectedPath));
+        QCOMPARE(readFile(expectedPath), QByteArray("# custom user config\n"));
+
+        // Cli::handleArguments also handles -g / --generate before starting the app.
+        QCOMPARE(Cli::handleArguments(
+                     {QStringLiteral("omawrite"), QStringLiteral("-g")},
+                     QStringLiteral("1.2.3")),
+                 std::optional<int>(1));
+        QVERIFY(QFile::remove(expectedPath));
+        QCOMPARE(Cli::handleArguments(
+                     {QStringLiteral("omawrite"), QStringLiteral("--generate")},
+                     QStringLiteral("1.2.3")),
+                 std::optional<int>(0));
+        QVERIFY(QFileInfo::exists(expectedPath));
+    }
+
+    void codeBlocksHaveSingleSpacingAndConfigurableColorsAndLineNumbers() {
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const QString customConfig = scratch.filePath(QStringLiteral("code_theme.toml"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "background = \"#111111\"\n"
+                  "foreground = \"#eeeeee\"\n"
+                  "code_background = \"#2a3b4c\"\n"
+                  "code_foreground = \"#33ff88\"\n"
+                  "code_font = \"IBM Plex Mono\"\n"
+                  "code_line_numbers = true\n"
+                  "code_line_numbers_font = \"DejaVu Sans Mono\"\n"
+                  "code_line_numbers_foreground = \"#ffaa00\"\n"
+                  "code_line_numbers_background = \"#182028\"\n"
+                  "code_line_numbers_size = 14\n");
+
+        Backend backend(customConfig);
+        QCOMPARE(backend.themeCodeBackground(), QStringLiteral("#2a3b4c"));
+        QCOMPARE(backend.themeCodeForeground(), QStringLiteral("#33ff88"));
+        QCOMPARE(backend.codeFont(), QStringLiteral("IBM Plex Mono"));
+        QCOMPARE(backend.codeLineNumbers(), true);
+        QCOMPARE(backend.codeLineNumberFont(), QStringLiteral("DejaVu Sans Mono"));
+        QCOMPARE(backend.codeLineNumberForeground(), QStringLiteral("#ffaa00"));
+        QCOMPARE(backend.codeLineNumberBackground(), QStringLiteral("#182028"));
+        QCOMPARE(backend.codeLineNumberSize(), 14.0);
+        QVERIFY(backend.codeLineNumberMargin() > 0.0);
+
+        QTextDocument document;
+        document.setPlainText(QStringLiteral(
+            "Prose line\n"
+            "\n"
+            "```js\n"
+            "const a = 1;\n"
+            "const b = 2;\n"
+            "return a + b;\n"
+            "```\n"
+            "\n"
+            "Closing prose\n"));
+
+        backend.m_document = &document;
+        auto *testHighlighter = new MarkdownHighlighter(&document);
+        backend.m_highlighter = testHighlighter;
+        testHighlighter->setTheme(true, backend.themeBackground(), backend.themeForeground(),
+                                 backend.themeAccent(), backend.themeCodeBackground(),
+                                 backend.themeCodeForeground(), backend.codeFont());
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+
+        // Prose block
+        QCOMPARE(document.findBlockByNumber(0).blockFormat().lineHeight(), 140.0);
+        QCOMPARE(document.findBlockByNumber(0).blockFormat().background().style(), Qt::NoBrush);
+        QCOMPARE(document.findBlockByNumber(0).blockFormat().leftMargin(), 0.0);
+
+        // Code blocks: single spaced (100%), background handled by panel overlay, text starts at normal margin (0.0)
+        for (int i = 2; i <= 6; ++i) {
+            const QTextBlock block = document.findBlockByNumber(i);
+            QCOMPARE(block.blockFormat().lineHeight(), 100.0);
+            QCOMPARE(block.blockFormat().background().style(), Qt::NoBrush);
+            QCOMPARE(block.blockFormat().leftMargin(), 0.0);
+        }
+
+        // Code block panels overlay covers the entire code block
+        const QVariantList panels = backend.codeBlockPanels();
+        QCOMPARE(panels.size(), 1);
+        QVERIFY(panels.at(0).toMap().value(QStringLiteral("height")).toDouble() > 0.0);
+
+        // Closing prose
+        QCOMPARE(document.findBlockByNumber(8).blockFormat().lineHeight(), 140.0);
+        QCOMPARE(document.findBlockByNumber(8).blockFormat().background().style(), Qt::NoBrush);
+        QCOMPARE(document.findBlockByNumber(8).blockFormat().leftMargin(), 0.0);
+
+        // Code lines numbers
+        const QVariantList lines = backend.codeBlockLines();
+        QCOMPARE(lines.size(), 3);
+        QCOMPARE(lines.at(0).toMap().value(QStringLiteral("number")).toInt(), 1);
+        QCOMPARE(lines.at(1).toMap().value(QStringLiteral("number")).toInt(), 2);
+        QCOMPARE(lines.at(2).toMap().value(QStringLiteral("number")).toInt(), 3);
+
+        // Character formats: opening fence, code lines, closing fence all share code_foreground and code_font
+        const auto formatsAt = [&document](int blockNumber) {
+            return document.findBlockByNumber(blockNumber).layout()->formats();
+        };
+        const QColor expectedCodeColor(QStringLiteral("#33ff88"));
+        QCOMPARE(formatsAt(2).constFirst().format.foreground().color(), expectedCodeColor);
+        QCOMPARE(formatsAt(3).constFirst().format.foreground().color(), expectedCodeColor);
+        QCOMPARE(formatsAt(4).constFirst().format.foreground().color(), expectedCodeColor);
+        QCOMPARE(formatsAt(5).constFirst().format.foreground().color(), expectedCodeColor);
+        QCOMPARE(formatsAt(6).constFirst().format.foreground().color(), expectedCodeColor);
+        QCOMPARE(formatsAt(3).constFirst().format.fontFamilies().toStringList(),
+                 QStringList{QStringLiteral("IBM Plex Mono")});
+
+        // A single line with three tick marks and no other text creates a panel for that entire line
+        document.setPlainText(QStringLiteral("```\n"));
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+        const QVariantList singleFencePanels = backend.codeBlockPanels();
+        QCOMPARE(singleFencePanels.size(), 1);
+        QVERIFY(singleFencePanels.at(0).toMap().value(QStringLiteral("height")).toDouble() > 0.0);
+
+        // Resetting code_font defaults back to main editorFont
+        document.setPlainText(QStringLiteral(
+            "Prose line\n"
+            "\n"
+            "```js\n"
+            "const a = 1;\n"
+            "const b = 2;\n"
+            "return a + b;\n"
+            "```\n"
+            "\n"
+            "Closing prose\n"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_background = \"#2a3b4c\"\n"
+                  "code_foreground = \"#33ff88\"\n"
+                  "code_line_numbers = false\n");
+        backend.loadOmarchyTheme();
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+        QCOMPARE(backend.codeFont(), backend.editorFont());
+        QCOMPARE(backend.codeLineNumbers(), false);
+        QCOMPARE(backend.codeLineNumberFont(), backend.editorFont());
+        QCOMPARE(backend.codeLineNumberForeground().isEmpty(), true);
+        QCOMPARE(backend.codeLineNumberBackground().isEmpty(), true);
+        QCOMPARE(backend.codeLineNumberSize(), 0.0);
+        QCOMPARE(backend.codeBlockLines().isEmpty(), true);
+        for (int i = 2; i <= 6; ++i) {
+            const QTextBlock block = document.findBlockByNumber(i);
+            QCOMPARE(block.blockFormat().lineHeight(), 100.0);
+            QCOMPARE(block.blockFormat().leftMargin(), 0.0);
+        }
+
+        // Setting only code_line_numbers_foreground implicitly enables line numbers
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_line_numbers_foreground = \"#990000\"\n");
+        backend.loadOmarchyTheme();
+        QCOMPARE(backend.codeLineNumbers(), true);
+        QCOMPARE(backend.codeLineNumberForeground(), QStringLiteral("#990000"));
+        QCOMPARE(backend.codeLineNumberFont(), backend.editorFont());
+        QCOMPARE(backend.codeLineNumberBackground().isEmpty(), true);
+        QCOMPARE(backend.codeLineNumberSize(), 0.0);
+
+        // Setting code_line_numbers = false explicitly overrides implicit enable
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_line_numbers = false\n"
+                  "code_line_numbers_size = 16\n");
+        backend.loadOmarchyTheme();
+        QCOMPARE(backend.codeLineNumbers(), false);
+        QCOMPARE(backend.codeLineNumberSize(), 16.0);
+
+        backend.m_document = nullptr;
+        backend.m_highlighter = nullptr;
+        delete testHighlighter;
+
+        // Test in Main.qml interface
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        if (!mainQmlPath.isEmpty()) {
+            QQmlEngine engine;
+            engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+            if (component.isReady()) {
+                QScopedPointer<QObject> object(component.create());
+                auto *window = qobject_cast<QQuickWindow *>(object.data());
+                if (window) {
+                    QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+                    QObject *overlay = window->findChild<QObject *>(QStringLiteral("codeLineNumbersOverlay"));
+                    QVERIFY(editor);
+                    QVERIFY(overlay);
+                    QCOMPARE(overlay->property("visible").toBool(), false);
+                }
+            }
+        }
+    }
+
+    void codeBlockOverlaysRefreshWhenTextWrappingChanges() {
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const QString customConfig = scratch.filePath(QStringLiteral("wrap_test.toml"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_line_numbers = true\n");
+
+        Backend backend(customConfig);
+        QTextDocument document;
+        document.setTextWidth(800);
+        document.setPlainText(QStringLiteral(
+            "This is a long line of intro text that will wrap onto multiple visual lines when document width is small.\n"
+            "\n"
+            "```\n"
+            "const x = 1;\n"
+            "const y = 2;\n"
+            "```\n"));
+
+        backend.m_document = &document;
+        auto *testHighlighter = new MarkdownHighlighter(&document);
+        backend.m_highlighter = testHighlighter;
+        testHighlighter->setTheme(true, backend.themeBackground(), backend.themeForeground(),
+                                 backend.themeAccent(), backend.themeCodeBackground(),
+                                 backend.themeCodeForeground(), backend.codeFont());
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+
+        const QVariantList initialPanels = backend.codeBlockPanels();
+        const QVariantList initialLines = backend.codeBlockLines();
+        QCOMPARE(initialPanels.size(), 1);
+        QCOMPARE(initialLines.size(), 2);
+        const qreal initialPanelY = initialPanels.at(0).toMap().value(QStringLiteral("y")).toReal();
+        const qreal initialLine1Y = initialLines.at(0).toMap().value(QStringLiteral("y")).toReal();
+
+        // Spy on signals
+        QSignalSpy panelsSpy(&backend, &Backend::codeBlockPanelsChanged);
+        QSignalSpy linesSpy(&backend, &Backend::codeBlockLinesChanged);
+
+        // Narrowing the document causes the intro line to wrap, moving the code block down
+        document.setTextWidth(150);
+
+        QVERIFY(panelsSpy.count() > 0);
+        QVERIFY(linesSpy.count() > 0);
+
+        const QVariantList wrappedPanels = backend.codeBlockPanels();
+        const QVariantList wrappedLines = backend.codeBlockLines();
+        QCOMPARE(wrappedPanels.size(), 1);
+        QCOMPARE(wrappedLines.size(), 2);
+        const qreal wrappedPanelY = wrappedPanels.at(0).toMap().value(QStringLiteral("y")).toReal();
+        const qreal wrappedLine1Y = wrappedLines.at(0).toMap().value(QStringLiteral("y")).toReal();
+
+        // The code block moved down due to text wrapping, and models refreshed to match
+        QVERIFY(wrappedPanelY > initialPanelY);
+        QVERIFY(wrappedLine1Y > initialLine1Y);
+
+        backend.m_document = nullptr;
+        backend.m_highlighter = nullptr;
+        delete testHighlighter;
+    }
+
+    void ordinaryEditsDoNotRefreshOverlaysWhileFenceChangesExpandFormatting() {
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const QString customConfig = scratch.filePath(QStringLiteral("ordinary_edits.toml"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_line_numbers = true\n");
+
+        Backend backend(customConfig);
+        QTextDocument document;
+        document.setTextWidth(800);
+        document.setPlainText(QStringLiteral(
+            "Intro paragraph.\n"
+            "\n"
+            "```js\n"
+            "const x = 1;\n"
+            "```\n"
+            "\n"
+            "Outro paragraph.\n"));
+
+        backend.m_document = &document;
+        auto *testHighlighter = new MarkdownHighlighter(&document);
+        backend.m_highlighter = testHighlighter;
+        testHighlighter->setTheme(true, backend.themeBackground(), backend.themeForeground(),
+                                 backend.themeAccent(), backend.themeCodeBackground(),
+                                 backend.themeCodeForeground(), backend.codeFont());
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+
+        QObject::connect(&document, &QTextDocument::contentsChange, &backend,
+                         [&backend](int pos, int removed, int added) {
+                             if (backend.m_formattingTypography || backend.m_loading)
+                                 return;
+                             backend.m_lastChangePos = pos;
+                             backend.m_lastChangeAdded = added;
+                             backend.m_lastChangeRemoved = removed;
+                         });
+
+        QCOMPARE(backend.codeBlockPanels().size(), 1);
+        QCOMPARE(backend.codeBlockLines().size(), 1);
+
+        QSignalSpy panelsSpy(&backend, &Backend::codeBlockPanelsChanged);
+        QSignalSpy linesSpy(&backend, &Backend::codeBlockLinesChanged);
+
+        // 1. Ordinary edit in prose paragraph: overlays must NOT refresh
+        QTextCursor cursor(&document);
+        cursor.setPosition(5);
+        cursor.insertText(QStringLiteral("added "));
+        backend.editorTextChanged();
+
+        QCOMPARE(panelsSpy.count(), 0);
+        QCOMPARE(linesSpy.count(), 0);
+        QCOMPARE(document.firstBlock().blockFormat().lineHeight(), 140.0);
+
+        // 2. Edit inside code block: line numbers and panels update to keep line numbers in sync
+        const QTextBlock codeLineBlock = document.findBlockByNumber(3);
+        cursor.setPosition(codeLineBlock.position() + 5);
+        cursor.insertText(QStringLiteral("/* note */ "));
+        backend.editorTextChanged();
+
+        QVERIFY(linesSpy.count() > 0);
+        QCOMPARE(codeLineBlock.blockFormat().lineHeight(), 100.0);
+
+        // 3. Changing fence boundaries by creating a second code block: overlays MUST refresh
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral("\n```\nlet z = 99;\n```\n"));
+        backend.editorTextChanged();
+
+        QVERIFY(panelsSpy.count() > 0);
+        QCOMPARE(backend.codeBlockPanels().size(), 2);
+        QCOMPARE(backend.codeBlockLines().size(), 2);
+
+        backend.m_document = nullptr;
+        backend.m_highlighter = nullptr;
+        delete testHighlighter;
+    }
+
+    void deletedCodeLinesUpdateLineNumbersEvenWhenDocumentHeightDoesNotChange() {
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const QString customConfig = scratch.filePath(QStringLiteral("delete_line.toml"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_line_numbers = true\n");
+
+        Backend backend(customConfig);
+        QTextDocument document;
+        document.setTextWidth(150);
+        document.setPlainText(QStringLiteral(
+            "```\n"
+            "const a = 1;\n"
+            "const b = 2;\n"
+            "```\n"));
+
+        backend.m_document = &document;
+        auto *testHighlighter = new MarkdownHighlighter(&document);
+        backend.m_highlighter = testHighlighter;
+        testHighlighter->setTheme(true, backend.themeBackground(), backend.themeForeground(),
+                                 backend.themeAccent(), backend.themeCodeBackground(),
+                                 backend.themeCodeForeground(), backend.codeFont());
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+
+        QObject::connect(&document, &QTextDocument::contentsChange, &backend,
+                         [&backend](int pos, int removed, int added) {
+                             if (backend.m_formattingTypography || backend.m_loading)
+                                 return;
+                             backend.m_lastChangePos = pos;
+                             backend.m_lastChangeAdded = added;
+                             backend.m_lastChangeRemoved = removed;
+                         });
+
+        QCOMPARE(backend.codeBlockLines().size(), 2);
+        const qreal initialHeight = document.size().height();
+
+        QSignalSpy linesSpy(&backend, &Backend::codeBlockLinesChanged);
+
+        // Delete the newline between the two code lines
+        const QTextBlock line2Block = document.findBlockByNumber(2);
+        QTextCursor cursor(&document);
+        cursor.setPosition(line2Block.position());
+        cursor.deletePreviousChar(); // deletes '\n'
+        backend.editorTextChanged();
+
+        // Merged line wrapped onto two rows, so document height remained unchanged
+        QCOMPARE(document.size().height(), initialHeight);
+
+        // Line numbers model refreshed and drops the deleted line's number
+        QVERIFY(linesSpy.count() > 0);
+        QCOMPARE(backend.codeBlockLines().size(), 1);
+        QCOMPARE(backend.codeBlockLines().at(0).toMap().value(QStringLiteral("number")).toInt(), 1);
+
+        backend.m_document = nullptr;
+        backend.m_highlighter = nullptr;
+        delete testHighlighter;
+    }
+
+    void changingCodeBackgroundLiveUpdatesWithoutLeavingOldParagraphColorsOrClearingUndo() {
+        QTemporaryDir scratch;
+        QVERIFY(scratch.isValid());
+        const QString customConfig = scratch.filePath(QStringLiteral("code_bg_test.toml"));
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_background = \"#112233\"\n");
+
+        Backend backend(customConfig);
+        QTextDocument document;
+        document.setPlainText(QStringLiteral(
+            "Intro\n"
+            "```\n"
+            "let x = 1;\n"
+            "```\n"
+            "Outro\n"));
+
+        backend.m_document = &document;
+        auto *testHighlighter = new MarkdownHighlighter(&document);
+        backend.m_highlighter = testHighlighter;
+        testHighlighter->setTheme(true, backend.themeBackground(), backend.themeForeground(),
+                                 backend.themeAccent(), backend.themeCodeBackground(),
+                                 backend.themeCodeForeground(), backend.codeFont());
+        testHighlighter->rehighlight();
+        backend.applyDocumentTypography();
+
+        // Code block paragraph background is Qt::NoBrush (rendered via panel overlay and highlighter)
+        const QTextBlock codeBlock = document.findBlockByNumber(2);
+        QCOMPARE(codeBlock.blockFormat().background().style(), Qt::NoBrush);
+        QCOMPARE(backend.themeCodeBackground(), QStringLiteral("#112233"));
+
+        // Edit document so undo history exists
+        QTextCursor cursor(&document);
+        cursor.setPosition(0);
+        cursor.insertText(QStringLiteral("Edited "));
+        QVERIFY(document.isUndoAvailable());
+
+        // Live update changing code_background
+        writeFile(customConfig,
+                  "mode = \"dark\"\n"
+                  "code_background = \"#445566\"\n");
+        backend.loadOmarchyTheme();
+
+        // Highlighter and panel get the new color
+        QCOMPARE(backend.themeCodeBackground(), QStringLiteral("#445566"));
+
+        // Paragraph does not paint any old color
+        QCOMPARE(codeBlock.blockFormat().background().style(), Qt::NoBrush);
+
+        // Undo history is preserved
+        QVERIFY(document.isUndoAvailable());
+        document.undo();
+        QCOMPARE(document.toPlainText().startsWith(QStringLiteral("Intro")), true);
+
+        backend.m_document = nullptr;
+        backend.m_highlighter = nullptr;
+        delete testHighlighter;
     }
 
 private:
