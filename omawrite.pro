@@ -18,3 +18,5 @@ SOURCES += \
     src/systemtheme.cpp
 
 RESOURCES += src/resources.qrc
+
+LIBS += -lEGL

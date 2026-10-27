@@ -9,6 +9,11 @@
 #include <QUrl>
 #include <QWindow>
 #include <QFile>
+#include <QQuickWindow>
+#include <QThreadPool>
+
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 
 #include "backend.h"
 #include "cli.h"
@@ -30,6 +35,19 @@ int main(int argc, char *argv[]) {
         qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
 
     QApplication app(argc, argv);
+
+    // Qt loads the GPU driver only once the window exists, and that takes
+    // tens of milliseconds. Loading it here overlaps it with building the
+    // interface; Qt then asks for the same display and finds it ready.
+    auto *wayland = app.nativeInterface<QNativeInterface::QWaylandApplication>();
+    if (wayland && QQuickWindow::graphicsApi() == QSGRendererInterface::OpenGL) {
+        wl_display *display = wayland->display();
+        QThreadPool::globalInstance()->start([display] {
+            eglInitialize(eglGetPlatformDisplay(EGL_PLATFORM_WAYLAND_EXT, display, nullptr),
+                          nullptr, nullptr);
+        });
+    }
+
     app.setApplicationName(QStringLiteral("omawrite"));
     app.setApplicationVersion(QStringLiteral(OMAWRITE_VERSION));
     app.setDesktopFileName(QStringLiteral("omawrite"));
