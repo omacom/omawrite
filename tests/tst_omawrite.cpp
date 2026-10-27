@@ -315,6 +315,48 @@ private slots:
         QVERIFY(allLinesSpaced());
     }
 
+    void opensFilesWithLineHeightAndNoUndo() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("notes.md"));
+        const QByteArray contents("# Title\n\nSome **bold** text\n\n```\ncode\n```\n");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(contents), qint64(contents.size()));
+        file.close();
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QTextDocument *document = qobject_cast<QQuickTextDocument *>(
+            editor->property("textDocument").value<QObject *>())->textDocument();
+
+        // Typing first leaves something to undo, which opening must drop.
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTest::keyClick(window, Qt::Key_D);
+        QVERIFY(document->isUndoAvailable());
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(editor->property("text").toString(), QString::fromUtf8(contents));
+        QVERIFY(!document->isUndoAvailable());
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
+            QCOMPARE(block.blockFormat().lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
+            QCOMPARE(block.blockFormat().lineHeight(), qreal(140));
+        }
+        QVERIFY(editor->flags().testFlag(QQuickItem::ItemObservesViewport));
+    }
+
     void searchFollowsEditsWithoutTakingTheCaret() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

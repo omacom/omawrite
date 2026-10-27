@@ -13,6 +13,7 @@ Dialog {
     property real textScale: 1
     property int containerWidth: 1280
     property int containerHeight: 820
+    property bool listed: false
     readonly property string versionText: "Omawrite " + Qt.application.version
     readonly property var shortcuts: [
         { key: "Ctrl+S", desc: "Save" },
@@ -53,6 +54,7 @@ Dialog {
     y: Math.round((containerHeight - height) / 2)
     padding: 24
 
+    onAboutToShow: listed = true
     onOpened: closeButton.forceActiveFocus()
 
     Overlay.modal: Rectangle { color: Qt.rgba(0, 0, 0, 0.65) }
@@ -112,7 +114,7 @@ Dialog {
             rowSpacing: 10
 
             Repeater {
-                model: root.shortcuts
+                model: root.listed ? root.shortcuts : []
                 RowLayout {
                     Layout.fillWidth: true
                     Layout.preferredWidth: (shortcutsGrid.width

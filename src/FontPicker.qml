@@ -14,6 +14,7 @@ Popup {
     property color mutedColor: "#909191"
     property color highlightColor: "#428bca"
     property real maximumHeight: 440
+    property bool listed: false
 
     signal fontChosen(string family)
 
@@ -48,6 +49,7 @@ Popup {
     Material.elevation: 8
 
     onAboutToShow: {
+        listed = true;
         filterField.text = "";
         fontList.currentIndex = Math.max(0, fonts.indexOf(currentFont));
         fontList.positionViewAtIndex(fontList.currentIndex, ListView.Center);
@@ -108,7 +110,7 @@ Popup {
             width: parent.width
             height: picker.availableHeight - picker.headerHeight
             clip: true
-            model: picker.filteredFonts
+            model: picker.listed ? picker.filteredFonts : []
             boundsBehavior: Flickable.StopAtBounds
             highlightMoveDuration: 0
             ScrollBar.vertical: ScrollBar { policy: ScrollBar.AsNeeded }

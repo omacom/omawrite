@@ -1,6 +1,6 @@
 QT += core gui concurrent widgets printsupport qml quick quickcontrols2 quickdialogs2 dbus
 
-CONFIG += c++17 release
+CONFIG += c++17 release qtquickcompiler
 TARGET = omawrite
 TEMPLATE = app
 
