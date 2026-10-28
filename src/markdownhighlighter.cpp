@@ -140,9 +140,27 @@ void MarkdownHighlighter::rebuildFormats() {
     m_hiddenMarkerFormat.setFontLetterSpacingType(QFont::AbsoluteSpacing);
     m_hiddenMarkerFormat.setFontLetterSpacing(-charWidth);
 
-    m_headingFormat = QTextCharFormat();
-    m_headingFormat.setForeground(text);
-    m_headingFormat.setFontWeight(QFont::Bold);
+    // Headings scale from the editor's own size, so they follow the font, the
+    // desktop text size and Ctrl+= alike. The editor sizes in pixels.
+    static const qreal headingScales[6] = {1.7, 1.4, 1.2, 1.1, 1.0, 1.0};
+    const QFont bodyFont = document() ? document()->defaultFont() : QFont();
+    for (int level = 0; level < 6; ++level) {
+        QTextCharFormat sized;
+        if (bodyFont.pixelSize() > 0)
+            sized.setProperty(QTextFormat::FontPixelSize,
+                              qRound(bodyFont.pixelSize() * headingScales[level]));
+        else
+            sized.setFontPointSize(bodyFont.pointSizeF() * headingScales[level]);
+
+        m_headingFormats[level] = sized;
+        m_headingFormats[level].setForeground(text);
+        m_headingFormats[level].setFontWeight(QFont::Bold);
+
+        // The # markers take the heading's size too, so the line sits on one
+        // baseline.
+        m_headingMarkerFormats[level] = sized;
+        m_headingMarkerFormats[level].merge(m_markerFormat);
+    }
 
     m_boldFormat = QTextCharFormat();
     m_boldFormat.setFontWeight(QFont::Bold);
@@ -366,10 +384,11 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
         static const QRegularExpression headingRe(QStringLiteral("^(#{1,6})(\\s+)(.*)$"));
         const QRegularExpressionMatch heading = headingRe.match(text);
         if (heading.hasMatch()) {
+            const int level = heading.capturedLength(1) - 1;
             setFormat(0, heading.capturedLength(1) + heading.capturedLength(2),
-                      m_markerFormat);
+                      m_headingMarkerFormats[level]);
             setFormat(heading.capturedStart(3), heading.capturedLength(3),
-                      m_headingFormat);
+                      m_headingFormats[level]);
             return;
         }
     }

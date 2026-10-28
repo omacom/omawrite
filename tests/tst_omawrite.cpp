@@ -1369,6 +1369,26 @@ private slots:
         }
     }
 
+    void sizesHeadingsByLevel() {
+        // Fewer hashes, larger text, and the hashes match the text they mark.
+        const auto sizeOf = [](const QTextCharFormat &format) {
+            return format.hasProperty(QTextFormat::FontPixelSize)
+                ? qreal(format.intProperty(QTextFormat::FontPixelSize))
+                : format.fontPointSize();
+        };
+        qreal previous = 0;
+        for (int level = 1; level <= 4; ++level) {
+            const QString hashes(level, QLatin1Char('#'));
+            const auto heading = highlightedFormats(hashes + QStringLiteral(" Title"));
+            const qreal size = sizeOf(heading.at(level + 1));
+            QVERIFY2(size > 0, qPrintable(hashes));
+            QCOMPARE(sizeOf(heading.at(0)), size);
+            if (level > 1)
+                QVERIFY2(size < previous, qPrintable(hashes));
+            previous = size;
+        }
+    }
+
     void mergesInlineStylesWithTheBlock() {
         // A heading stays bold under italic, a link, or code.
         const auto heading = highlightedFormats(QStringLiteral("# head *it* [l](u) `c`"));

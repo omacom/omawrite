@@ -75,7 +75,9 @@ private:
     QString m_customCodeBackground;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
-    QTextCharFormat m_headingFormat;
+    // One per level, # to ######: larger the fewer the hashes.
+    QTextCharFormat m_headingFormats[6];
+    QTextCharFormat m_headingMarkerFormats[6];
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;
     QTextCharFormat m_codeFormat;
