@@ -51,8 +51,9 @@ int main(int argc, char *argv[]) {
                      &Backend::setDarkMode);
 
     // Carry the text scale into the default font, so the chrome that inherits
-    // it (dialog titles, buttons) grows along with the writing area.
-    const QFont interfaceFont(QStringLiteral("IBM Plex Mono"));
+    // it (dialog titles, buttons) grows along with the writing area. The family
+    // is the desktop's monospace font, so the chrome matches the theme too.
+    const QFont interfaceFont(Backend::defaultEditorFont());
     const qreal basePointSize = interfaceFont.pointSizeF() > 0
         ? interfaceFont.pointSizeF()
         : app.font().pointSizeF();

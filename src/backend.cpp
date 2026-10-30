@@ -9,6 +9,7 @@
 #include <QFileInfo>
 #include <QFont>
 #include <QFontDatabase>
+#include <QFontInfo>
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QProcess>
@@ -741,7 +742,13 @@ void Backend::saveWindowGeometry(int x, int y, int width, int height, bool maxim
 }
 
 QString Backend::defaultEditorFont() {
-    return QStringLiteral("IBM Plex Mono");
+    // Follow the desktop's monospace font. Omarchy's Style > Font writes the
+    // chosen family to fontconfig, where "monospace" resolves to it, so the
+    // writing font tracks the theme instead of being pinned to the bundled
+    // IBM Plex Mono. Only fall back to that bundle if nothing else resolves.
+    const QFont systemFixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+    const QString family = QFontInfo(systemFixed).family();
+    return family.isEmpty() ? QStringLiteral("IBM Plex Mono") : family;
 }
 
 void Backend::setEditorFont(const QString &family) {

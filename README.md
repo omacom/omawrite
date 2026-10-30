@@ -43,7 +43,9 @@ auto-save pauses until you reload, keep your version, or save. A recovered draft
 is never auto-saved over its file — save it to keep it.
 
 The font button in the footer picks the writing font from any installed text font,
-and Omawrite remembers the choice. IBM Plex Mono is the default.
+and Omawrite remembers the choice. Until you pick one, Omawrite writes in the
+desktop's monospace font (the one set by Omarchy's *Style > Font* menu), falling
+back to the bundled IBM Plex Mono when the desktop has no preference.
 
 Text follows the desktop text size — `omarchy display text size`, or GNOME's
 `text-scaling-factor` — and re-flows without a restart. The default of 12px leaves

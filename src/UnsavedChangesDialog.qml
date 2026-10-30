@@ -12,6 +12,7 @@ Dialog {
     property int containerWidth: 420
     property int containerHeight: 320
     property real textScale: 1
+    property string fontFamily: ""
 
     signal saveRequested()
     signal discardRequested()
@@ -58,7 +59,7 @@ Dialog {
         Label {
             text: "Unsaved changes"
             color: root.strongTextColor
-            font.family: "IBM Plex Mono"
+            font.family: root.fontFamily
             font.pixelSize: Math.round(16 * root.textScale)
             font.bold: true
         }
@@ -68,7 +69,7 @@ Dialog {
             text: "Save changes to " + root.fileName + " before closing?"
             color: root.textColor
             wrapMode: Text.Wrap
-            font.family: "IBM Plex Mono"
+            font.family: root.fontFamily
             font.pixelSize: Math.round(13 * root.textScale)
         }
     }
@@ -89,6 +90,7 @@ Dialog {
                 formattedText: "<u>C</u>ancel"
                 darkMode: root.darkMode
                 textScale: root.textScale
+                fontFamily: root.fontFamily
                 labelColor: root.textColor
                 KeyNavigation.left: saveButton
                 KeyNavigation.right: discardButton
@@ -103,6 +105,7 @@ Dialog {
                 formattedText: "<u>D</u>iscard"
                 darkMode: root.darkMode
                 textScale: root.textScale
+                fontFamily: root.fontFamily
                 labelColor: root.textColor
                 KeyNavigation.left: cancelButton
                 KeyNavigation.right: saveButton
@@ -121,6 +124,7 @@ Dialog {
                 primary: true
                 darkMode: root.darkMode
                 textScale: root.textScale
+                fontFamily: root.fontFamily
                 activeColor: root.activeButtonColor
                 KeyNavigation.left: discardButton
                 KeyNavigation.right: cancelButton

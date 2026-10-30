@@ -9,6 +9,7 @@ Button {
     property color labelColor: primary ? "#ffffff" : "#d0d0d0"
     property color activeColor: "#428bca"
     property real textScale: 1
+    property string fontFamily: ""
     property string formattedText: ""
 
     leftPadding: 16
@@ -25,7 +26,7 @@ Button {
         color: control.labelColor
         horizontalAlignment: Text.AlignHCenter
         verticalAlignment: Text.AlignVCenter
-        font.family: "IBM Plex Mono"
+        font.family: control.fontFamily
         font.pixelSize: Math.round(12 * control.textScale)
     }
 

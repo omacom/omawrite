@@ -4,6 +4,8 @@
 #include <QSignalSpy>
 #include <QSemaphore>
 #include <QFont>
+#include <QFontDatabase>
+#include <QFontInfo>
 #include <QAbstractTextDocumentLayout>
 #include <QTextBlock>
 #include <QTextDocument>
@@ -204,13 +206,26 @@ private slots:
             QStringLiteral("Standard Symbols PS"), QStringLiteral("D050000L"),
             QStringLiteral("Noto Color Emoji"), QStringLiteral("Nimbus Sans [UKWN]"),
             QStringLiteral("Nimbus Sans [URW ]")});
-        QCOMPARE(fonts, QStringList({QStringLiteral("IBM Plex Mono"),
-                                     QStringLiteral("adwaita Sans"),
-                                     QStringLiteral("Liberation Serif"),
-                                     QStringLiteral("Nimbus Sans"),
-                                     QStringLiteral("Noto Sans"),
-                                     QStringLiteral("Noto Sans Mono"),
-                                     QStringLiteral("Noto Serif")}));
+        const QString defaultFont = Backend::defaultEditorFont();
+        QStringList expected{QStringLiteral("adwaita Sans"),
+                             QStringLiteral("IBM Plex Mono"),
+                             QStringLiteral("Liberation Serif"),
+                             QStringLiteral("Nimbus Sans"),
+                             QStringLiteral("Noto Sans"),
+                             QStringLiteral("Noto Sans Mono"),
+                             QStringLiteral("Noto Serif")};
+        // The default is never repeated among the sorted families; it leads
+        // the list instead, whichever family the desktop picked for it.
+        expected.removeAll(defaultFont);
+        expected.prepend(defaultFont);
+        QCOMPARE(fonts, expected);
+    }
+
+    void defaultFontIsTheDesktopMonospaceFont() {
+        const QFont systemFixed = QFontDatabase::systemFont(QFontDatabase::FixedFont);
+        const QString resolved = QFontInfo(systemFixed).family();
+        QCOMPARE(Backend::defaultEditorFont(), resolved);
+        QCOMPARE(Backend().availableFonts().value(0), resolved);
     }
 
     void remembersEditorFont() {

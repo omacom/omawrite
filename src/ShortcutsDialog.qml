@@ -11,6 +11,7 @@ Dialog {
     property color strongTextColor: darkMode ? "#eeeeee" : "#222324"
     property color activeButtonColor: "#428bca"
     property real textScale: 1
+    property string fontFamily: ""
     property int containerWidth: 1280
     property int containerHeight: 820
     readonly property string versionText: "Omawrite " + Qt.application.version
@@ -74,7 +75,7 @@ Dialog {
             Layout.bottomMargin: Qt.application.version.length > 0 ? 0 : 8
             text: root.title
             color: root.strongTextColor
-            font.family: "IBM Plex Mono"
+            font.family: root.fontFamily
             font.pixelSize: Math.round(15 * root.textScale)
             font.bold: true
             wrapMode: Text.Wrap
@@ -89,7 +90,7 @@ Dialog {
             visible: Qt.application.version.length > 0
             color: root.textColor
             opacity: 0.75
-            font.family: "IBM Plex Mono"
+            font.family: root.fontFamily
             font.pixelSize: Math.round(11 * root.textScale)
             wrapMode: Text.Wrap
         }
@@ -125,7 +126,7 @@ Dialog {
                         Layout.minimumWidth: 0
                         text: modelData.key
                         color: root.strongTextColor
-                        font.family: "IBM Plex Mono"
+                        font.family: root.fontFamily
                         font.pixelSize: Math.round(12 * root.textScale)
                         font.bold: true
                         wrapMode: Text.Wrap
@@ -135,7 +136,7 @@ Dialog {
                         Layout.minimumWidth: 0
                         text: modelData.desc
                         color: root.textColor
-                        font.family: "IBM Plex Mono"
+                        font.family: root.fontFamily
                         font.pixelSize: Math.round(12 * root.textScale)
                         wrapMode: Text.Wrap
                     }

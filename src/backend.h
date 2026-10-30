@@ -33,6 +33,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelectionForeground READ themeSelectionForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString editorFont READ editorFont WRITE setEditorFont NOTIFY editorFontChanged)
+    Q_PROPERTY(QString defaultFont READ defaultFont CONSTANT)
     Q_PROPERTY(QStringList availableFonts READ availableFonts CONSTANT)
 
 public:
@@ -60,6 +61,7 @@ public:
     QString themeSelectionForeground() const { return m_themeSelectionForeground; }
     QString editorFont() const { return m_editorFont; }
     void setEditorFont(const QString &family);
+    QString defaultFont() const { return defaultEditorFont(); }
     QStringList availableFonts() const;
     static QString defaultEditorFont();
     static QStringList selectableFontFamilies(const QStringList &families);

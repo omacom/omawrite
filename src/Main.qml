@@ -354,6 +354,7 @@ ApplicationWindow {
         fileName: backend.fileName
         darkMode: win.darkMode
         textScale: win.textScale
+        fontFamily: backend.defaultFont
         textColor: win.textColor
         strongTextColor: win.textColor
         activeButtonColor: backend.themeAccent
@@ -381,6 +382,7 @@ ApplicationWindow {
         id: externalChangeDialog
         darkMode: win.darkMode
         textScale: win.textScale
+        fontFamily: backend.defaultFont
         textColor: win.textColor
         strongTextColor: win.textColor
         activeButtonColor: backend.themeAccent
@@ -395,6 +397,7 @@ ApplicationWindow {
         id: shortcutsDialog
         darkMode: win.darkMode
         textScale: win.textScale
+        fontFamily: backend.defaultFont
         textColor: win.textColor
         activeButtonColor: backend.themeAccent
         containerWidth: win.width
@@ -1087,7 +1090,7 @@ ApplicationWindow {
             Label {
                 text: backend.status
                 color: win.mutedColor
-                font.family: "IBM Plex Mono"
+                font.family: backend.defaultFont
                 font.pixelSize: win.scaledSize(11)
                 visible: text !== ""
                 elide: Text.ElideRight
@@ -1109,7 +1112,7 @@ ApplicationWindow {
             maximumHeight: Math.min(win.scaledSize(440), win.height - 80)
             fonts: backend.availableFonts
             currentFont: backend.editorFont
-            defaultFont: "IBM Plex Mono"
+            defaultFont: backend.defaultFont
             darkMode: win.darkMode
             textScale: win.textScale
             textColor: win.textColor
@@ -1127,7 +1130,7 @@ ApplicationWindow {
             text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
             color: win.mutedColor
             opacity: 0.75
-            font.family: "IBM Plex Mono"
+            font.family: backend.defaultFont
             font.pixelSize: win.scaledSize(11)
         }
 
