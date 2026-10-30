@@ -13,6 +13,7 @@ Dialog {
     property int containerWidth: 520
     property int containerHeight: 320
     property real textScale: 1
+    property string fontFamily: ""
     // Closing without a choice, as with Escape, keeps the writer's text: it
     // decides nothing destructive and leaves auto-save able to resume.
     property bool decided: false
@@ -52,7 +53,7 @@ Dialog {
         Label {
             text: root.deleted ? "File removed" : "File changed"
             color: root.strongTextColor
-            font.family: "IBM Plex Mono"
+            font.family: root.fontFamily
             font.pixelSize: Math.round(16 * root.textScale)
             font.bold: true
         }
@@ -66,7 +67,7 @@ Dialog {
                    : "This file changed outside Omawrite.")
             color: root.textColor
             wrapMode: Text.Wrap
-            font.family: "IBM Plex Mono"
+            font.family: root.fontFamily
             font.pixelSize: Math.round(13 * root.textScale)
         }
     }
@@ -87,6 +88,7 @@ Dialog {
                 text: "Keep Mine"
                 darkMode: root.darkMode
                 textScale: root.textScale
+                fontFamily: root.fontFamily
                 labelColor: root.deleted ? "#ffffff" : root.textColor
                 primary: root.deleted
                 activeColor: root.activeButtonColor
@@ -112,6 +114,7 @@ Dialog {
                 primary: true
                 darkMode: root.darkMode
                 textScale: root.textScale
+                fontFamily: root.fontFamily
                 activeColor: root.activeButtonColor
                 KeyNavigation.left: keepButton
                 KeyNavigation.right: keepButton
