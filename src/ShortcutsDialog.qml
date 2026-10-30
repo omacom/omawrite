@@ -156,6 +156,7 @@ Dialog {
             primary: true
             darkMode: root.darkMode
             textScale: root.textScale
+            fontFamily: root.fontFamily
             activeColor: root.activeButtonColor
             onClicked: root.close()
         }
