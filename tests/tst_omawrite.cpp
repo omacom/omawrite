@@ -18,10 +18,34 @@
 #include <QStandardPaths>
 #include <QClipboard>
 #include <QMimeData>
+#include <private/qguiapplication_p.h>
+#include <qpa/qplatformtheme.h>
 #include "cli.h"
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+
+// Wraps the active platform theme and swaps the keys for the next and
+// previous character, as a theme like KDE Plasma's or qt6ct may change them.
+class SwappedCharacterKeysTheme : public QPlatformTheme {
+public:
+    explicit SwappedCharacterKeysTheme(QPlatformTheme *base) : m_base(base) {}
+
+    QList<QKeySequence> keyBindings(QKeySequence::StandardKey key) const override {
+        if (key == QKeySequence::MoveToNextChar)
+            return m_base->keyBindings(QKeySequence::MoveToPreviousChar);
+        if (key == QKeySequence::MoveToPreviousChar)
+            return m_base->keyBindings(QKeySequence::MoveToNextChar);
+        return m_base->keyBindings(key);
+    }
+    const QPalette *palette(Palette type) const override { return m_base->palette(type); }
+    const QFont *font(Font type) const override { return m_base->font(type); }
+    QVariant themeHint(ThemeHint hint) const override { return m_base->themeHint(hint); }
+    Qt::ColorScheme colorScheme() const override { return m_base->colorScheme(); }
+
+private:
+    QPlatformTheme *m_base;
+};
 
 // Counts QML "Binding loop detected" warnings while it is alive, forwarding
 // everything to the previous handler so test output stays intact.
@@ -1742,6 +1766,67 @@ private slots:
                  QStringLiteral("alpha **beta** omega"));
         QCOMPARE(editor->property("wrappedSelectionStart").toInt(), 8);
         QCOMPARE(editor->property("wrappedSelectionEnd").toInt(), 12);
+    }
+
+    void arrowKeysStepOverWholeCharacters() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        editor->setProperty("text", QStringLiteral("a😀b"));
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        editor->setProperty("cursorPosition", 1);
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 3);
+        QTest::keyClick(window, Qt::Key_Left);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 1);
+    }
+
+    void characterKeysFollowThePlatformTheme() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+
+        // Qt has no public way to change standard keys, so the test swaps
+        // the platform theme that Qt asks for them.
+        QPlatformTheme *originalTheme = QGuiApplicationPrivate::platform_theme;
+        QVERIFY(originalTheme);
+        SwappedCharacterKeysTheme swappedTheme(originalTheme);
+        QGuiApplicationPrivate::platform_theme = &swappedTheme;
+        const auto restoreTheme = qScopeGuard(
+            [originalTheme] { QGuiApplicationPrivate::platform_theme = originalTheme; });
+
+        editor->setProperty("text", QStringLiteral("a😀b"));
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        editor->setProperty("cursorPosition", 1);
+        QTest::keyClick(window, Qt::Key_Left);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 3);
+        QTest::keyClick(window, Qt::Key_Right);
+        QCOMPARE(editor->property("cursorPosition").toInt(), 1);
     }
 
     void stepsOverWholeCharactersWhenTypingAndSaving() {

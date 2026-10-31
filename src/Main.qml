@@ -948,12 +948,10 @@ ApplicationWindow {
                     } else if (!commandModifier && event.key === Qt.Key_Backspace
                                && deleteParagraphBreakBehindCursor()) {
                         event.accepted = true;
-                    } else if (!commandModifier && !(event.modifiers & Qt.ShiftModifier)
-                               && event.key === Qt.Key_Right) {
+                    } else if (event.matches(StandardKey.MoveToNextChar)) {
                         moveCursorVisibly(1);
                         event.accepted = true;
-                    } else if (!commandModifier && !(event.modifiers & Qt.ShiftModifier)
-                               && event.key === Qt.Key_Left) {
+                    } else if (event.matches(StandardKey.MoveToPreviousChar)) {
                         moveCursorVisibly(-1);
                         event.accepted = true;
                     } else if (!commandModifier
