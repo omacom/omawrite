@@ -301,6 +301,10 @@ ApplicationWindow {
         }
 
         function onSaveDialogRequested(suggestedUrl) {
+            // Qt's portal backend drops the folder of a file that does not exist
+            // yet and sends only its name, so give the folder explicitly.
+            const url = suggestedUrl.toString();
+            saveFileDialog.currentFolder = url.substring(0, url.lastIndexOf("/"));
             saveFileDialog.selectedFile = suggestedUrl;
             saveFileDialog.open();
         }
