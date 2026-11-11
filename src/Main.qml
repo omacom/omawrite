@@ -773,7 +773,10 @@ ApplicationWindow {
                     var end = text.indexOf("\n", Math.max(start, selectionEnd - 1));
                     if (end < 0)
                         end = text.length;
-                    var lines = rawText().slice(start, end).split("\n");
+                    // A line separator breaks a line on screen as a newline does,
+                    // and each line keeps the one it had.
+                    var parts = rawText().slice(start, end).split(/(\n|\u2028)/);
+                    var lines = parts.filter(function(part, i) { return i % 2 === 0; });
                     // The selection starts at an item and holds only lines that
                     // belong to one: other items, blanks, and indented lines.
                     // A fence indented under an item moves along with it whole;
@@ -798,7 +801,9 @@ ApplicationWindow {
                             ? " ".repeat(columns(line) + step) + line.slice(lead.length)
                             : line;
                     });
-                    var nested = moved.join("\n");
+                    var nested = moved.map(function(line, i) {
+                        return i > 0 ? parts[2 * i - 1] + line : line;
+                    }).join("");
                     var from = Math.max(start, selectionStart + moved[0].length - lines[0].length);
                     // Neither end of the selection leaves its line, even when
                     // the indent it sat in is gone.

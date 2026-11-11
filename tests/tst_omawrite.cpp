@@ -2088,6 +2088,12 @@ private slots:
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(text(), QStringLiteral("- one\n- two"));
 
+        // A line separator starts a line as a newline does, and stays one.
+        load(QStringLiteral("- a\u2028- b"), 0);
+        QMetaObject::invokeMethod(editor, "selectAll");
+        tabKey();
+        QCOMPARE(backend.documentText(), QStringLiteral("    - a\u2028    - b"));
+
         // The same step nests under ordered markers, the empty one Return
         // leaves included, and Shift+Tab steps back out one level.
         load(QStringLiteral("1. one"), 6);
