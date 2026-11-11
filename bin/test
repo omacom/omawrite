@@ -1,17 +1,7 @@
-#!/usr/bin/env sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-BUILD_DIR="$ROOT/build-tests"
-
-if command -v qmake6 >/dev/null 2>&1; then
-  QMAKE=qmake6
-else
-  QMAKE=qmake
-fi
-
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-"$QMAKE" "$ROOT/tests/tests.pro"
-make -j"$(nproc 2>/dev/null || echo 1)"
-QT_QPA_PLATFORM=offscreen ./tst_omawrite
+# Arguments go to ctest, so `bin/test -R theme` runs only the matching tests.
+root="$(cd "$(dirname "$0")/.." && pwd)"
+"$root/bin/build"
+QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure "$@"

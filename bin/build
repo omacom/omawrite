@@ -1,24 +1,6 @@
-#!/usr/bin/env sh
-set -eu
+#!/bin/bash
+set -euo pipefail
 
-ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
-BUILD_DIR="$ROOT/build"
-
-if command -v qmake6 >/dev/null 2>&1; then
-  QMAKE=qmake6
-elif command -v qmake >/dev/null 2>&1; then
-  QMAKE=qmake
-else
-  echo "qmake6 or qmake is required to build omawrite." >&2
-  exit 1
-fi
-
-JOBS="$(nproc 2>/dev/null || echo 1)"
-
-mkdir -p "$BUILD_DIR"
-cd "$BUILD_DIR"
-
-"$QMAKE" "$ROOT/omawrite.pro"
-make -j"$JOBS"
-
-echo "Built $BUILD_DIR/omawrite"
+root="$(cd "$(dirname "$0")/.." && pwd)"
+cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
+cmake --build "$root/build" -j"$(nproc)"

@@ -3463,4 +3463,4 @@ private:
 };
 
 QTEST_MAIN(OmawriteTest)
-#include "tst_omawrite.moc"
+#include "omawrite_tests.moc"
