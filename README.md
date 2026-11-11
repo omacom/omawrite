@@ -59,7 +59,7 @@ Omawrite at the size it is designed around; larger and smaller sizes scale from 
 The IBM Plex Mono font is bundled under the SIL Open Font License 1.1; see
 `fonts/OFL.txt`. The font is copyright IBM Corp.
 
-## Build and install
+## Build
 
 For a local build, install the Qt requirements above, a C++17 compiler such as `gcc`, `cmake`, and `make`. `bin/build` configures and builds into `build/`, and `bin/test` builds and runs the Qt test suite through `ctest`.
 
@@ -73,20 +73,4 @@ require an active graphical session. To open a file with the local build:
 
 ```sh
 ./build/omawrite path/to/document.md
-```
-
-On Arch Linux or Omarchy, install `base-devel` for the packaging tools, then
-build and install the package:
-
-```sh
-./bin/install
-```
-
-This runs the local build and `makepkg -fsi`, which installs the package through
-pacman and may ask for authentication. To build a package archive for inspection
-without installing it:
-
-```sh
-cd pkgbuild
-makepkg -f
 ```
