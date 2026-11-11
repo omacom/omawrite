@@ -9,7 +9,36 @@ Button {
     property color labelColor: primary ? "#ffffff" : "#d0d0d0"
     property color activeColor: "#428bca"
     property real textScale: 1
-    property string formattedText: ""
+    // A label that marks its access key with "&", as Qt writes them ("&Save",
+    // "&&" for an ampersand), so each translation picks its own. The dialog
+    // binds Alt and the key; the button underlines it.
+    property string mnemonicLabel: ""
+    readonly property string mnemonic: {
+        var match = /&([^&\s])/.exec(mnemonicLabel.replace(/&&/g, ""));
+        return match ? match[1].toUpperCase() : "";
+    }
+
+    text: mnemonicLabel.replace(/&(&?)/g, "$1")
+    // The label as rich text, its access key underlined.
+    property string formattedText: {
+        var escape = function(c) {
+            return c === "&" ? "&amp;" : c === "<" ? "&lt;" : c === ">" ? "&gt;" : c;
+        };
+        var out = "", marked = false;
+        for (var i = 0; i < mnemonicLabel.length; ++i) {
+            var c = mnemonicLabel[i];
+            if (c === "&" && i + 1 < mnemonicLabel.length) {
+                c = mnemonicLabel[++i];
+                if (c !== "&" && !marked) {
+                    out += "<u>" + escape(c) + "</u>";
+                    marked = true;
+                    continue;
+                }
+            }
+            out += escape(c);
+        }
+        return out;
+    }
 
     leftPadding: 16
     rightPadding: 16

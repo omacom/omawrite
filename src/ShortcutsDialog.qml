@@ -15,32 +15,32 @@ Dialog {
     property int containerHeight: 820
     readonly property string versionText: "Omawrite " + Qt.application.version
     readonly property var shortcuts: [
-        { key: "Ctrl+S", desc: "Save" },
-        { key: "Ctrl+Shift+S", desc: "Save As" },
-        { key: "Ctrl+O", desc: "Open" },
-        { key: "Ctrl+N", desc: "New Window" },
-        { key: "Ctrl+P", desc: "Print" },
-        { key: "Ctrl+Z", desc: "Undo" },
-        { key: "Ctrl+Shift+Z / Ctrl+Y", desc: "Redo" },
-        { key: "F11 / Super+F", desc: "Fullscreen" },
-        { key: "Ctrl+F", desc: "Find" },
-        { key: "Ctrl+H", desc: "Find & Replace" },
-        { key: "Ctrl+G / Enter", desc: "Next Match in Find" },
-        { key: "Shift+Enter", desc: "Previous Match in Find" },
-        { key: "Escape", desc: "Close Find" },
-        { key: "Ctrl+B", desc: "Bold" },
-        { key: "Ctrl+I", desc: "Italic" },
-        { key: "Ctrl+Shift+X", desc: "Strikethrough" },
-        { key: "Ctrl+K", desc: "Link" },
-        { key: "Ctrl+Shift+C", desc: "Copy as HTML" },
-        { key: "Ctrl+= / Ctrl++", desc: "Increase Text Size" },
-        { key: "Ctrl+-", desc: "Decrease Text Size" },
-        { key: "Ctrl+0", desc: "Reset Text Size" },
-        { key: "Ctrl+scroll", desc: "Change Text Size" },
-        { key: "Ctrl+? / Ctrl+/ / F1", desc: "Shortcuts" }
+        { key: "Ctrl+S", desc: qsTr("Save") },
+        { key: "Ctrl+Shift+S", desc: qsTr("Save As") },
+        { key: "Ctrl+O", desc: qsTr("Open") },
+        { key: "Ctrl+N", desc: qsTr("New Window") },
+        { key: "Ctrl+P", desc: qsTr("Print") },
+        { key: "Ctrl+Z", desc: qsTr("Undo") },
+        { key: "Ctrl+Shift+Z / Ctrl+Y", desc: qsTr("Redo") },
+        { key: "F11 / Super+F", desc: qsTr("Fullscreen") },
+        { key: "Ctrl+F", desc: qsTr("Find") },
+        { key: "Ctrl+H", desc: qsTr("Find & Replace") },
+        { key: "Ctrl+G / Enter", desc: qsTr("Next Match in Find") },
+        { key: "Shift+Enter", desc: qsTr("Previous Match in Find") },
+        { key: "Escape", desc: qsTr("Close Find") },
+        { key: "Ctrl+B", desc: qsTr("Bold") },
+        { key: "Ctrl+I", desc: qsTr("Italic") },
+        { key: "Ctrl+Shift+X", desc: qsTr("Strikethrough") },
+        { key: "Ctrl+K", desc: qsTr("Link") },
+        { key: "Ctrl+Shift+C", desc: qsTr("Copy as HTML") },
+        { key: "Ctrl+= / Ctrl++", desc: qsTr("Increase Text Size") },
+        { key: "Ctrl+-", desc: qsTr("Decrease Text Size") },
+        { key: "Ctrl+0", desc: qsTr("Reset Text Size") },
+        { key: "Ctrl+scroll", desc: qsTr("Change Text Size") },
+        { key: "Ctrl+? / Ctrl+/ / F1", desc: qsTr("Shortcuts") }
     ]
 
-    title: "Keyboard shortcuts"
+    title: qsTr("Keyboard shortcuts")
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -151,7 +151,7 @@ Dialog {
             anchors.right: parent.right
             anchors.rightMargin: 24
             anchors.verticalCenter: parent.verticalCenter
-            text: "Close"
+            text: qsTr("Close")
             primary: true
             darkMode: root.darkMode
             textScale: root.textScale

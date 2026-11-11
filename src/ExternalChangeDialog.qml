@@ -23,7 +23,8 @@ Dialog {
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape
-    width: Math.min(520, containerWidth - 48)
+    // Wide enough for the buttons, which run longer in some languages.
+    width: Math.min(Math.max(520, dialogButtons.implicitWidth + 40), containerWidth - 48)
     x: Math.round((containerWidth - width) / 2)
     y: Math.round((containerHeight - height) / 2)
     padding: 20
@@ -50,7 +51,7 @@ Dialog {
         spacing: 12
 
         Label {
-            text: root.deleted ? "File removed" : "File changed"
+            text: root.deleted ? qsTr("File removed") : qsTr("File changed")
             color: root.strongTextColor
             font.family: "IBM Plex Mono"
             font.pixelSize: Math.round(16 * root.textScale)
@@ -60,10 +61,10 @@ Dialog {
         Label {
             width: parent.width
             text: root.deleted
-                ? "This file was removed outside Omawrite. Keep your text as an unsaved document?"
+                ? qsTr("This file was removed outside Omawrite. Keep your text as an unsaved document?")
                 : (root.locallyModified
-                   ? "This file changed outside Omawrite. Reloading will discard your changes."
-                   : "This file changed outside Omawrite.")
+                   ? qsTr("This file changed outside Omawrite. Reloading will discard your changes.")
+                   : qsTr("This file changed outside Omawrite."))
             color: root.textColor
             wrapMode: Text.Wrap
             font.family: "IBM Plex Mono"
@@ -84,7 +85,7 @@ Dialog {
             SquareDialogButton {
                 id: keepButton
                 objectName: "keepButton"
-                text: "Keep Mine"
+                text: qsTr("Keep Mine")
                 darkMode: root.darkMode
                 textScale: root.textScale
                 labelColor: root.deleted ? "#ffffff" : root.textColor
@@ -104,7 +105,7 @@ Dialog {
             SquareDialogButton {
                 id: reloadButton
                 objectName: "reloadButton"
-                text: "Reload"
+                text: qsTr("Reload")
                 // There is nothing to reload from a removed file. Should it
                 // come back, the dialog turns into a change and this returns.
                 visible: !root.deleted

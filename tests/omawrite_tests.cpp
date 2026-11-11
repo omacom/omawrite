@@ -22,6 +22,12 @@
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "translator.h"
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QSet>
 
 // Counts QML "Binding loop detected" warnings while it is alive, forwarding
 // everything to the previous handler so test output stays intact.
@@ -46,6 +52,191 @@ private:
     static inline QtMessageHandler s_previous = nullptr;
     QtMessageHandler m_previous = nullptr;
 };
+
+// Omawrite's sources, beside the tests.
+static QString sourceFolder() {
+    return QFileInfo(QFINDTESTDATA("../src/Main.qml")).absolutePath();
+}
+
+// A source file with its comments left out (their examples aren't calls)
+// and its strings kept whole, so neither hides the other.
+static QString withoutComments(const QString &text, bool cpp) {
+    QString out;
+    for (qsizetype i = 0; i < text.size();) {
+        const QChar c = text.at(i);
+        if (text.mid(i, 2) == QLatin1String("//")) {
+            const qsizetype end = text.indexOf(QLatin1Char('\n'), i);
+            i = end < 0 ? text.size() : end;
+        } else if (text.mid(i, 2) == QLatin1String("/*")) {
+            const qsizetype end = text.indexOf(QLatin1String("*/"), i + 2);
+            i = end < 0 ? text.size() : end + 2;
+        } else if (cpp && c == QLatin1Char('"') && i > 0 && text.at(i - 1) == QLatin1Char('R')) {
+            // A raw string (a pattern) is no translation; it is left out whole.
+            const qsizetype open = text.indexOf(QLatin1Char('('), i);
+            const QString close = QLatin1Char(')') + text.mid(i + 1, open - i - 1) + QLatin1Char('"');
+            out += QLatin1String("\"\"");
+            i = text.indexOf(close, open) + close.size();
+        } else if (c == QLatin1Char('"') || c == QLatin1Char('\'') || c == QLatin1Char('`')) {
+            qsizetype end = i + 1;
+            while (end < text.size() && text.at(end) != c)
+                end += text.at(end) == QLatin1Char('\\') ? 2 : 1;
+            out += text.mid(i, end + 1 - i);
+            i = end + 1;
+        } else {
+            out += c;
+            ++i;
+        }
+    }
+    return out;
+}
+
+// Every text the sources hand to qsTr() or tr(), and whether any call also
+// passes it a count (its third argument). A call whose text isn't a literal
+// can't be in a catalog, and is reported in `problems`.
+static QMap<QString, bool> translatables(const QString &folder, QStringList *problems) {
+    static const QRegularExpression call(QString::fromLatin1(R"(\b(qsTr|tr)\s*\()"));
+    static const QRegularExpression literal(QString::fromLatin1(R"(^\s*(["'])((?:\\.|(?!\1).)*)\1)"),
+                                            QRegularExpression::DotMatchesEverythingOption);
+    QMap<QString, bool> found;
+    const QStringList filters{QStringLiteral("*.qml"), QStringLiteral("*.js"),
+                              QStringLiteral("*.cpp"), QStringLiteral("*.h")};
+    for (const QFileInfo &info : QDir(folder).entryInfoList(filters, QDir::Files)) {
+        QFile file(info.filePath());
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const bool cpp = info.suffix() == QLatin1String("cpp") || info.suffix() == QLatin1String("h");
+        const QString code = withoutComments(QString::fromUtf8(file.readAll()), cpp);
+        for (auto calls = call.globalMatch(code); calls.hasNext();) {
+            const auto match = calls.next();
+            qsizetype at = match.capturedEnd();
+            const auto part = literal.match(code.mid(at));
+            if (!part.hasMatch()) {
+                *problems << info.fileName() + QStringLiteral(": not a literal: ")
+                                 + code.mid(match.capturedStart(), 60);
+                continue;
+            }
+            const QString text = part.captured(2).replace(QStringLiteral("\\\""), QStringLiteral("\""));
+            at += part.capturedEnd();
+            // The arguments after the text, up to the call's closing parenthesis.
+            int depth = 0, commas = 0;
+            for (; at < code.size(); ++at) {
+                const QChar c = code.at(at);
+                if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+                    for (++at; at < code.size() && code.at(at) != c;
+                         at += code.at(at) == QLatin1Char('\\') ? 2 : 1) { }
+                } else if (c == QLatin1Char('(') || c == QLatin1Char('[') || c == QLatin1Char('{')) {
+                    ++depth;
+                } else if (c == QLatin1Char(')') || c == QLatin1Char(']') || c == QLatin1Char('}')) {
+                    if (depth-- == 0)
+                        break;
+                } else if (c == QLatin1Char(',') && depth == 0) {
+                    ++commas;
+                }
+            }
+            found[text] = found.value(text) || commas >= 2;
+        }
+    }
+    return found;
+}
+
+static QJsonObject readCatalog(const QString &path, QStringList *problems) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        *problems << path + QStringLiteral(": can't be read");
+        return {};
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (!document.isObject())
+        *problems << path + QStringLiteral(": not a JSON object: ") + error.errorString();
+    return document.object();
+}
+
+// The placeholders in a text, sorted: %1 to %9, and the count (%n).
+static QStringList placeholders(const QString &text) {
+    static const QRegularExpression placeholder(QStringLiteral("%L?[1-9n]"));
+    QStringList found;
+    for (auto it = placeholder.globalMatch(text); it.hasNext();)
+        found << it.next().captured();
+    found.sort();
+    return found;
+}
+
+// The letter "&" marks in a button label, as SquareDialogButton reads it.
+static QString accessKey(const QString &label) {
+    static const QRegularExpression marked(QStringLiteral("&([^&\\s])"));
+    const auto match = marked.match(QString(label).remove(QStringLiteral("&&")));
+    return match.hasMatch() ? match.captured(1).toUpper() : QString();
+}
+
+// What's wrong with the translations in `folder`, measured against its
+// en.json: an unknown language, empty or broken translations, plural forms
+// that don't fit the language's rule, and access keys the unsaved-changes
+// prompt can't tell apart. A string a catalog lacks is not a problem: the
+// app shows the English meanwhile, so a new string never waits on 49
+// languages.
+static QStringList catalogProblems(const QString &folder) {
+    static const QStringList codes{
+        "ar", "bg", "bn", "ca", "cs", "da", "de", "el", "es-MX", "et", "fa", "fi", "fil",
+        "fr", "ga", "he", "hi", "hr", "hu", "id", "is", "it", "ja", "ko", "lt", "lv", "ms",
+        "nl", "no", "pl", "pt", "pt-BR", "ro", "ru", "si", "sk", "sl", "sr", "sv", "sw",
+        "ta", "th", "tr", "uk", "ur", "uz", "vi", "zh-CN", "zh-TW"};
+    QStringList problems;
+    const QJsonObject english = readCatalog(folder + QStringLiteral("/en.json"), &problems);
+    for (const QFileInfo &file : QDir(folder).entryInfoList({QStringLiteral("*.json")}, QDir::Files)) {
+        const QString code = file.completeBaseName();
+        if (code == QLatin1String("en"))
+            continue;
+        if (!codes.contains(code)) {
+            problems << file.fileName() + QStringLiteral(": not one of Omarchy's language codes");
+            continue;
+        }
+        const QJsonObject catalog = readCatalog(file.filePath(), &problems);
+
+        // The categories the language's rule reaches, and "other" always.
+        QSet<QString> categories{QStringLiteral("other"), Translator::pluralCategory(code, 1000000)};
+        for (long long n = 0; n <= 1000; ++n)
+            categories << Translator::pluralCategory(code, n);
+
+        for (auto it = english.begin(); it != english.end(); ++it) {
+            const QJsonValue translated = catalog.value(it.key());
+            const QString where = code + QStringLiteral(": ") + it.key() + QStringLiteral(": ");
+            if (translated.isUndefined())
+                continue;
+            if (it.value().isString()) {
+                if (!translated.isString() || translated.toString().isEmpty())
+                    problems << where + QStringLiteral("needs a translation");
+                else if (placeholders(translated.toString()) != placeholders(it.key()))
+                    problems << where + QStringLiteral("has other placeholders than the English");
+                continue;
+            }
+            const QJsonObject forms = translated.toObject();
+            const QStringList given = forms.keys();
+            if (!translated.isObject() || QSet<QString>(given.begin(), given.end()) != categories) {
+                QStringList wanted(categories.begin(), categories.end());
+                wanted.sort();
+                problems << where + QStringLiteral("needs exactly the plural forms ") + wanted.join(QStringLiteral(", "));
+                continue;
+            }
+            for (auto form = forms.begin(); form != forms.end(); ++form) {
+                if (!form.value().toString().contains(QStringLiteral("%n")))
+                    problems << where + form.key() + QStringLiteral(" needs its %n");
+            }
+        }
+
+        QStringList keys;
+        for (const char *label : {"&Cancel", "&Discard", "&Save"}) {
+            const QString translated = catalog.value(QLatin1String(label)).toString(QLatin1String(label));
+            const QString key = accessKey(translated);
+            if (key.isEmpty())
+                problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": needs an access key");
+            else if (keys.contains(key))
+                problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": shares its access key");
+            keys << key;
+        }
+    }
+    return problems;
+}
 
 class OmawriteTest : public QObject {
     Q_OBJECT
@@ -2326,6 +2517,158 @@ private slots:
         backspaceKey();
         QCOMPARE(text(), QStringLiteral("one\n  two"));
         QCOMPARE(caret(), 6);
+    }
+
+    void translatorFallsBackToEnglish() {
+        QTemporaryDir dir;
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(translator.language(), QStringLiteral("en"));
+        QVERIFY(translator.translate("Main", "Save").isNull());
+    }
+
+    void translatorFollowsTheLanguageFile() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/language"), "pt-BR\n");
+        writeFile(dir.path() + QStringLiteral("/pt.json"), R"({"Save": "Guardar", "Open": "Abrir"})");
+        writeFile(dir.path() + QStringLiteral("/pt-BR.json"), R"({"Save": "Salvar"})");
+
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(translator.language(), QStringLiteral("pt-BR"));
+        QCOMPARE(translator.translate("Main", "Save"), QStringLiteral("Salvar"));
+        QCOMPARE(translator.translate("Main", "Open"), QStringLiteral("Abrir"));
+        QVERIFY(translator.translate("Main", "Quit").isNull());
+    }
+
+    void translatorPicksPluralForms() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/language"), "ru\n");
+        writeFile(dir.path() + QStringLiteral("/en.json"), R"({"%n Words": {"one": "%n Word", "other": "%n Words"}})");
+        writeFile(dir.path() + QStringLiteral("/ru.json"),
+                  R"({"%n Words": {"one": "%n слово", "few": "%n слова", "many": "%n слов", "other": "%n слова"}})");
+
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(translator.translate("Main", "%n Words", nullptr, 21), QStringLiteral("%n слово"));
+        QCOMPARE(translator.translate("Main", "%n Words", nullptr, 22), QStringLiteral("%n слова"));
+        QCOMPARE(translator.translate("Main", "%n Words", nullptr, 25), QStringLiteral("%n слов"));
+    }
+
+    void englishCatalogMatchesTheSources() {
+        // en.json is what translators work from: every text the sources
+        // translate is in it, as itself or, when a count is passed, as its
+        // English plural forms, and nothing else is.
+        QStringList problems;
+        const QMap<QString, bool> used = translatables(sourceFolder(), &problems);
+        QVERIFY(used.value(QStringLiteral("%n Words")));
+        const QJsonObject english = readCatalog(sourceFolder() + QStringLiteral("/i18n/en.json"), &problems);
+        for (auto it = used.begin(); it != used.end(); ++it) {
+            const QJsonValue value = english.value(it.key());
+            if (value.isUndefined())
+                problems << QStringLiteral("missing from en.json: ") + it.key();
+            else if (it.value() && (value.toObject().keys() != QStringList{"one", "other"}
+                                    || value.toObject().value("other").toString() != it.key()))
+                problems << QStringLiteral("counted, so needs its one and other forms: ") + it.key();
+            else if (!it.value() && value.toString() != it.key())
+                problems << QStringLiteral("should be itself: ") + it.key();
+        }
+        for (const QString &key : english.keys())
+            if (!used.contains(key))
+                problems << QStringLiteral("in en.json but no source translates it: ") + key;
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+    }
+
+    void catalogsMatchTheEnglishOne() {
+        const QStringList problems = catalogProblems(sourceFolder() + QStringLiteral("/i18n"));
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+    }
+
+    void catalogChecksCatchBrokenTranslations() {
+        QTemporaryDir dir;
+        writeFile(dir.filePath(QStringLiteral("en.json")),
+                  R"({"Open %1": "Open %1", "&Cancel": "&Cancel", "&Discard": "&Discard", "&Save": "&Save",
+                      "%n Words": {"one": "%n Word", "other": "%n Words"}})");
+        writeFile(dir.filePath(QStringLiteral("pl.json")),
+                  R"({"Open %1": "Otwórz", "%n Words": {"one": "%n słowo", "few": "%n słowa", "other": "%n słowa"}})");
+        writeFile(dir.filePath(QStringLiteral("da.json")),
+                  R"({"Open %1": "Åbn %1", "&Cancel": "&Annuller", "&Discard": "&Afvis", "&Save": "Gem"})");
+        writeFile(dir.filePath(QStringLiteral("xx.json")), "{}");
+        QStringList problems = catalogProblems(dir.path());
+        problems.sort();
+        QCOMPARE(problems, QStringList({QStringLiteral("da: &Discard: shares its access key"),
+                                        QStringLiteral("da: &Save: needs an access key"),
+                                        QStringLiteral("pl: %n Words: needs exactly the plural forms few, many, one, other"),
+                                        QStringLiteral("pl: Open %1: has other placeholders than the English"),
+                                        QStringLiteral("xx.json: not one of Omarchy's language codes")}));
+    }
+
+    void everyCatalogIsCompiledIn() {
+        QFile resources(sourceFolder() + QStringLiteral("/resources.qrc"));
+        QVERIFY(resources.open(QIODevice::ReadOnly));
+        const QString listed = QString::fromUtf8(resources.readAll());
+        QStringList left;
+        for (const QString &name : QDir(sourceFolder() + QStringLiteral("/i18n"))
+                 .entryList({QStringLiteral("*.json")}, QDir::Files))
+            if (!listed.contains(QStringLiteral("<file>i18n/") + name + QStringLiteral("</file>")))
+                left << name;
+        QVERIFY2(left.isEmpty(), qPrintable(QStringLiteral("not in resources.qrc: ") + left.join(QStringLiteral(", "))));
+    }
+
+    void dialogButtonsTakeTheirAccessKeysFromTheTranslation() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/language"), "da\n");
+        writeFile(dir.path() + QStringLiteral("/da.json"),
+                  R"json({"&Cancel": "&Annuller", "&Discard": "&Kassér", "&Save": "Gem (&G)"})json");
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCoreApplication::installTranslator(&translator);
+        const auto removeTranslator = qScopeGuard([&translator] {
+            QCoreApplication::removeTranslator(&translator);
+        });
+
+        const QString dialogQmlPath = QFINDTESTDATA("../src/UnsavedChangesDialog.qml");
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"QML(
+            import QtQuick
+            import QtQuick.Controls
+            ApplicationWindow {
+                width: 640
+                height: 420
+                visible: true
+                UnsavedChangesDialog { objectName: "dialog"; containerWidth: 640; containerHeight: 420 }
+            }
+        )QML", QUrl::fromLocalFile(QFileInfo(dialogQmlPath).absolutePath() + QStringLiteral("/Harness.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QObject *dialog = root->findChild<QObject *>(QStringLiteral("dialog"));
+        QVERIFY(window && dialog);
+
+        QSignalSpy cancelSpy(dialog, SIGNAL(cancelRequested()));
+        QSignalSpy discardSpy(dialog, SIGNAL(discardRequested()));
+        QSignalSpy saveSpy(dialog, SIGNAL(saveRequested()));
+        const auto press = [&](Qt::Key key) {
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QTest::keyClick(window, key, Qt::AltModifier);
+        };
+
+        // The English keys are the translation's now.
+        press(Qt::Key_C);
+        QCOMPARE(cancelSpy.count(), 0);
+        QTest::keyClick(window, Qt::Key_A, Qt::AltModifier);
+        QTRY_COMPARE(cancelSpy.count(), 1);
+        press(Qt::Key_K);
+        QTRY_COMPARE(discardSpy.count(), 1);
+        press(Qt::Key_G);
+        QTRY_COMPARE(saveSpy.count(), 1);
+
+        // The label shows without its marker, the key underlined.
+        QQuickItem *save = nullptr;
+        for (QQuickItem *item : root->findChildren<QQuickItem *>())
+            if (item->property("mnemonicLabel").toString() == QStringLiteral("Gem (&G)"))
+                save = item;
+        QVERIFY(save);
+        QCOMPARE(save->property("text").toString(), QStringLiteral("Gem (G)"));
+        QCOMPARE(save->property("formattedText").toString(), QStringLiteral("Gem (<u>G</u>)"));
     }
 
     void unsavedChangesDialogSupportsAltMnemonics() {
