@@ -2736,6 +2736,66 @@ private slots:
         backend.discardRecovery();
     }
 
+    void autoSavesUntitledDraftsWhenEnabled() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString draftsPath = directory.filePath(QStringLiteral("drafts"));
+        QSettings().setValue(QStringLiteral("autosave/untitledDrafts"), true);
+        QSettings().setValue(QStringLiteral("autosave/draftsDirectory"), draftsPath);
+        // Untimestamped, so the collision with the file below is predictable.
+        QSettings().setValue(QStringLiteral("autosave/draftNameFormat"), QStringLiteral("{title}"));
+        // A draft with the same first line already exists and must survive.
+        QVERIFY(QDir().mkpath(draftsPath));
+        QFile existing(QDir(draftsPath).filePath(QStringLiteral("Trip notes.md")));
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        existing.write("older");
+        existing.close();
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+
+        // An unfinished first line is not yet a name, so nothing is written.
+        editor->setProperty("text", QStringLiteral("Trip no"));
+        QVERIFY(backend.editorTextChanged());
+        QTest::qWait(1200);
+        QCOMPARE(savedSpy.count(), 0);
+
+        editor->setProperty("text", QStringLiteral("Trip notes\nPack the tent."));
+        QVERIFY(backend.editorTextChanged());
+        QTRY_COMPARE(savedSpy.count(), 1);
+        QVERIFY(!backend.modified());
+
+        const QString expected = QDir(draftsPath).filePath(QStringLiteral("Trip notes-2.md"));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(expected));
+        QFile written(expected);
+        QVERIFY(written.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(written.readAll()),
+                 QStringLiteral("Trip notes\nPack the tent."));
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("older"));
+
+        QSettings().remove(QStringLiteral("autosave"));
+    }
+
+    void namesDraftsFromTheConfiguredFormat() {
+        const QDateTime when(QDate(2026, 3, 7), QTime(9, 5));
+        // The default puts the time before the title; letters in the title are
+        // never read as date fields.
+        QCOMPARE(Backend::draftFileName(QStringLiteral("Meeting dd MM\nbody"), when, QString()),
+                 QStringLiteral("2026-03-07-09:05_Meeting dd MM.md"));
+        QCOMPARE(Backend::draftFileName(QStringLiteral("Idea"), when,
+                                        QStringLiteral("{title} 'v'yyyy")),
+                 QStringLiteral("Idea v2026.md"));
+        // A slash in the format cannot lead out of the drafts folder.
+        QCOMPARE(Backend::draftFileName(QStringLiteral("Idea"), when,
+                                        QStringLiteral("yyyy/MM/{title}")),
+                 QStringLiteral("2026-03-Idea.md"));
+        QCOMPARE(Backend::draftFileName(QString(), when, QStringLiteral("yyyy_{title}")),
+                 QStringLiteral("2026_Untitled.md"));
+    }
+
     void holdsAutoSaveWhenTheFileChangesElsewhere() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());

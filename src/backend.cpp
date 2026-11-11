@@ -18,6 +18,7 @@
 #include <QRegularExpression>
 #include <QScreen>
 #include <QSettings>
+#include <QDateTime>
 #include <QStandardPaths>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -47,6 +48,10 @@ static QTextBlockFormat lineHeightFormat() {
 }
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
 const QString textZoomSetting = QStringLiteral("text/zoom");
+const QString autoSaveUntitledSetting = QStringLiteral("autosave/untitledDrafts");
+const QString draftsDirectorySetting = QStringLiteral("autosave/draftsDirectory");
+const QString draftNameFormatSetting = QStringLiteral("autosave/draftNameFormat");
+const QString defaultDraftNameFormat = QStringLiteral("yyyy-MM-dd-HH:mm_{title}");
 
 // The user's own text size, multiplied onto the desktop's text scale.
 // Browser-sized steps, with a wider range for small and large displays.
@@ -887,12 +892,82 @@ void Backend::scheduleRecovery() {
 }
 
 void Backend::scheduleAutoSave() {
-    // Only auto-save documents with a file name. Untitled drafts are left to
-    // manual save so auto-save never silently opens a file picker or creates a
-    // file the writer did not name; crash recovery still covers them. A named
-    // file that does not exist yet waits for an explicit save (see autoSave()).
-    if (m_fileUrl.isLocalFile() && !m_autoSaveSuspended && !m_autoSaveHeld)
+    // Named documents auto-save. Untitled drafts only do when the writer opted
+    // in, and only once their first line (the file name) is finished, so the
+    // name is not taken from a half-typed word. Crash recovery covers the rest.
+    // A named file that does not exist yet waits for an explicit save (see
+    // autoSave()).
+    if (m_autoSaveSuspended || m_autoSaveHeld)
+        return;
+    if (m_fileUrl.isLocalFile() || untitledDraftReady())
         m_autoSaveTimer.start();
+}
+
+bool Backend::untitledDraftReady() const {
+    if (!m_fileUrl.isEmpty() || !QSettings().value(autoSaveUntitledSetting, false).toBool())
+        return false;
+    const QString text = currentDocumentText();
+    const qsizetype lineEnd = text.indexOf(QLatin1Char('\n'));
+    return lineEnd >= 0 && !text.left(lineEnd).trimmed().isEmpty();
+}
+
+QString Backend::draftsDirectory() {
+    QString directory = QSettings().value(draftsDirectorySetting).toString().trimmed();
+    if (directory.isEmpty())
+        return QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
+            .filePath(QStringLiteral("omawrite/drafts"));
+    if (directory == QStringLiteral("~"))
+        return QDir::homePath();
+    if (directory.startsWith(QStringLiteral("~/")))
+        return QDir::home().filePath(directory.mid(2));
+    return directory;
+}
+
+QString Backend::draftFileName(const QString &text, const QDateTime &when, QString format) {
+    // The format is a QDateTime pattern with {title} standing for the first
+    // line. Each part around {title} is formatted on its own so letters in
+    // the title are never read as date fields.
+    if (format.trimmed().isEmpty())
+        format = defaultDraftNameFormat;
+    QString title = suggestedFileName(text);
+    title.chop(3);
+    const QStringList parts = format.split(QStringLiteral("{title}"));
+    QStringList formatted;
+    formatted.reserve(parts.size());
+    for (const QString &part : parts)
+        formatted << (part.isEmpty() ? QString() : when.toString(part));
+    QString name = formatted.join(title);
+    // The name must stay a single file inside the drafts folder.
+    name.replace(QRegularExpression(QStringLiteral("[/\\x00-\\x1f\\x7f]")),
+                 QStringLiteral("-"));
+    name = name.trimmed();
+    if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
+        name = QStringLiteral("Untitled");
+    if (!name.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
+        name += QStringLiteral(".md");
+    return name;
+}
+
+void Backend::autoSaveUntitledDraft() {
+    if (!untitledDraftReady())
+        return;
+
+    const QString directory = draftsDirectory();
+    if (!QDir().mkpath(directory)) {
+        setStatus(QStringLiteral("Could not create drafts folder %1.").arg(directory));
+        return;
+    }
+
+    // Never write over an existing file: number the name until it is free.
+    const QString name = draftFileName(currentDocumentText(), QDateTime::currentDateTime(),
+                                       QSettings().value(draftNameFormatSetting).toString());
+    const QString stem = name.left(name.size() - 3);
+    const QDir dir(directory);
+    QString path = dir.filePath(name);
+    for (int n = 2; QFileInfo::exists(path); ++n)
+        path = dir.filePath(QStringLiteral("%1-%2.md").arg(stem).arg(n));
+
+    saveTo(QUrl::fromLocalFile(path));
 }
 
 void Backend::holdAutoSave(bool held) {
@@ -904,7 +979,13 @@ void Backend::holdAutoSave(bool held) {
 }
 
 void Backend::autoSave() {
-    if (!m_modified || !m_fileUrl.isLocalFile() || m_autoSaveSuspended || m_autoSaveHeld)
+    if (!m_modified || m_autoSaveSuspended || m_autoSaveHeld)
+        return;
+    if (m_fileUrl.isEmpty()) {
+        autoSaveUntitledDraft();
+        return;
+    }
+    if (!m_fileUrl.isLocalFile())
         return;
 
     // Never write over a version we have not seen. The watcher normally

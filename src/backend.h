@@ -13,6 +13,7 @@
 #include <memory>
 
 class MarkdownHighlighter;
+class QDateTime;
 class QFont;
 class QTextDocument;
 class QWindow;
@@ -66,6 +67,7 @@ public:
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
+    static QString draftFileName(const QString &text, const QDateTime &when, QString format);
     static QString tomlValue(const QString &text);
     static QFont printFont(const QFont &editorFont, qreal screenDpi);
 
@@ -137,6 +139,9 @@ private:
     void writeRecovery();
     void scheduleAutoSave();
     void autoSave();
+    bool untitledDraftReady() const;
+    void autoSaveUntitledDraft();
+    static QString draftsDirectory();
     void suspendAutoSave();
     void restoreRecovery();
     void clearRecovery();
