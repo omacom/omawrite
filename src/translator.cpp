@@ -1,5 +1,6 @@
 #include "translator.h"
 
+#include <QCoreApplication>
 #include <QDir>
 #include <QFile>
 #include <QFileInfo>
@@ -19,6 +20,22 @@ Translator::Translator(const QString &languageFile, const QString &catalogDirect
     connect(&m_watcher, &QFileSystemWatcher::fileChanged, this, [this] { m_debounce.start(); });
     connect(&m_debounce, &QTimer::timeout, this, &Translator::reload);
     reload();
+}
+
+QString Translator::language() const {
+    QReadLocker locker(&m_lock);
+    return m_language;
+}
+
+bool Translator::isEmpty() const {
+    QReadLocker locker(&m_lock);
+    return m_strings.isEmpty();
+}
+
+// Unregistered before the catalog and its lock go, since a worker thread can
+// still be translating through QCoreApplication while the app shuts down.
+Translator::~Translator() {
+    QCoreApplication::removeTranslator(this);
 }
 
 // One registry code on the first line; anything else, or no file, is English.
@@ -81,12 +98,14 @@ QLocale Translator::formatLocale(const QString &language) {
 
 QString Translator::translate(const char *, const char *sourceText, const char *, int n) const {
     // A null string tells Qt there is no translation, so it shows the English.
-    const QJsonValue value = m_strings.value(QString::fromUtf8(sourceText));
+    QReadLocker locker(&m_lock);
+    const Entry entry = m_strings.value(QString::fromUtf8(sourceText));
+    const QJsonValue &value = entry.value;
     if (value.isString())
         return value.toString();
     if (value.isObject()) {
         const QJsonObject forms = value.toObject();
-        const QString form = forms.value(n < 0 ? "other" : pluralCategory(m_language, n)).toString();
+        const QString form = forms.value(n < 0 ? "other" : pluralCategory(entry.language, n)).toString();
         return form.isEmpty() ? forms.value("other").toString() : form;
     }
     return {};
@@ -98,22 +117,24 @@ void Translator::reload() {
         m_watcher.removePaths(paths);
 
     // omarchy-language replaces the file, which drops it from the watch, and a
-    // first pick creates it; watch its directory too and re-arm every time.
-    const QString directory = QFileInfo(m_languageFile).absolutePath();
-    if (QFileInfo::exists(directory))
-        m_watcher.addPath(directory);
+    // first pick creates it, and maybe its directory; watch the nearest
+    // existing directory too and re-arm every time.
+    QString directory = QFileInfo(m_languageFile).absolutePath();
+    while (!QFileInfo::exists(directory) && directory != "/")
+        directory = QFileInfo(directory).absolutePath();
+    m_watcher.addPath(directory);
     if (QFileInfo::exists(m_languageFile))
         m_watcher.addPath(m_languageFile);
 
     // Catalogs are compiled in, so only a different language needs a reload.
     const QString language = readLanguage(m_languageFile);
-    if (language == m_language)
+    if (language == this->language())
         return;
 
     // English first (it carries the plural forms of counted strings), then
     // the base language and the regional file over it (pt, then pt-BR), so a
     // missing string falls back toward English one step at a time.
-    QHash<QString, QJsonValue> strings;
+    QHash<QString, Entry> strings;
     QStringList codes{"en", language.section('-', 0, 0), language};
     codes.removeDuplicates();
     for (const auto &code : codes) {
@@ -123,11 +144,14 @@ void Translator::reload() {
         const QJsonObject object = QJsonDocument::fromJson(catalog.readAll()).object();
         for (auto it = object.begin(); it != object.end(); ++it)
             if ((it.value().isString() && !it.value().toString().isEmpty()) || it.value().isObject())
-                strings.insert(it.key(), it.value());
+                strings.insert(it.key(), {it.value(), code});
     }
 
-    m_language = language;
-    m_strings = strings;
+    {
+        QWriteLocker locker(&m_lock);
+        m_language = language;
+        m_strings = strings;
+    }
     // Dates, numbers, and Qt's own day and month names follow the language
     // too, and right-to-left languages mirror the window.
     const QLocale locale = formatLocale(language);

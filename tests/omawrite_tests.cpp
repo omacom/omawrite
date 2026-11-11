@@ -2552,6 +2552,27 @@ private slots:
         QCOMPARE(translator.translate("Main", "%n Words", nullptr, 25), QStringLiteral("%n слов"));
     }
 
+    void translatorTakesEnglishPluralRulesForAnEnglishFallback() {
+        // A counted string the catalog lacks shows its English forms, picked
+        // by English rules: 21 is "one" in Russian, and 1 is "other" in Japanese.
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/en.json"), R"({"%n Words": {"one": "%n Word", "other": "%n Words"}})");
+        writeFile(dir.path() + QStringLiteral("/ru.json"), R"({"Save": "Сохранить"})");
+        writeFile(dir.path() + QStringLiteral("/ja.json"), R"({"Save": "保存"})");
+        const auto restore = qScopeGuard([locale = QLocale(), direction = QGuiApplication::layoutDirection()] {
+            QLocale::setDefault(locale);
+            QGuiApplication::setLayoutDirection(direction);
+        });
+
+        writeFile(dir.path() + QStringLiteral("/language"), "ru\n");
+        Translator russian(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(russian.translate("Main", "%n Words", nullptr, 21), QStringLiteral("%n Words"));
+
+        writeFile(dir.path() + QStringLiteral("/language"), "ja\n");
+        Translator japanese(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(japanese.translate("Main", "%n Words", nullptr, 1), QStringLiteral("%n Word"));
+    }
+
     void translatorFollowsALanguageSwitch() {
         QTemporaryDir dir;
         const QString language = dir.path() + QStringLiteral("/language");
