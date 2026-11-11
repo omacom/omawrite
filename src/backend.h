@@ -137,6 +137,9 @@ private:
     void writeRecovery();
     void scheduleAutoSave();
     void autoSave();
+    bool untitledDraftReady() const;
+    void autoSaveUntitledDraft();
+    static QString draftsDirectory();
     void suspendAutoSave();
     void restoreRecovery();
     void clearRecovery();

@@ -35,12 +35,25 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
   Discard, and Save.
 
 Once a document has been saved to a file, edits are auto-saved to that file a
-moment after you stop typing, so `Ctrl+S` is rarely needed. Untitled drafts are
-never auto-saved — they wait for an explicit save so Omawrite never picks a file
-name for you. Unsaved drafts are recovered after an abnormal exit. Omawrite also
-watches open files and warns before an external change can replace local work;
-auto-save pauses until you reload, keep your version, or save. A recovered draft
-is never auto-saved over its file — save it to keep it.
+moment after you stop typing, so `Ctrl+S` is rarely needed. By default untitled
+drafts are never auto-saved — they wait for an explicit save so Omawrite never
+picks a file name for you. Unsaved drafts are recovered after an abnormal exit.
+Omawrite also watches open files and warns before an external change can replace
+local work; auto-save pauses until you reload, keep your version, or save. A
+recovered draft is never auto-saved over its file — save it to keep it.
+
+To auto-save untitled drafts too, set these in `~/.config/Omacom/omawrite.conf`:
+
+```ini
+[autosave]
+untitledDrafts=true
+draftsDirectory=~/Documents/Drafts
+```
+
+A draft is saved once its first line is finished, named after that line like
+the save picker suggests (`-2`, `-3`, … when the name is taken), and auto-saved
+as a normal file from then on. `draftsDirectory` defaults to `Drafts` in your
+documents folder and is created when needed.
 
 The font button in the footer picks the writing font from any installed text font,
 and Omawrite remembers the choice. IBM Plex Mono is the default.

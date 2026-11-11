@@ -2736,6 +2736,47 @@ private slots:
         backend.discardRecovery();
     }
 
+    void autoSavesUntitledDraftsWhenEnabled() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString draftsPath = directory.filePath(QStringLiteral("drafts"));
+        QSettings().setValue(QStringLiteral("autosave/untitledDrafts"), true);
+        QSettings().setValue(QStringLiteral("autosave/draftsDirectory"), draftsPath);
+        // A draft with the same first line already exists and must survive.
+        QVERIFY(QDir().mkpath(draftsPath));
+        QFile existing(QDir(draftsPath).filePath(QStringLiteral("Trip notes.md")));
+        QVERIFY(existing.open(QIODevice::WriteOnly));
+        existing.write("older");
+        existing.close();
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+
+        // An unfinished first line is not yet a name, so nothing is written.
+        editor->setProperty("text", QStringLiteral("Trip no"));
+        QVERIFY(backend.editorTextChanged());
+        QTest::qWait(1200);
+        QCOMPARE(savedSpy.count(), 0);
+
+        editor->setProperty("text", QStringLiteral("Trip notes\nPack the tent."));
+        QVERIFY(backend.editorTextChanged());
+        QTRY_COMPARE(savedSpy.count(), 1);
+        QVERIFY(!backend.modified());
+
+        const QString expected = QDir(draftsPath).filePath(QStringLiteral("Trip notes-2.md"));
+        QCOMPARE(backend.fileUrl(), QUrl::fromLocalFile(expected));
+        QFile written(expected);
+        QVERIFY(written.open(QIODevice::ReadOnly | QIODevice::Text));
+        QCOMPARE(QString::fromUtf8(written.readAll()),
+                 QStringLiteral("Trip notes\nPack the tent."));
+        QVERIFY(existing.open(QIODevice::ReadOnly));
+        QCOMPARE(existing.readAll(), QByteArray("older"));
+
+        QSettings().remove(QStringLiteral("autosave"));
+    }
+
     void holdsAutoSaveWhenTheFileChangesElsewhere() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
