@@ -10,6 +10,7 @@ license=('MIT' 'OFL-1.1')
 install='omawrite.install'
 depends=('qt6-base' 'qt6-declarative' 'qt6-wayland' 'xdg-desktop-portal')
 makedepends=('cmake' 'gcc' 'make')
+checkdepends=('ttf-dejavu')
 source=()
 sha256sums=()
 
