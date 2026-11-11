@@ -2552,6 +2552,36 @@ private slots:
         QCOMPARE(translator.translate("Main", "%n Words", nullptr, 25), QStringLiteral("%n слов"));
     }
 
+    void translatorFollowsALanguageSwitch() {
+        QTemporaryDir dir;
+        const QString language = dir.path() + QStringLiteral("/language");
+        // omarchy-language replaces the file, which drops it from a watch.
+        const auto pick = [&](const QByteArray &code) {
+            writeFile(dir.path() + QStringLiteral("/next"), code + "\n");
+            QFile::remove(language);
+            QVERIFY(QFile::rename(dir.path() + QStringLiteral("/next"), language));
+        };
+        pick("da");
+        writeFile(dir.path() + QStringLiteral("/da.json"), R"({"Save": "Gem"})");
+        writeFile(dir.path() + QStringLiteral("/ar.json"), R"({"Save": "حفظ"})");
+
+        const auto restore = qScopeGuard([locale = QLocale(), direction = QGuiApplication::layoutDirection()] {
+            QLocale::setDefault(locale);
+            QGuiApplication::setLayoutDirection(direction);
+        });
+        Translator translator(language, dir.path());
+        QCOMPARE(translator.translate("Main", "Save"), QStringLiteral("Gem"));
+
+        pick("ar");
+        QTRY_COMPARE(translator.language(), QStringLiteral("ar"));
+        QCOMPARE(translator.translate("Main", "Save"), QStringLiteral("حفظ"));
+        QCOMPARE(QGuiApplication::layoutDirection(), Qt::RightToLeft);
+
+        pick("da");
+        QTRY_COMPARE(translator.language(), QStringLiteral("da"));
+        QCOMPARE(QGuiApplication::layoutDirection(), Qt::LeftToRight);
+    }
+
     void englishCatalogMatchesTheSources() {
         // en.json is what translators work from: every text the sources
         // translate is in it, as itself or, when a count is passed, as its
