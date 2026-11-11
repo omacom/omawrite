@@ -88,6 +88,7 @@ public:
     Q_INVOKABLE void newWindow();
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
+    Q_INVOKABLE QString documentText() const { return currentDocumentText(); }
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE void setCaretPosition(int position);
     Q_INVOKABLE QString linkUrlAt(int position) const;

@@ -1210,8 +1210,14 @@ QUrl Backend::suggestedSaveUrl() const {
         directory.filePath(suggestedFileName(currentDocumentText())));
 }
 
+// toPlainText() turns non-breaking spaces into spaces and line separators
+// into newlines, which saving would write over the file's own characters.
 QString Backend::currentDocumentText() const {
-    return m_document ? m_document->toPlainText() : QString();
+    if (!m_document)
+        return {};
+    QString text = m_document->toRawText();
+    text.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+    return text;
 }
 
 int Backend::countWords(const QString &text) {

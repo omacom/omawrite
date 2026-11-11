@@ -665,6 +665,12 @@ ApplicationWindow {
                 onCursorPositionChanged: backend.setCaretPosition(cursorPosition)
                 onFontChanged: backend.documentFontChanged()
 
+                // The document's own characters, where `text` turns non-breaking
+                // spaces into spaces; read this for text that is written back.
+                function rawText() {
+                    return backend.documentText();
+                }
+
                 // One edit command, so a single undo takes the change back.
                 function replaceText(start, end, replacement) {
                     backend.replaceRange(start, end, replacement);
@@ -684,7 +690,7 @@ ApplicationWindow {
                     forceActiveFocus();
                     var start = selectionStart;
                     var end = selectionEnd;
-                    var selected = text.slice(start, end);
+                    var selected = rawText().slice(start, end);
                     var url = backend.clipboardUrl();
                     var label = selected.length > 0 ? selected : "link text";
                     var markdown = markdownLink(label, url.length > 0 ? url : "https://");
@@ -767,7 +773,7 @@ ApplicationWindow {
                     var end = text.indexOf("\n", Math.max(start, selectionEnd - 1));
                     if (end < 0)
                         end = text.length;
-                    var lines = text.slice(start, end).split("\n");
+                    var lines = rawText().slice(start, end).split("\n");
                     // The selection starts at an item and holds only lines that
                     // belong to one: other items, blanks, and indented lines.
                     // A fence indented under an item moves along with it whole;
@@ -831,7 +837,7 @@ ApplicationWindow {
                     if (url === "")
                         return false;
 
-                    var selected = text.slice(start, end);
+                    var selected = rawText().slice(start, end);
                     var leading = selected.match(/^\s*/)[0];
                     var trailing = selected.match(/\s*$/)[0];
                     var linkText = selected.slice(leading.length,
@@ -1269,10 +1275,11 @@ ApplicationWindow {
                         // One replacement over the span of every match, so a
                         // single undo takes them all back.
                         var first = matches[0];
+                        var text = editor.rawText();
                         var replaced = "";
                         var position = first;
                         for (var i = 0; i < matches.length; ++i) {
-                            replaced += editor.text.slice(position, matches[i]) + replaceField.text;
+                            replaced += text.slice(position, matches[i]) + replaceField.text;
                             position = matches[i] + query.length;
                         }
                         EditorMutations.replaceRange(editor, first, position, replaced);
