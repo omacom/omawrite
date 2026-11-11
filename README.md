@@ -84,7 +84,9 @@ build and install the package:
 ./bin/install
 ```
 
-This runs `makepkg -fsi`, whose `build()` runs `bin/build`, and installs the package through pacman, which may ask for authentication. To build a package archive for inspection without installing it:
+This runs the local build and `makepkg -fsi`, which installs the package through
+pacman and may ask for authentication. To build a package archive for inspection
+without installing it:
 
 ```sh
 cd pkgbuild
