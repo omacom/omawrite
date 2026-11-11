@@ -18,6 +18,7 @@
 #include <QRegularExpression>
 #include <QScreen>
 #include <QSettings>
+#include <QDateTime>
 #include <QStandardPaths>
 #include <QJsonDocument>
 #include <QJsonObject>
@@ -49,6 +50,8 @@ const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory"
 const QString textZoomSetting = QStringLiteral("text/zoom");
 const QString autoSaveUntitledSetting = QStringLiteral("autosave/untitledDrafts");
 const QString draftsDirectorySetting = QStringLiteral("autosave/draftsDirectory");
+const QString draftNameFormatSetting = QStringLiteral("autosave/draftNameFormat");
+const QString defaultDraftNameFormat = QStringLiteral("yyyy-MM-dd-HH:mm_{title}");
 
 // The user's own text size, multiplied onto the desktop's text scale.
 // Browser-sized steps, with a wider range for small and large displays.
@@ -912,12 +915,37 @@ QString Backend::draftsDirectory() {
     QString directory = QSettings().value(draftsDirectorySetting).toString().trimmed();
     if (directory.isEmpty())
         return QDir(QStandardPaths::writableLocation(QStandardPaths::DocumentsLocation))
-            .filePath(QStringLiteral("Drafts"));
+            .filePath(QStringLiteral("omawrite/drafts"));
     if (directory == QStringLiteral("~"))
         return QDir::homePath();
     if (directory.startsWith(QStringLiteral("~/")))
         return QDir::home().filePath(directory.mid(2));
     return directory;
+}
+
+QString Backend::draftFileName(const QString &text, const QDateTime &when, QString format) {
+    // The format is a QDateTime pattern with {title} standing for the first
+    // line. Each part around {title} is formatted on its own so letters in
+    // the title are never read as date fields.
+    if (format.trimmed().isEmpty())
+        format = defaultDraftNameFormat;
+    QString title = suggestedFileName(text);
+    title.chop(3);
+    const QStringList parts = format.split(QStringLiteral("{title}"));
+    QStringList formatted;
+    formatted.reserve(parts.size());
+    for (const QString &part : parts)
+        formatted << (part.isEmpty() ? QString() : when.toString(part));
+    QString name = formatted.join(title);
+    // The name must stay a single file inside the drafts folder.
+    name.replace(QRegularExpression(QStringLiteral("[/\\x00-\\x1f\\x7f]")),
+                 QStringLiteral("-"));
+    name = name.trimmed();
+    if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
+        name = QStringLiteral("Untitled");
+    if (!name.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
+        name += QStringLiteral(".md");
+    return name;
 }
 
 void Backend::autoSaveUntitledDraft() {
@@ -931,7 +959,8 @@ void Backend::autoSaveUntitledDraft() {
     }
 
     // Never write over an existing file: number the name until it is free.
-    const QString name = suggestedFileName(currentDocumentText());
+    const QString name = draftFileName(currentDocumentText(), QDateTime::currentDateTime(),
+                                       QSettings().value(draftNameFormatSetting).toString());
     const QString stem = name.left(name.size() - 3);
     const QDir dir(directory);
     QString path = dir.filePath(name);

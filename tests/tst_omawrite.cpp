@@ -2742,6 +2742,8 @@ private slots:
         const QString draftsPath = directory.filePath(QStringLiteral("drafts"));
         QSettings().setValue(QStringLiteral("autosave/untitledDrafts"), true);
         QSettings().setValue(QStringLiteral("autosave/draftsDirectory"), draftsPath);
+        // Untimestamped, so the collision with the file below is predictable.
+        QSettings().setValue(QStringLiteral("autosave/draftNameFormat"), QStringLiteral("{title}"));
         // A draft with the same first line already exists and must survive.
         QVERIFY(QDir().mkpath(draftsPath));
         QFile existing(QDir(draftsPath).filePath(QStringLiteral("Trip notes.md")));
@@ -2775,6 +2777,23 @@ private slots:
         QCOMPARE(existing.readAll(), QByteArray("older"));
 
         QSettings().remove(QStringLiteral("autosave"));
+    }
+
+    void namesDraftsFromTheConfiguredFormat() {
+        const QDateTime when(QDate(2026, 3, 7), QTime(9, 5));
+        // The default puts the time before the title; letters in the title are
+        // never read as date fields.
+        QCOMPARE(Backend::draftFileName(QStringLiteral("Meeting dd MM\nbody"), when, QString()),
+                 QStringLiteral("2026-03-07-09:05_Meeting dd MM.md"));
+        QCOMPARE(Backend::draftFileName(QStringLiteral("Idea"), when,
+                                        QStringLiteral("{title} 'v'yyyy")),
+                 QStringLiteral("Idea v2026.md"));
+        // A slash in the format cannot lead out of the drafts folder.
+        QCOMPARE(Backend::draftFileName(QStringLiteral("Idea"), when,
+                                        QStringLiteral("yyyy/MM/{title}")),
+                 QStringLiteral("2026-03-Idea.md"));
+        QCOMPARE(Backend::draftFileName(QString(), when, QStringLiteral("yyyy_{title}")),
+                 QStringLiteral("2026_Untitled.md"));
     }
 
     void holdsAutoSaveWhenTheFileChangesElsewhere() {

@@ -47,13 +47,17 @@ To auto-save untitled drafts too, set these in `~/.config/Omacom/omawrite.conf`:
 ```ini
 [autosave]
 untitledDrafts=true
-draftsDirectory=~/Documents/Drafts
+draftsDirectory=~/Documents/omawrite/drafts
+draftNameFormat=yyyy-MM-dd-HH:mm_{title}
 ```
 
-A draft is saved once its first line is finished, named after that line like
-the save picker suggests (`-2`, `-3`, … when the name is taken), and auto-saved
-as a normal file from then on. `draftsDirectory` defaults to `Drafts` in your
-documents folder and is created when needed.
+A draft is saved once its first line is finished, and auto-saved as a normal
+file from then on. `draftNameFormat` is a Qt date-time pattern (`yyyy`, `MM`,
+`dd`, `HH`, `mm`, `ss`, …; quote literal letters as `'v'`) taken at the first
+save, with `{title}` for the first line, so the default gives
+`2026-03-07-09:05_Trip notes.md`. `-2`, `-3`, … are added when the name is
+taken. Both settings show their defaults above; the folder is created when
+needed.
 
 The font button in the footer picks the writing font from any installed text font,
 and Omawrite remembers the choice. IBM Plex Mono is the default.
