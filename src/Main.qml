@@ -713,7 +713,8 @@ ApplicationWindow {
                         return;
                     }
                     var lineStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
-                    var line = text.slice(lineStart, cursorPosition);
+                    // Raw, as its indentation is copied onto the next line.
+                    var line = rawText().slice(lineStart, cursorPosition);
                     if (backend.insideFence(cursorPosition)) {
                         replaceSelectionWith("\n");
                         return;

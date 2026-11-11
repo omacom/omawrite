@@ -2088,6 +2088,11 @@ private slots:
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(text(), QStringLiteral("- one\n- two"));
 
+        // Return carries an item's indentation onto the next as it is.
+        load(QStringLiteral("\u00a0- a"), 4);
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(backend.documentText(), QStringLiteral("\u00a0- a\n\u00a0- "));
+
         // A line separator starts a line as a newline does, and stays one.
         load(QStringLiteral("- a\u2028- b"), 0);
         QMetaObject::invokeMethod(editor, "selectAll");
