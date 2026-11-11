@@ -10,6 +10,7 @@ Dialog {
     property color textColor: darkMode ? "#d0d0d0" : "#42464c"
     property color strongTextColor: darkMode ? "#eeeeee" : "#222324"
     property color activeButtonColor: "#428bca"
+    property color activeButtonLabelColor: "#ffffff"
     property int containerWidth: 520
     property int containerHeight: 320
     property real textScale: 1
@@ -87,9 +88,10 @@ Dialog {
                 text: "Keep Mine"
                 darkMode: root.darkMode
                 textScale: root.textScale
-                labelColor: root.deleted ? "#ffffff" : root.textColor
+                labelColor: root.deleted ? root.activeButtonLabelColor : root.textColor
                 primary: root.deleted
                 activeColor: root.activeButtonColor
+                activeLabelColor: root.activeButtonLabelColor
                 KeyNavigation.left: reloadButton
                 KeyNavigation.right: reloadButton
                 KeyNavigation.tab: reloadButton
@@ -113,6 +115,7 @@ Dialog {
                 darkMode: root.darkMode
                 textScale: root.textScale
                 activeColor: root.activeButtonColor
+                activeLabelColor: root.activeButtonLabelColor
                 KeyNavigation.left: keepButton
                 KeyNavigation.right: keepButton
                 KeyNavigation.tab: keepButton

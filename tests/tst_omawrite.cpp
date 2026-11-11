@@ -1538,6 +1538,13 @@ private slots:
         QCOMPARE(mixed.at(1).kind, MarkdownHighlighter::InlineKind::Italic);
     }
 
+    void labelsTheAccentInWhicheverReads() {
+        // A light accent takes a dark label, a dark one a light label.
+        QCOMPARE(Backend::readableOn(QStringLiteral("#FFD60A")), QStringLiteral("black"));
+        QCOMPARE(Backend::readableOn(QStringLiteral("#7aa2f7")), QStringLiteral("black"));
+        QCOMPARE(Backend::readableOn(QStringLiteral("#112233")), QStringLiteral("white"));
+    }
+
     void loadsCurrentOmarchyTheme() {
         ScopedTheme theme(
             "mode = \"light\"\n"

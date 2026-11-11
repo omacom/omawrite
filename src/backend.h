@@ -30,6 +30,7 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeAccentForeground READ themeAccentForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelectionForeground READ themeSelectionForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString editorFont READ editorFont WRITE setEditorFont NOTIFY editorFontChanged)
@@ -55,6 +56,7 @@ public:
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
+    QString themeAccentForeground() const { return readableOn(m_themeAccent); }
     QString themeSelection() const { return m_themeSelection; }
     QString themeCodeBackground() const { return m_themeCodeBackground; }
     QString themeSelectionForeground() const { return m_themeSelectionForeground; }
@@ -67,6 +69,7 @@ public:
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
     static QString tomlValue(const QString &text);
+    static QString readableOn(const QString &color);
     static QFont printFont(const QFont &editorFont, qreal screenDpi);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);

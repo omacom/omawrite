@@ -6,8 +6,9 @@ Button {
 
     property bool primary: false
     property bool darkMode: true
-    property color labelColor: primary ? "#ffffff" : "#d0d0d0"
     property color activeColor: "#428bca"
+    property color activeLabelColor: "#ffffff"
+    property color labelColor: primary ? activeLabelColor : "#d0d0d0"
     property real textScale: 1
     property string formattedText: ""
 
@@ -34,7 +35,8 @@ Button {
         implicitHeight: 34
         radius: 0
         color: control.primary
-            ? (control.down ? "#347ab3" : control.hovered ? "#4b96d0" : control.activeColor)
+            ? (control.down ? Qt.darker(control.activeColor, 1.15)
+                            : control.hovered ? Qt.lighter(control.activeColor, 1.1) : control.activeColor)
             : control.down
                 ? (control.darkMode ? "#2a2a2a" : "#dedede")
                 : control.hovered
@@ -43,7 +45,7 @@ Button {
         border.color: control.activeFocus
             ? (control.darkMode ? "#eeeeee" : "#222324")
             : control.primary
-                ? "#367eb7"
+                ? Qt.darker(control.activeColor, 1.1)
                 : (control.darkMode ? "#424242" : "#c8c8c8")
     }
 }
