@@ -65,6 +65,9 @@ Dialog {
     }
 
     header: ColumnLayout {
+        // Popups sit outside the window's mirrored root, so they mirror here.
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         spacing: 6
         Label {
             Layout.fillWidth: true
@@ -96,6 +99,8 @@ Dialog {
     }
 
     contentItem: ScrollView {
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         id: shortcutsScroll
         objectName: "shortcutsScroll"
         clip: true
@@ -145,6 +150,8 @@ Dialog {
     }
 
     footer: Item {
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         implicitHeight: closeButton.implicitHeight + 20
         SquareDialogButton {
             id: closeButton

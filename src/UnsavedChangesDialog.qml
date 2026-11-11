@@ -54,6 +54,9 @@ Dialog {
     }
 
     contentItem: Column {
+        // Popups sit outside the window's mirrored root, so they mirror here.
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         spacing: 12
 
         Label {
@@ -75,6 +78,8 @@ Dialog {
     }
 
     footer: Item {
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         implicitHeight: dialogButtons.implicitHeight + 20
 
         Row {
