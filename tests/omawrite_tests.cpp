@@ -172,9 +172,9 @@ static QString accessKey(const QString &label) {
 // What's wrong with the translations in `folder`, measured against its
 // en.json: an unknown language, empty or broken translations, plural forms
 // that don't fit the language's rule, and access keys the unsaved-changes
-// prompt can't tell apart. A string a catalog lacks is not a problem: the
-// app shows the English meanwhile, so a new string never waits on 49
-// languages.
+// prompt can't tell apart or bind. A string a catalog lacks is not a
+// problem: the app shows the English meanwhile, so a new string never waits
+// on 49 languages.
 static QStringList catalogProblems(const QString &folder) {
     static const QStringList codes{
         "ar", "bg", "bn", "ca", "cs", "da", "de", "el", "es-MX", "et", "fa", "fi", "fil",
@@ -232,6 +232,8 @@ static QStringList catalogProblems(const QString &folder) {
                 problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": needs an access key");
             else if (keys.contains(key))
                 problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": shares its access key");
+            else if (QKeySequence(key).count() != 1 || QKeySequence(key)[0].key() == Qt::Key_unknown)
+                problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": has an access key Qt cannot bind");
             keys << key;
         }
     }
