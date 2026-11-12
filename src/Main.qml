@@ -1056,13 +1056,15 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
-            spacing: 12
-            opacity: 0.55
+            spacing: win.scaledSize(12)
 
+            // Brighter while there are unsaved changes, as in Plain.
             FooterIconButton {
                 objectName: "saveButton"
                 iconName: "save"
-                iconColor: win.mutedColor
+                size: win.scaledSize(16)
+                iconColor: backend.modified ? win.textColor : win.mutedColor
+                opacity: backend.modified ? 0.9 : 0.55
                 tooltip: "Save"
                 onClicked: backend.save()
             }
@@ -1070,7 +1072,9 @@ ApplicationWindow {
             FooterIconButton {
                 objectName: "openButton"
                 iconName: "open"
+                size: win.scaledSize(16)
                 iconColor: win.mutedColor
+                opacity: 0.55
                 tooltip: "Open"
                 onClicked: backend.openDialog()
             }
@@ -1079,7 +1083,9 @@ ApplicationWindow {
                 id: fontButton
                 objectName: "fontButton"
                 iconName: "font"
+                size: win.scaledSize(16)
                 iconColor: win.mutedColor
+                opacity: 0.55
                 tooltip: "Font"
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
@@ -1087,13 +1093,13 @@ ApplicationWindow {
             Label {
                 text: backend.status
                 color: win.mutedColor
+                opacity: 0.55
                 font.family: "IBM Plex Mono"
                 font.pixelSize: win.scaledSize(11)
                 visible: text !== ""
                 elide: Text.ElideRight
                 width: Math.min(360, win.width / 3)
-                height: win.scaledSize(16)
-                verticalAlignment: Text.AlignVCenter
+                anchors.verticalCenter: parent.verticalCenter
             }
         }
 
