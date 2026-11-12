@@ -10,6 +10,7 @@ Dialog {
     property color textColor: darkMode ? "#d0d0d0" : "#42464c"
     property color strongTextColor: darkMode ? "#eeeeee" : "#222324"
     property color activeButtonColor: "#428bca"
+    property color activeButtonLabelColor: "#ffffff"
     property real textScale: 1
     property int containerWidth: 1280
     property int containerHeight: 820
@@ -156,6 +157,7 @@ Dialog {
             darkMode: root.darkMode
             textScale: root.textScale
             activeColor: root.activeButtonColor
+            activeLabelColor: root.activeButtonLabelColor
             onClicked: root.close()
         }
     }

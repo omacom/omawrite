@@ -34,6 +34,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 
 #include "markdownhighlighter.h"
@@ -1046,6 +1047,14 @@ void Backend::checkWatchedFile() {
     if (m_fileMissing && wasMissing)
         return;
     reportExternalChange(m_fileMissing);
+}
+
+// Black or white, whichever reads on the color (WCAG relative luminance).
+QString Backend::readableOn(const QString &color) {
+    const QColor c(color);
+    auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
+    const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
+    return luminance > .179 ? QStringLiteral("black") : QStringLiteral("white");
 }
 
 // A quoted TOML value ends at its closing quote; whatever trails it is an inline comment.

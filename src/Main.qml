@@ -357,6 +357,7 @@ ApplicationWindow {
         textColor: win.textColor
         strongTextColor: win.textColor
         activeButtonColor: backend.themeAccent
+        activeButtonLabelColor: backend.themeAccentForeground
         containerWidth: win.width
         containerHeight: win.height
 
@@ -384,6 +385,7 @@ ApplicationWindow {
         textColor: win.textColor
         strongTextColor: win.textColor
         activeButtonColor: backend.themeAccent
+        activeButtonLabelColor: backend.themeAccentForeground
         containerWidth: win.width
         containerHeight: win.height
 
@@ -397,6 +399,7 @@ ApplicationWindow {
         textScale: win.textScale
         textColor: win.textColor
         activeButtonColor: backend.themeAccent
+        activeButtonLabelColor: backend.themeAccentForeground
         containerWidth: win.width
         containerHeight: win.height
     }
