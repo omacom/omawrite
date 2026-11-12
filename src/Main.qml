@@ -21,6 +21,9 @@ ApplicationWindow {
     readonly property color mutedColor: darkMode ? "#909191" : "#aeb1b5"
     readonly property color selectionFill: backend.themeSelection
     readonly property color selectionTextColor: backend.themeSelectionForeground
+    // The theme's shade for panels, which the search bar, font picker and
+    // tooltips sit on.
+    readonly property color panelColor: backend.themePanelBackground
     // The desktop's text size knob (GNOME's text-scaling-factor, which
     // `omarchy display text size` drives) anchored so its 12px default leaves
     // the app at the sizes it was designed around, times the user's own
@@ -1085,6 +1088,8 @@ ApplicationWindow {
                 iconColor: backend.modified ? win.textColor : win.mutedColor
                 opacity: backend.modified ? 0.9 : 0.55
                 tooltip: qsTr("Save")
+                tooltipColor: win.panelColor
+                tooltipTextColor: win.textColor
                 onClicked: backend.save()
             }
 
@@ -1095,6 +1100,8 @@ ApplicationWindow {
                 iconColor: win.mutedColor
                 opacity: 0.55
                 tooltip: qsTr("Open")
+                tooltipColor: win.panelColor
+                tooltipTextColor: win.textColor
                 onClicked: backend.openDialog()
             }
 
@@ -1106,6 +1113,8 @@ ApplicationWindow {
                 iconColor: win.mutedColor
                 opacity: 0.55
                 tooltip: qsTr("Font")
+                tooltipColor: win.panelColor
+                tooltipTextColor: win.textColor
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
 
@@ -1137,8 +1146,8 @@ ApplicationWindow {
             fonts: backend.availableFonts
             currentFont: backend.editorFont
             defaultFont: "IBM Plex Mono"
-            darkMode: win.darkMode
             textScale: win.textScale
+            panelColor: win.panelColor
             textColor: win.textColor
             mutedColor: win.mutedColor
             highlightColor: backend.themeAccent
@@ -1182,7 +1191,7 @@ ApplicationWindow {
 
             background: Rectangle {
                 radius: 9
-                color: win.darkMode ? "#22221f" : "#fffef2"
+                color: win.panelColor
             }
 
             RowLayout {

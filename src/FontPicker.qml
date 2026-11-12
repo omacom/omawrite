@@ -8,8 +8,8 @@ Popup {
     property var fonts: []
     property string currentFont
     property string defaultFont
-    property bool darkMode: true
     property real textScale: 1
+    property color panelColor: "#22221f"
     property color textColor: "#d0d0d0"
     property color mutedColor: "#909191"
     property color highlightColor: "#428bca"
@@ -56,7 +56,7 @@ Popup {
 
     background: Rectangle {
         radius: 9
-        color: picker.darkMode ? "#22221f" : "#fffef2"
+        color: picker.panelColor
     }
 
     contentItem: Column {
