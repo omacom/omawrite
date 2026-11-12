@@ -64,13 +64,11 @@
   "Shortcuts": "Skratky",
   "Start writing": "Začnite písať",
   "Strikethrough": "Prečiarknuté",
-  "Text size %1%": "Veľkosť textu %1%",
   "There is no document to print.": "Nie je žiadny dokument na tlač.",
   "This file changed outside Omawrite.": "Tento súbor bol zmenený mimo Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Tento súbor bol zmenený mimo Omawrite. Opätovné načítanie zahodí vaše zmeny.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Tento súbor bol odstránený mimo Omawrite. Ponechať text ako neuložený dokument?",
   "Undo": "Späť",
-  "Unsaved": "Neuložené",
   "Unsaved changes": "Neuložené zmeny",
   "Untitled": "Bez názvu"
 }

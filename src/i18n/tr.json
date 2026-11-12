@@ -63,13 +63,11 @@
   "Shortcuts": "Kısayollar",
   "Start writing": "Yazmaya başlayın",
   "Strikethrough": "Üstü çizili",
-  "Text size %1%": "Metin boyutu %1%",
   "There is no document to print.": "Yazdırılacak belge yok.",
   "This file changed outside Omawrite.": "Bu dosya Omawrite dışında değiştirildi.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Bu dosya Omawrite dışında değiştirildi. Yeniden yüklemek değişikliklerinizi silecek.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Bu dosya Omawrite dışında silindi. Metniniz kaydedilmemiş bir belge olarak tutulsun mu?",
   "Undo": "Geri al",
-  "Unsaved": "Kaydedilmedi",
   "Unsaved changes": "Kaydedilmemiş değişiklikler",
   "Untitled": "Adsız"
 }

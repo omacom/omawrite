@@ -65,13 +65,11 @@
   "Shortcuts": "Скорочення",
   "Start writing": "Почніть писати",
   "Strikethrough": "Закреслений",
-  "Text size %1%": "Розмір тексту %1%",
   "There is no document to print.": "Немає документа для друку.",
   "This file changed outside Omawrite.": "Цей файл змінено поза Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Цей файл змінено поза Omawrite. Перезавантаження відкине ваші зміни.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Цей файл вилучено поза Omawrite. Залишити ваш текст як незбережений документ?",
   "Undo": "Скасувати",
-  "Unsaved": "Не збережено",
   "Unsaved changes": "Незбережені зміни",
   "Untitled": "Без назви"
 }

@@ -64,13 +64,11 @@
   "Shortcuts": "Пречице",
   "Start writing": "Почните да пишете",
   "Strikethrough": "Прецртано",
-  "Text size %1%": "Величина текста %1%",
   "There is no document to print.": "Нема документа за штампу.",
   "This file changed outside Omawrite.": "Ова датотека је измењена изван програма Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Ова датотека је измењена изван програма Omawrite. Поновно учитавање ће одбацити ваше измене.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Ова датотека је уклоњена изван програма Omawrite. Задржати текст као несачуван документ?",
   "Undo": "Опозови",
-  "Unsaved": "Није сачувано",
   "Unsaved changes": "Несачуване измене",
   "Untitled": "Без наслова"
 }

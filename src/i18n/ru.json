@@ -65,13 +65,11 @@
   "Shortcuts": "Горячие клавиши",
   "Start writing": "Начните писать",
   "Strikethrough": "Зачёркнутый",
-  "Text size %1%": "Размер текста %1%",
   "There is no document to print.": "Нет документа для печати.",
   "This file changed outside Omawrite.": "Этот файл был изменён вне Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Этот файл был изменён вне Omawrite. Перезагрузка отменит ваши изменения.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Этот файл был удалён вне Omawrite. Оставить текст как несохранённый документ?",
   "Undo": "Отменить",
-  "Unsaved": "Не сохранено",
   "Unsaved changes": "Несохранённые изменения",
   "Untitled": "Без названия"
 }

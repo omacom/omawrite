@@ -62,13 +62,11 @@
   "Shortcuts": "Phím tắt",
   "Start writing": "Bắt đầu viết",
   "Strikethrough": "Gạch ngang",
-  "Text size %1%": "Cỡ chữ %1%",
   "There is no document to print.": "Không có tài liệu để in.",
   "This file changed outside Omawrite.": "Tệp này đã bị thay đổi bên ngoài Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Tệp này đã bị thay đổi bên ngoài Omawrite. Tải lại sẽ hủy các thay đổi của bạn.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Tệp này đã bị xóa bên ngoài Omawrite. Giữ văn bản của bạn dưới dạng tài liệu chưa lưu?",
   "Undo": "Hoàn tác",
-  "Unsaved": "Chưa lưu",
   "Unsaved changes": "Thay đổi chưa lưu",
   "Untitled": "Chưa đặt tên"
 }

@@ -62,13 +62,11 @@
   "Shortcuts": "Pintasan",
   "Start writing": "Mula menulis",
   "Strikethrough": "Garis lorek",
-  "Text size %1%": "Saiz teks %1%",
   "There is no document to print.": "Tiada dokumen untuk dicetak.",
   "This file changed outside Omawrite.": "Fail ini telah diubah di luar Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Fail ini telah diubah di luar Omawrite. Memuat semula akan membuang perubahan anda.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Fail ini telah dibuang di luar Omawrite. Kekalkan teks anda sebagai dokumen yang belum disimpan?",
   "Undo": "Buat asal",
-  "Unsaved": "Belum disimpan",
   "Unsaved changes": "Perubahan belum disimpan",
   "Untitled": "Tanpa tajuk"
 }

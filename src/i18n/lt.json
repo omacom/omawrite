@@ -64,13 +64,11 @@
   "Shortcuts": "Spartieji klavišai",
   "Start writing": "Pradėkite rašyti",
   "Strikethrough": "Perbrauktas",
-  "Text size %1%": "Teksto dydis %1%",
   "There is no document to print.": "Nėra dokumento, kurį būtų galima spausdinti.",
   "This file changed outside Omawrite.": "Šis failas buvo pakeistas už Omawrite ribų.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Šis failas buvo pakeistas už Omawrite ribų. Įkėlus iš naujo jūsų pakeitimai bus prarasti.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Šis failas buvo pašalintas už Omawrite ribų. Palikti tekstą kaip neįrašytą dokumentą?",
   "Undo": "Atšaukti",
-  "Unsaved": "Neįrašyta",
   "Unsaved changes": "Neįrašyti pakeitimai",
   "Untitled": "Be pavadinimo"
 }

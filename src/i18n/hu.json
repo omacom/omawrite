@@ -63,13 +63,11 @@
   "Shortcuts": "Billentyűparancsok",
   "Start writing": "Kezdjen el írni",
   "Strikethrough": "Áthúzott",
-  "Text size %1%": "Szövegméret: %1%",
   "There is no document to print.": "Nincs nyomtatható dokumentum.",
   "This file changed outside Omawrite.": "A fájl az Omawrite-on kívül megváltozott.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "A fájl az Omawrite-on kívül megváltozott. Az újratöltés elveti a módosításait.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "A fájlt az Omawrite-on kívül törölték. Megtartja a szöveget nem mentett dokumentumként?",
   "Undo": "Visszavonás",
-  "Unsaved": "Nincs mentve",
   "Unsaved changes": "Nem mentett módosítások",
   "Untitled": "Névtelen"
 }

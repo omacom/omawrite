@@ -63,13 +63,11 @@
   "Shortcuts": "குறுக்குவழிகள்",
   "Start writing": "எழுதத் தொடங்குங்கள்",
   "Strikethrough": "அடித்தல்",
-  "Text size %1%": "உரை அளவு %1%",
   "There is no document to print.": "அச்சிட ஆவணம் எதுவும் இல்லை.",
   "This file changed outside Omawrite.": "இந்தக் கோப்பு Omawrite க்கு வெளியே மாற்றப்பட்டது.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "இந்தக் கோப்பு Omawrite க்கு வெளியே மாற்றப்பட்டது. மீண்டும் ஏற்றினால் உங்கள் மாற்றங்கள் நிராகரிக்கப்படும்.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "இந்தக் கோப்பு Omawrite க்கு வெளியே நீக்கப்பட்டது. உங்கள் உரையைச் சேமிக்கப்படாத ஆவணமாக வைத்திருக்கவா?",
   "Undo": "செயல்தவிர்",
-  "Unsaved": "சேமிக்கப்படவில்லை",
   "Unsaved changes": "சேமிக்கப்படாத மாற்றங்கள்",
   "Untitled": "தலைப்பிடப்படாதது"
 }

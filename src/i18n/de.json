@@ -63,13 +63,11 @@
   "Shortcuts": "Tastenkürzel",
   "Start writing": "Losschreiben",
   "Strikethrough": "Durchgestrichen",
-  "Text size %1%": "Textgröße %1%",
   "There is no document to print.": "Es gibt kein Dokument zum Drucken.",
   "This file changed outside Omawrite.": "Diese Datei wurde außerhalb von Omawrite geändert.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Diese Datei wurde außerhalb von Omawrite geändert. Beim Neuladen gehen die eigenen Änderungen verloren.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Diese Datei wurde außerhalb von Omawrite entfernt. Den Text als nicht gespeichertes Dokument behalten?",
   "Undo": "Rückgängig",
-  "Unsaved": "Nicht gespeichert",
   "Unsaved changes": "Nicht gespeicherte Änderungen",
   "Untitled": "Unbenannt"
 }

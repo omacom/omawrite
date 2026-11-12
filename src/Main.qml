@@ -357,6 +357,7 @@ ApplicationWindow {
         textColor: win.textColor
         strongTextColor: win.textColor
         activeButtonColor: backend.themeAccent
+        activeButtonLabelColor: backend.themeAccentForeground
         containerWidth: win.width
         containerHeight: win.height
 
@@ -384,6 +385,7 @@ ApplicationWindow {
         textColor: win.textColor
         strongTextColor: win.textColor
         activeButtonColor: backend.themeAccent
+        activeButtonLabelColor: backend.themeAccentForeground
         containerWidth: win.width
         containerHeight: win.height
 
@@ -397,6 +399,7 @@ ApplicationWindow {
         textScale: win.textScale
         textColor: win.textColor
         activeButtonColor: backend.themeAccent
+        activeButtonLabelColor: backend.themeAccentForeground
         containerWidth: win.width
         containerHeight: win.height
     }
@@ -669,6 +672,12 @@ ApplicationWindow {
                 onCursorPositionChanged: backend.setCaretPosition(cursorPosition)
                 onFontChanged: backend.documentFontChanged()
 
+                // The document's own characters, where `text` turns non-breaking
+                // spaces into spaces; read this for text that is written back.
+                function rawText() {
+                    return backend.documentText();
+                }
+
                 // One edit command, so a single undo takes the change back.
                 function replaceText(start, end, replacement) {
                     backend.replaceRange(start, end, replacement);
@@ -688,7 +697,7 @@ ApplicationWindow {
                     forceActiveFocus();
                     var start = selectionStart;
                     var end = selectionEnd;
-                    var selected = text.slice(start, end);
+                    var selected = rawText().slice(start, end);
                     var url = backend.clipboardUrl();
                     var label = selected.length > 0 ? selected : qsTr("link text");
                     var markdown = markdownLink(label, url.length > 0 ? url : "https://");
@@ -711,7 +720,8 @@ ApplicationWindow {
                         return;
                     }
                     var lineStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
-                    var line = text.slice(lineStart, cursorPosition);
+                    // Raw, as its indentation is copied onto the next line.
+                    var line = rawText().slice(lineStart, cursorPosition);
                     if (backend.insideFence(cursorPosition)) {
                         replaceSelectionWith("\n");
                         return;
@@ -771,7 +781,10 @@ ApplicationWindow {
                     var end = text.indexOf("\n", Math.max(start, selectionEnd - 1));
                     if (end < 0)
                         end = text.length;
-                    var lines = text.slice(start, end).split("\n");
+                    // A line separator breaks a line on screen as a newline does,
+                    // and each line keeps the one it had.
+                    var parts = rawText().slice(start, end).split(/(\n|\u2028)/);
+                    var lines = parts.filter(function(part, i) { return i % 2 === 0; });
                     // The selection starts at an item and holds only lines that
                     // belong to one: other items, blanks, and indented lines.
                     // A fence indented under an item moves along with it whole;
@@ -796,7 +809,9 @@ ApplicationWindow {
                             ? " ".repeat(columns(line) + step) + line.slice(lead.length)
                             : line;
                     });
-                    var nested = moved.join("\n");
+                    var nested = moved.map(function(line, i) {
+                        return i > 0 ? parts[2 * i - 1] + line : line;
+                    }).join("");
                     var from = Math.max(start, selectionStart + moved[0].length - lines[0].length);
                     // Neither end of the selection leaves its line, even when
                     // the indent it sat in is gone.
@@ -835,7 +850,7 @@ ApplicationWindow {
                     if (url === "")
                         return false;
 
-                    var selected = text.slice(start, end);
+                    var selected = rawText().slice(start, end);
                     var leading = selected.match(/^\s*/)[0];
                     var trailing = selected.match(/\s*$/)[0];
                     var linkText = selected.slice(leading.length,
@@ -1060,13 +1075,15 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
-            spacing: 12
-            opacity: 0.55
+            spacing: win.scaledSize(12)
 
+            // Brighter while there are unsaved changes, as in Plain.
             FooterIconButton {
                 objectName: "saveButton"
                 iconName: "save"
-                iconColor: win.mutedColor
+                size: win.scaledSize(16)
+                iconColor: backend.modified ? win.textColor : win.mutedColor
+                opacity: backend.modified ? 0.9 : 0.55
                 tooltip: qsTr("Save")
                 onClicked: backend.save()
             }
@@ -1074,7 +1091,9 @@ ApplicationWindow {
             FooterIconButton {
                 objectName: "openButton"
                 iconName: "open"
+                size: win.scaledSize(16)
                 iconColor: win.mutedColor
+                opacity: 0.55
                 tooltip: qsTr("Open")
                 onClicked: backend.openDialog()
             }
@@ -1083,7 +1102,9 @@ ApplicationWindow {
                 id: fontButton
                 objectName: "fontButton"
                 iconName: "font"
+                size: win.scaledSize(16)
                 iconColor: win.mutedColor
+                opacity: 0.55
                 tooltip: qsTr("Font")
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
@@ -1091,13 +1112,13 @@ ApplicationWindow {
             Label {
                 text: backend.status
                 color: win.mutedColor
+                opacity: 0.55
                 font.family: "IBM Plex Mono"
                 font.pixelSize: win.scaledSize(11)
                 visible: text !== ""
                 elide: Text.ElideRight
                 width: Math.min(360, win.width / 3)
-                height: win.scaledSize(16)
-                verticalAlignment: Text.AlignVCenter
+                anchors.verticalCenter: parent.verticalCenter
             }
         }
 
@@ -1275,10 +1296,11 @@ ApplicationWindow {
                         // One replacement over the span of every match, so a
                         // single undo takes them all back.
                         var first = matches[0];
+                        var text = editor.rawText();
                         var replaced = "";
                         var position = first;
                         for (var i = 0; i < matches.length; ++i) {
-                            replaced += editor.text.slice(position, matches[i]) + replaceField.text;
+                            replaced += text.slice(position, matches[i]) + replaceField.text;
                             position = matches[i] + query.length;
                         }
                         EditorMutations.replaceRange(editor, first, position, replaced);

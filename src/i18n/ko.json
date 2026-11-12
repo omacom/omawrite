@@ -62,13 +62,11 @@
   "Shortcuts": "단축키",
   "Start writing": "글쓰기 시작",
   "Strikethrough": "취소선",
-  "Text size %1%": "글자 크기 %1%",
   "There is no document to print.": "인쇄할 문서가 없습니다.",
   "This file changed outside Omawrite.": "이 파일이 Omawrite 외부에서 변경되었습니다.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "이 파일이 Omawrite 외부에서 변경되었습니다. 다시 불러오면 변경 사항이 사라집니다.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "이 파일이 Omawrite 외부에서 삭제되었습니다. 텍스트를 저장되지 않은 문서로 유지할까요?",
   "Undo": "실행 취소",
-  "Unsaved": "저장 안 됨",
   "Unsaved changes": "저장되지 않은 변경 사항",
   "Untitled": "제목 없음"
 }

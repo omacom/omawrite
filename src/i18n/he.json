@@ -64,13 +64,11 @@
   "Shortcuts": "קיצורים",
   "Start writing": "התחילו לכתוב",
   "Strikethrough": "קו חוצה",
-  "Text size %1%": "גודל טקסט %1%",
   "There is no document to print.": "אין מסמך להדפסה.",
   "This file changed outside Omawrite.": "הקובץ הזה השתנה מחוץ ל־Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "הקובץ הזה השתנה מחוץ ל־Omawrite. טעינה מחדש תמחק את השינויים שלך.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "הקובץ הזה הוסר מחוץ ל־Omawrite. להשאיר את הטקסט שלך כמסמך שלא נשמר?",
   "Undo": "ביטול פעולה",
-  "Unsaved": "לא נשמר",
   "Unsaved changes": "שינויים שלא נשמרו",
   "Untitled": "ללא שם"
 }

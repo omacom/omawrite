@@ -62,13 +62,11 @@
   "Shortcuts": "ทางลัด",
   "Start writing": "เริ่มเขียน",
   "Strikethrough": "ขีดฆ่า",
-  "Text size %1%": "ขนาดข้อความ %1%",
   "There is no document to print.": "ไม่มีเอกสารให้พิมพ์",
   "This file changed outside Omawrite.": "ไฟล์นี้ถูกเปลี่ยนแปลงภายนอก Omawrite",
   "This file changed outside Omawrite. Reloading will discard your changes.": "ไฟล์นี้ถูกเปลี่ยนแปลงภายนอก Omawrite การโหลดใหม่จะทิ้งการเปลี่ยนแปลงของคุณ",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "ไฟล์นี้ถูกลบภายนอก Omawrite ต้องการเก็บข้อความของคุณไว้เป็นเอกสารที่ยังไม่ได้บันทึกหรือไม่",
   "Undo": "เลิกทำ",
-  "Unsaved": "ยังไม่ได้บันทึก",
   "Unsaved changes": "การเปลี่ยนแปลงที่ยังไม่ได้บันทึก",
   "Untitled": "ไม่มีชื่อ"
 }

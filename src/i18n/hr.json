@@ -64,13 +64,11 @@
   "Shortcuts": "Prečaci",
   "Start writing": "Počnite pisati",
   "Strikethrough": "Precrtano",
-  "Text size %1%": "Veličina teksta %1 %",
   "There is no document to print.": "Nema dokumenta za ispis.",
   "This file changed outside Omawrite.": "Ova je datoteka promijenjena izvan aplikacije Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Ova je datoteka promijenjena izvan aplikacije Omawrite. Ponovnim učitavanjem odbacit ćete svoje promjene.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Ova je datoteka uklonjena izvan aplikacije Omawrite. Zadržati tekst kao nespremljeni dokument?",
   "Undo": "Poništi",
-  "Unsaved": "Nespremljeno",
   "Unsaved changes": "Nespremljene promjene",
   "Untitled": "Bez naslova"
 }

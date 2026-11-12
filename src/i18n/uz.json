@@ -63,13 +63,11 @@
   "Shortcuts": "Tezkor tugmalar",
   "Start writing": "Yozishni boshlang",
   "Strikethrough": "Ustidan chizilgan",
-  "Text size %1%": "Matn oʻlchami %1%",
   "There is no document to print.": "Chop etish uchun hujjat yoʻq.",
   "This file changed outside Omawrite.": "Bu fayl Omawrite tashqarisida oʻzgartirildi.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Bu fayl Omawrite tashqarisida oʻzgartirildi. Qayta yuklash oʻzgarishlaringizni yoʻqotadi.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Bu fayl Omawrite tashqarisida oʻchirildi. Matningiz saqlanmagan hujjat sifatida qolsinmi?",
   "Undo": "Ortga qaytarish",
-  "Unsaved": "Saqlanmagan",
   "Unsaved changes": "Saqlanmagan oʻzgarishlar",
   "Untitled": "Nomsiz"
 }

@@ -63,13 +63,11 @@
   "Shortcuts": "میان‌برها",
   "Start writing": "نوشتن را شروع کنید",
   "Strikethrough": "خط‌خورده",
-  "Text size %1%": "اندازه‌ی متن %1%",
   "There is no document to print.": "سندی برای چاپ وجود ندارد.",
   "This file changed outside Omawrite.": "این پرونده بیرون از Omawrite تغییر کرد.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "این پرونده بیرون از Omawrite تغییر کرد. بارگذاری دوباره تغییرات شما را دور می‌ریزد.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "این پرونده بیرون از Omawrite حذف شد. متن شما به‌صورت سند ذخیره‌نشده نگه داشته شود؟",
   "Undo": "واگرد",
-  "Unsaved": "ذخیره‌نشده",
   "Unsaved changes": "تغییرات ذخیره‌نشده",
   "Untitled": "بی‌عنوان"
 }

@@ -67,13 +67,11 @@
   "Shortcuts": "الاختصارات",
   "Start writing": "ابدأ الكتابة",
   "Strikethrough": "يتوسطه خط",
-  "Text size %1%": "حجم النص %1%",
   "There is no document to print.": "لا يوجد مستند للطباعة.",
   "This file changed outside Omawrite.": "تغيّر هذا الملف خارج Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "تغيّر هذا الملف خارج Omawrite. ستؤدي إعادة التحميل إلى تجاهل تغييراتك.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "أُزيل هذا الملف خارج Omawrite. هل تريد الإبقاء على نصك كمستند غير محفوظ؟",
   "Undo": "تراجع",
-  "Unsaved": "غير محفوظ",
   "Unsaved changes": "تغييرات غير محفوظة",
   "Untitled": "بلا عنوان"
 }

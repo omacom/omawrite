@@ -34,6 +34,7 @@
 #include <QWindow>
 
 #include <algorithm>
+#include <cmath>
 #include <iterator>
 
 #include "markdownhighlighter.h"
@@ -263,9 +264,6 @@ qreal Backend::steppedTextZoom(int direction) const {
 }
 
 void Backend::setTextZoom(qreal zoom) {
-    // Report the size even when the ladder has run out, so a keypress that
-    // changes nothing still says why.
-    setStatus(tr("Text size %1%").arg(qRound(zoom * 100)));
     if (qFuzzyCompare(m_textZoom, zoom))
         return;
 
@@ -550,7 +548,7 @@ bool Backend::editorTextChanged() {
             setStatus(QString());
     } else {
         setModified(true);
-        setStatus(tr("Unsaved"));
+        setStatus(QString());
         scheduleRecovery();
         scheduleAutoSave();
     }
@@ -1060,6 +1058,14 @@ void Backend::checkWatchedFile() {
     reportExternalChange(m_fileMissing);
 }
 
+// Black or white, whichever reads on the color (WCAG relative luminance).
+QString Backend::readableOn(const QString &color) {
+    const QColor c(color);
+    auto linear = [](double v) { return v <= .04045 ? v / 12.92 : std::pow((v + .055) / 1.055, 2.4); };
+    const double luminance = .2126 * linear(c.redF()) + .7152 * linear(c.greenF()) + .0722 * linear(c.blueF());
+    return luminance > .179 ? QStringLiteral("black") : QStringLiteral("white");
+}
+
 // A quoted TOML value ends at its closing quote; whatever trails it is an inline comment.
 QString Backend::tomlValue(const QString &text) {
     const QString value = text.trimmed();
@@ -1219,8 +1225,14 @@ QUrl Backend::suggestedSaveUrl() const {
         directory.filePath(suggestedFileName(currentDocumentText())));
 }
 
+// toPlainText() turns non-breaking spaces into spaces and line separators
+// into newlines, which saving would write over the file's own characters.
 QString Backend::currentDocumentText() const {
-    return m_document ? m_document->toPlainText() : QString();
+    if (!m_document)
+        return {};
+    QString text = m_document->toRawText();
+    text.replace(QChar::ParagraphSeparator, QLatin1Char('\n'));
+    return text;
 }
 
 int Backend::countWords(const QString &text) {

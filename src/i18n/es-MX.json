@@ -64,13 +64,11 @@
   "Shortcuts": "Atajos",
   "Start writing": "Empieza a escribir",
   "Strikethrough": "Tachado",
-  "Text size %1%": "Tamaño del texto %1%",
   "There is no document to print.": "No hay ningún documento para imprimir.",
   "This file changed outside Omawrite.": "Este archivo cambió fuera de Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Este archivo cambió fuera de Omawrite. Al recargarlo se descartarán tus cambios.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Este archivo se eliminó fuera de Omawrite. ¿Conservar tu texto como documento sin guardar?",
   "Undo": "Deshacer",
-  "Unsaved": "Sin guardar",
   "Unsaved changes": "Cambios sin guardar",
   "Untitled": "Sin título"
 }

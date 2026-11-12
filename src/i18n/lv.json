@@ -64,13 +64,11 @@
   "Shortcuts": "Īsinājumtaustiņi",
   "Start writing": "Sāciet rakstīt",
   "Strikethrough": "Pārsvītrojums",
-  "Text size %1%": "Teksta izmērs %1%",
   "There is no document to print.": "Nav dokumenta, ko drukāt.",
   "This file changed outside Omawrite.": "Šis fails tika mainīts ārpus Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Šis fails tika mainīts ārpus Omawrite. Pārlādējot jūsu izmaiņas tiks zaudētas.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Šis fails tika noņemts ārpus Omawrite. Paturēt tekstu kā nesaglabātu dokumentu?",
   "Undo": "Atsaukt",
-  "Unsaved": "Nesaglabāts",
   "Unsaved changes": "Nesaglabātas izmaiņas",
   "Untitled": "Bez nosaukuma"
 }

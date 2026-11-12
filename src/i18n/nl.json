@@ -63,13 +63,11 @@
   "Shortcuts": "Sneltoetsen",
   "Start writing": "Begin met schrijven",
   "Strikethrough": "Doorhalen",
-  "Text size %1%": "Tekstgrootte %1%",
   "There is no document to print.": "Er is geen document om af te drukken.",
   "This file changed outside Omawrite.": "Dit bestand is buiten Omawrite gewijzigd.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Dit bestand is buiten Omawrite gewijzigd. Opnieuw laden verwijdert je wijzigingen.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Dit bestand is buiten Omawrite verwijderd. Je tekst behouden als niet-opgeslagen document?",
   "Undo": "Ongedaan maken",
-  "Unsaved": "Niet opgeslagen",
   "Unsaved changes": "Niet-opgeslagen wijzigingen",
   "Untitled": "Naamloos"
 }

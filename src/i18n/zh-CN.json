@@ -62,13 +62,11 @@
   "Shortcuts": "快捷键",
   "Start writing": "开始写作",
   "Strikethrough": "删除线",
-  "Text size %1%": "文字大小 %1%",
   "There is no document to print.": "没有可打印的文档。",
   "This file changed outside Omawrite.": "此文件已在 Omawrite 之外被修改。",
   "This file changed outside Omawrite. Reloading will discard your changes.": "此文件已在 Omawrite 之外被修改。重新加载将丢弃你的更改。",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "此文件已在 Omawrite 之外被删除。是否将你的文本保留为未保存的文档？",
   "Undo": "撤销",
-  "Unsaved": "未保存",
   "Unsaved changes": "未保存的更改",
   "Untitled": "未命名"
 }

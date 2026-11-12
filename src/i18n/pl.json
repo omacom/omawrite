@@ -65,13 +65,11 @@
   "Shortcuts": "Skróty",
   "Start writing": "Zacznij pisać",
   "Strikethrough": "Przekreślenie",
-  "Text size %1%": "Rozmiar tekstu %1%",
   "There is no document to print.": "Brak dokumentu do wydrukowania.",
   "This file changed outside Omawrite.": "Ten plik został zmieniony poza Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Ten plik został zmieniony poza Omawrite. Ponowne wczytanie odrzuci twoje zmiany.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Ten plik został usunięty poza Omawrite. Zachować tekst jako niezapisany dokument?",
   "Undo": "Cofnij",
-  "Unsaved": "Niezapisany",
   "Unsaved changes": "Niezapisane zmiany",
   "Untitled": "Bez tytułu"
 }

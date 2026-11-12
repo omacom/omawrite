@@ -63,13 +63,11 @@
   "Shortcuts": "Mga shortcut",
   "Start writing": "Magsimulang magsulat",
   "Strikethrough": "Strikethrough",
-  "Text size %1%": "Laki ng teksto %1%",
   "There is no document to print.": "Walang dokumentong ipi-print.",
   "This file changed outside Omawrite.": "Nagbago ang file na ito sa labas ng Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Nagbago ang file na ito sa labas ng Omawrite. Mawawala ang mga pagbabago mo kapag ni-reload ito.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Inalis ang file na ito sa labas ng Omawrite. Panatilihin ang teksto mo bilang hindi na-save na dokumento?",
   "Undo": "I-undo",
-  "Unsaved": "Hindi na-save",
   "Unsaved changes": "Mga hindi na-save na pagbabago",
   "Untitled": "Walang pamagat"
 }

@@ -63,13 +63,11 @@
   "Shortcuts": "শর্টকাট",
   "Start writing": "লেখা শুরু করুন",
   "Strikethrough": "কাটা দাগ",
-  "Text size %1%": "লেখার আকার %1%",
   "There is no document to print.": "প্রিন্ট করার মতো কোনো নথি নেই।",
   "This file changed outside Omawrite.": "এই ফাইলটি Omawrite-এর বাইরে পরিবর্তিত হয়েছে।",
   "This file changed outside Omawrite. Reloading will discard your changes.": "এই ফাইলটি Omawrite-এর বাইরে পরিবর্তিত হয়েছে। পুনরায় লোড করলে আপনার পরিবর্তনগুলো বাদ যাবে।",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "এই ফাইলটি Omawrite-এর বাইরে সরানো হয়েছে। আপনার লেখা কি অসংরক্ষিত নথি হিসেবে রাখবেন?",
   "Undo": "পূর্বাবস্থায় ফেরান",
-  "Unsaved": "অসংরক্ষিত",
   "Unsaved changes": "অসংরক্ষিত পরিবর্তন",
   "Untitled": "শিরোনামহীন"
 }

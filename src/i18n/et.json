@@ -63,13 +63,11 @@
   "Shortcuts": "Otseteed",
   "Start writing": "Alusta kirjutamist",
   "Strikethrough": "Läbikriipsutus",
-  "Text size %1%": "Teksti suurus %1%",
   "There is no document to print.": "Pole dokumenti, mida printida.",
   "This file changed outside Omawrite.": "Seda faili muudeti väljaspool Omawrite'i.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Seda faili muudeti väljaspool Omawrite'i. Uuesti laadimine hülgab sinu muudatused.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "See fail eemaldati väljaspool Omawrite'i. Kas jätta tekst alles salvestamata dokumendina?",
   "Undo": "Võta tagasi",
-  "Unsaved": "Salvestamata",
   "Unsaved changes": "Salvestamata muudatused",
   "Untitled": "Nimetu"
 }

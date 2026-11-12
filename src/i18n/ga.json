@@ -66,13 +66,11 @@
   "Shortcuts": "Aicearraí",
   "Start writing": "Tosaigh ag scríobh",
   "Strikethrough": "Líne tríd",
-  "Text size %1%": "Méid an téacs %1%",
   "There is no document to print.": "Níl aon cháipéis le priontáil.",
   "This file changed outside Omawrite.": "Athraíodh an comhad seo lasmuigh de Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Athraíodh an comhad seo lasmuigh de Omawrite. Má athlódáiltear é, caillfear d'athruithe.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Baineadh an comhad seo lasmuigh de Omawrite. An gcoinneofar do théacs mar cháipéis gan sábháil?",
   "Undo": "Cealaigh",
-  "Unsaved": "Gan sábháil",
   "Unsaved changes": "Athruithe gan sábháil",
   "Untitled": "Gan teideal"
 }

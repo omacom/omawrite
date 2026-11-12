@@ -63,13 +63,11 @@
   "Shortcuts": "Shortcuts",
   "Start writing": "Start writing",
   "Strikethrough": "Strikethrough",
-  "Text size %1%": "Text size %1%",
   "There is no document to print.": "There is no document to print.",
   "This file changed outside Omawrite.": "This file changed outside Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "This file changed outside Omawrite. Reloading will discard your changes.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "This file was removed outside Omawrite. Keep your text as an unsaved document?",
   "Undo": "Undo",
-  "Unsaved": "Unsaved",
   "Unsaved changes": "Unsaved changes",
   "Untitled": "Untitled"
 }

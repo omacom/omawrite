@@ -63,13 +63,11 @@
   "Shortcuts": "Snarveier",
   "Start writing": "Begynn å skrive",
   "Strikethrough": "Gjennomstreking",
-  "Text size %1%": "Tekststørrelse %1%",
   "There is no document to print.": "Det finnes ikke noe dokument å skrive ut.",
   "This file changed outside Omawrite.": "Denne filen ble endret utenfor Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Denne filen ble endret utenfor Omawrite. Hvis du laster inn på nytt, forkastes endringene dine.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Denne filen ble fjernet utenfor Omawrite. Beholde teksten som et ulagret dokument?",
   "Undo": "Angre",
-  "Unsaved": "Ikke lagret",
   "Unsaved changes": "Ulagrede endringer",
   "Untitled": "Uten navn"
 }

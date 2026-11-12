@@ -64,13 +64,11 @@
   "Shortcuts": "Dreceres",
   "Start writing": "Comenceu a escriure",
   "Strikethrough": "Ratllat",
-  "Text size %1%": "Mida del text %1%",
   "There is no document to print.": "No hi ha cap document per imprimir.",
   "This file changed outside Omawrite.": "Aquest fitxer ha canviat fora d'Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Aquest fitxer ha canviat fora d'Omawrite. Si el torneu a carregar, es descartaran els vostres canvis.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Aquest fitxer s'ha eliminat fora d'Omawrite. Voleu conservar el text com a document no desat?",
   "Undo": "Desfés",
-  "Unsaved": "No desat",
   "Unsaved changes": "Canvis no desats",
   "Untitled": "Sense títol"
 }

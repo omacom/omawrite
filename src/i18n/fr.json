@@ -64,13 +64,11 @@
   "Shortcuts": "Raccourcis",
   "Start writing": "Commencez à écrire",
   "Strikethrough": "Barré",
-  "Text size %1%": "Taille du texte %1 %",
   "There is no document to print.": "Il n'y a aucun document à imprimer.",
   "This file changed outside Omawrite.": "Ce fichier a été modifié en dehors d'Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Ce fichier a été modifié en dehors d'Omawrite. Le recharger annulera vos modifications.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Ce fichier a été supprimé en dehors d'Omawrite. Conserver votre texte comme document non enregistré ?",
   "Undo": "Annuler",
-  "Unsaved": "Non enregistré",
   "Unsaved changes": "Modifications non enregistrées",
   "Untitled": "Sans titre"
 }

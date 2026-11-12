@@ -63,13 +63,11 @@
   "Shortcuts": "Flýtileiðir",
   "Start writing": "Byrjaðu að skrifa",
   "Strikethrough": "Yfirstrikað",
-  "Text size %1%": "Leturstærð %1%",
   "There is no document to print.": "Það er ekkert skjal til að prenta.",
   "This file changed outside Omawrite.": "Þessari skrá var breytt utan Omawrite.",
   "This file changed outside Omawrite. Reloading will discard your changes.": "Þessari skrá var breytt utan Omawrite. Endurhleðsla fleygir breytingunum þínum.",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Þessi skrá var fjarlægð utan Omawrite. Halda textanum sem óvistuðu skjali?",
   "Undo": "Afturkalla",
-  "Unsaved": "Óvistað",
   "Unsaved changes": "Óvistaðar breytingar",
   "Untitled": "Ónefnt"
 }

@@ -63,13 +63,11 @@
   "Shortcuts": "शॉर्टकट",
   "Start writing": "लिखना शुरू करें",
   "Strikethrough": "स्ट्राइकथ्रू",
-  "Text size %1%": "टेक्स्ट का आकार %1%",
   "There is no document to print.": "प्रिंट करने के लिए कोई दस्तावेज़ नहीं है।",
   "This file changed outside Omawrite.": "यह फ़ाइल Omawrite के बाहर बदली गई।",
   "This file changed outside Omawrite. Reloading will discard your changes.": "यह फ़ाइल Omawrite के बाहर बदली गई। फिर से लोड करने पर आपके बदलाव हट जाएँगे।",
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "यह फ़ाइल Omawrite के बाहर हटा दी गई। अपना टेक्स्ट बिना सहेजे दस्तावेज़ के रूप में रखें?",
   "Undo": "पूर्ववत करें",
-  "Unsaved": "सहेजा नहीं गया",
   "Unsaved changes": "बिना सहेजे बदलाव",
   "Untitled": "बिना शीर्षक"
 }
