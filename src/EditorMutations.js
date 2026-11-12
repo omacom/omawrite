@@ -49,13 +49,13 @@ function toggleWrap(editor, marker, span) {
         } else if (start >= span.textEnd) {
             editor.cursorPosition = span.end;
         } else {
-            var content = editor.text.slice(span.contentStart, span.contentEnd);
+            var content = editor.rawText().slice(span.contentStart, span.contentEnd);
             var caret = Math.max(0, start - span.contentStart);
             replaceRange(editor, span.start, span.end, content, caret, caret);
         }
         return;
     }
-    var text = editor.text;
+    var text = editor.rawText();
     var size = marker.length;
     var mark = marker.charAt(0);
     var runFrom = function(position, step, limit) {

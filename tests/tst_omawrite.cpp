@@ -434,6 +434,12 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a x b x c"));
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a foo b foo c"));
+
+        // The text between the matches is written back as it was, its
+        // non-breaking spaces too.
+        editor->setProperty("text", QStringLiteral("foo a\u00a0b foo"));
+        QMetaObject::invokeMethod(replaceAllButton, "clicked");
+        QCOMPARE(backend.documentText(), QStringLiteral("x a\u00a0b x"));
     }
 
     void countsWordsAfterEditsWithoutBlocking() {
@@ -2089,6 +2095,17 @@ private slots:
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(text(), QStringLiteral("- one\n- two"));
 
+        // Return carries an item's indentation onto the next as it is.
+        load(QStringLiteral("\u00a0- a"), 4);
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(backend.documentText(), QStringLiteral("\u00a0- a\n\u00a0- "));
+
+        // A line separator starts a line as a newline does, and stays one.
+        load(QStringLiteral("- a\u2028- b"), 0);
+        QMetaObject::invokeMethod(editor, "selectAll");
+        tabKey();
+        QCOMPARE(backend.documentText(), QStringLiteral("    - a\u2028    - b"));
+
         // The same step nests under ordered markers, the empty one Return
         // leaves included, and Shift+Tab steps back out one level.
         load(QStringLiteral("1. one"), 6);
@@ -2695,6 +2712,39 @@ private slots:
         fallbackDocument.saveAsDialog();
         const QUrl fallbackUrl = fallbackDialogSpy.takeFirst().constFirst().toUrl();
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
+    }
+
+    void savesTheCharactersItOpened() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("spaces.md"));
+        // A non-breaking space and a line separator, which plain text
+        // export turns into a space and a newline.
+        const QByteArray original("prix\xc2\xa0" "10\nfirst\xe2\x80\xa8second\n");
+        writeFile(path, original);
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(!backend.modified());
+
+        QTextCursor cursor(backend.m_document);
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral("more"));
+        QVERIFY(backend.editorTextChanged());
+        cursor.deletePreviousChar();
+        cursor.deletePreviousChar();
+        cursor.deletePreviousChar();
+        cursor.deletePreviousChar();
+        QVERIFY(backend.editorTextChanged());
+        // Back to what was opened, so nothing is unsaved.
+        QVERIFY(!backend.modified());
+
+        cursor.insertText(QStringLiteral("more"));
+        QVERIFY(backend.editorTextChanged());
+        backend.save();
+        QCOMPARE(readFile(path), original + "more");
     }
 
     void autoSavesTitledDocumentsAfterEdits() {
