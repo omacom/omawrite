@@ -33,4 +33,6 @@ enable_testing()
 add_executable(omawrite_tests tests/omawrite_tests.cpp)
 target_link_libraries(omawrite_tests PRIVATE omawrite_core Qt6::Test)
 add_test(NAME omawrite_tests COMMAND omawrite_tests)
-set_tests_properties(omawrite_tests PROPERTIES ENVIRONMENT QT_QPA_PLATFORM=offscreen)
+# An empty platform theme keeps file dialogs in the offscreen window instead
+# of opening the real desktop chooser.
+set_tests_properties(omawrite_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=")

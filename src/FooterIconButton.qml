@@ -8,11 +8,13 @@ Item {
     property string iconName
     property color iconColor: "#666666"
     property string tooltip
+    // The icons are drawn on a 16-pixel grid and scaled to this size.
+    property real size: 16
 
     signal clicked()
 
-    width: 16
-    height: 16
+    width: size
+    height: size
 
     ToolTip.visible: hitArea.containsMouse && tooltip.length > 0
     ToolTip.text: tooltip
@@ -32,8 +34,10 @@ Item {
 
         onPaint: {
             var context = getContext("2d");
-            context.setTransform(dpr, 0, 0, dpr, 0, 0);
+            context.setTransform(1, 0, 0, 1, 0, 0);
             context.clearRect(0, 0, width, height);
+            var unit = dpr * control.size / 16;
+            context.setTransform(unit, 0, 0, unit, 0, 0);
             context.strokeStyle = control.iconColor;
             context.lineWidth = 1.4;
             context.lineCap = "round";
@@ -76,14 +80,15 @@ Item {
             target: control
             function onIconColorChanged() { iconCanvas.requestPaint(); }
             function onIconNameChanged() { iconCanvas.requestPaint(); }
+            function onSizeChanged() { iconCanvas.requestPaint(); }
         }
     }
 
     MouseArea {
         id: hitArea
         anchors.centerIn: parent
-        width: 28
-        height: 28
+        width: control.size * 1.75
+        height: control.size * 1.75
         hoverEnabled: true
         cursorShape: Qt.PointingHandCursor
         onClicked: control.clicked()

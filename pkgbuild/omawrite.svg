@@ -1,5 +1,28 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 128 128">
-  <rect width="128" height="128" rx="24" fill="#101010"/>
-  <path d="M31 30h66v68H31z" fill="#f5f1e8"/>
-  <path d="M43 48h42M43 64h34M43 80h28" fill="none" stroke="#101010" stroke-width="7" stroke-linecap="round"/>
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="0 0 512 512">
+  <title>Omawrite</title>
+  <desc>A sheet of paper seen from the front, in Tokyo Night colors: a pale page with a blue title bar and muted lines of text, and a lilac text cursor at the end of the last line, each piece with a hard shadow.</desc>
+  <defs>
+    <linearGradient id="title" x1="0" y1="0" x2="1" y2="1">
+      <stop stop-color="#7aa2f7"/>
+      <stop offset="1" stop-color="#7dcfff"/>
+    </linearGradient>
+  </defs>
+  <g transform="translate(256 256) scale(1.2) translate(-256 -256)">
+    <!-- The page; one hard shadow, as Hype's slides. -->
+    <rect x="106" y="96" width="300" height="320" rx="20" fill="#0e0f17" transform="translate(0 8)"/>
+    <rect x="106" y="96" width="300" height="320" rx="20" fill="#c0caf5"/>
+    <!-- Title. -->
+    <rect x="142" y="134" width="176" height="36" rx="12" fill="url(#title)"/>
+    <!-- Body text. -->
+    <g fill="#565f89">
+      <rect x="142" y="204" width="228" height="16" rx="8"/>
+      <rect x="142" y="240" width="200" height="16" rx="8"/>
+      <rect x="142" y="276" width="156" height="16" rx="8"/>
+      <rect x="142" y="332" width="112" height="16" rx="8"/>
+    </g>
+    <!-- The cursor, at the end of the line being written. -->
+    <rect x="268" y="302" width="26" height="76" rx="13" fill="#0e0f17" transform="translate(0 6)"/>
+    <rect x="268" y="302" width="26" height="76" rx="13" fill="#bb9af7"/>
+    <rect x="278" y="325" width="6" height="30" rx="3" fill="#1a1b26" opacity=".35"/>
+  </g>
 </svg>
