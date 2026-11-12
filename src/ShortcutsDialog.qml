@@ -14,7 +14,6 @@ Dialog {
     property real textScale: 1
     property int containerWidth: 1280
     property int containerHeight: 820
-    readonly property string versionText: "Omawrite " + Qt.application.version
     readonly property var shortcuts: [
         { key: "Ctrl+S", desc: qsTr("Save") },
         { key: "Ctrl+Shift+S", desc: qsTr("Save As") },
@@ -75,26 +74,12 @@ Dialog {
             Layout.leftMargin: 24
             Layout.rightMargin: 24
             Layout.topMargin: 20
-            Layout.bottomMargin: Qt.application.version.length > 0 ? 0 : 8
+            Layout.bottomMargin: 8
             text: root.title
             color: root.strongTextColor
             font.family: "IBM Plex Mono"
             font.pixelSize: Math.round(15 * root.textScale)
             font.bold: true
-            wrapMode: Text.Wrap
-        }
-        Label {
-            objectName: "versionLabel"
-            Layout.fillWidth: true
-            Layout.leftMargin: 24
-            Layout.rightMargin: 24
-            Layout.bottomMargin: 8
-            text: root.versionText
-            visible: Qt.application.version.length > 0
-            color: root.textColor
-            opacity: 0.75
-            font.family: "IBM Plex Mono"
-            font.pixelSize: Math.round(11 * root.textScale)
             wrapMode: Text.Wrap
         }
     }
