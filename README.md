@@ -61,12 +61,9 @@ The IBM Plex Mono font is bundled under the SIL Open Font License 1.1; see
 
 ## Build and install
 
-For a local build, install the Qt requirements above, a C++17 compiler such as
-`gcc`, and `make`. The build scripts use `qmake6` (or `qmake`), and the tests use
-QtTest; both ship in `qt6-base`.
+For a local build, install the Qt requirements above, a C++17 compiler such as `gcc`, `cmake`, and `make`. `bin/build` configures and builds into `build/`, and `bin/test` builds and runs the Qt test suite through `ctest`.
 
 ```sh
-./bin/build
 ./bin/test
 ./build/omawrite
 ```
