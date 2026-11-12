@@ -30,20 +30,22 @@ Dialog {
     y: Math.round((containerHeight - height) / 2)
     padding: 20
 
+    // Escape cancels; each button's key picks it, with or without Alt. There
+    // is nothing to type into here, so the bare letter is enough.
     Shortcut {
-        sequence: "Alt+" + cancelButton.mnemonic
+        sequences: [cancelButton.mnemonic, "Alt+" + cancelButton.mnemonic]
         enabled: root.opened && cancelButton.mnemonic !== ""
         onActivated: cancelButton.clicked()
     }
 
     Shortcut {
-        sequence: "Alt+" + discardButton.mnemonic
+        sequences: [discardButton.mnemonic, "Alt+" + discardButton.mnemonic]
         enabled: root.opened && discardButton.mnemonic !== ""
         onActivated: discardButton.clicked()
     }
 
     Shortcut {
-        sequence: "Alt+" + saveButton.mnemonic
+        sequences: [saveButton.mnemonic, "Alt+" + saveButton.mnemonic]
         enabled: root.opened && saveButton.mnemonic !== ""
         onActivated: saveButton.clicked()
     }

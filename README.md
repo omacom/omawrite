@@ -31,8 +31,7 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
   `Ctrl+scroll` does the same.
 - `Ctrl+Shift+C` copies the rendered document as HTML, with plain text as a fallback.
 - `Ctrl+?`, `Ctrl+/`, or `F1` shows the keyboard shortcut reference.
-- In the unsaved-changes dialog, `Alt+C`, `Alt+D`, and `Alt+S` choose Cancel,
-  Discard, and Save.
+- In the unsaved-changes dialog, `C`, `D`, and `S` choose Cancel, Discard, and Save, with or without `Alt`. `Escape` cancels.
 
 Once a document has been saved to a file, edits are auto-saved to that file a
 moment after you stop typing, so `Ctrl+S` is rarely needed. Untitled drafts are
