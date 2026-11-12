@@ -2598,6 +2598,45 @@ private slots:
         QCOMPARE(bindingLoops.count(), 0);
     }
 
+    void footerFitsTheWindow_data() {
+        QTest::addColumn<int>("windowWidth");
+        QTest::addColumn<qreal>("scale");
+        QTest::addColumn<bool>("showsWordCount");
+        QTest::newRow("standard") << 720 << qreal(1) << true;
+        QTest::newRow("large-text") << 720 << qreal(3) << true;
+        QTest::newRow("narrow-large-text") << 394 << qreal(3) << false;
+    }
+
+    void footerFitsTheWindow() {
+        QFETCH(int, windowWidth);
+        QFETCH(qreal, scale);
+        QFETCH(bool, showsWordCount);
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        backend.setDesktopTextScale(scale);
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->setMinimumWidth(0);
+        window->setWidth(windowWidth);
+        QCoreApplication::processEvents();
+
+        auto *fontButton = window->findChild<QQuickItem *>(QStringLiteral("fontButton"));
+        auto *status = window->findChild<QQuickItem *>(QStringLiteral("statusLabel"));
+        auto *wordCount = window->findChild<QQuickItem *>(QStringLiteral("wordCountLabel"));
+        QVERIFY(fontButton && status && wordCount);
+
+        const qreal wordCountLeft = wordCount->mapToScene(QPointF()).x();
+        QCOMPARE(wordCount->isVisible(), showsWordCount);
+        if (showsWordCount)
+            QVERIFY(fontButton->mapToScene(QPointF(fontButton->width(), 0)).x() < wordCountLeft);
+        QVERIFY(status->mapToScene(QPointF(status->width(), 0)).x() <= wordCountLeft);
+    }
+
     void shortcutReferenceFitsTheWindow_data() {
         QTest::addColumn<int>("windowWidth");
         QTest::addColumn<qreal>("scale");

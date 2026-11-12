@@ -1090,15 +1090,18 @@ ApplicationWindow {
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
 
+            // Takes only the room the word count leaves, eliding the rest.
             Label {
+                objectName: "statusLabel"
                 text: backend.status
                 color: win.mutedColor
                 opacity: 0.55
                 font.family: "IBM Plex Mono"
                 font.pixelSize: win.scaledSize(11)
-                visible: text !== ""
+                visible: text !== "" && width > 0
                 elide: Text.ElideRight
-                width: Math.min(360, win.width / 3)
+                width: Math.max(0, Math.min(360,
+                    wordCountLabel.x - footerStatus.x - x - footerStatus.spacing))
                 anchors.verticalCenter: parent.verticalCenter
             }
         }
@@ -1125,11 +1128,15 @@ ApplicationWindow {
             onClosed: editor.forceActiveFocus()
         }
 
+        // Gives way to the footer buttons when a narrow window can't fit both.
         Label {
+            id: wordCountLabel
+            objectName: "wordCountLabel"
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.rightMargin: 12
             anchors.bottomMargin: 10
+            visible: x >= footerStatus.x + fontButton.x + fontButton.width + footerStatus.spacing
             text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
             color: win.mutedColor
             opacity: 0.75
