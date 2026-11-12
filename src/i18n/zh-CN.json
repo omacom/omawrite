@@ -68,5 +68,6 @@
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "此文件已在 Omawrite 之外被删除。是否将你的文本保留为未保存的文档？",
   "Undo": "撤销",
   "Unsaved changes": "未保存的更改",
-  "Untitled": "未命名"
+  "Untitled": "未命名",
+  "Write": "写作"
 }

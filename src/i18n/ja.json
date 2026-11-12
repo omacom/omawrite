@@ -68,5 +68,6 @@
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "このファイルは Omawrite の外部で削除されました。テキストを未保存の文書として保持しますか？",
   "Undo": "元に戻す",
   "Unsaved changes": "未保存の変更",
-  "Untitled": "無題"
+  "Untitled": "無題",
+  "Write": "書く"
 }
