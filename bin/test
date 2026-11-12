@@ -14,4 +14,6 @@ mkdir -p "$BUILD_DIR"
 cd "$BUILD_DIR"
 "$QMAKE" "$ROOT/tests/tests.pro"
 make -j"$(nproc 2>/dev/null || echo 1)"
-QT_QPA_PLATFORM=offscreen ./tst_omawrite
+# An empty platform theme keeps file dialogs in the offscreen window instead
+# of opening the real desktop chooser.
+QT_QPA_PLATFORM=offscreen QT_QPA_PLATFORMTHEME= ./tst_omawrite

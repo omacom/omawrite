@@ -254,9 +254,6 @@ qreal Backend::steppedTextZoom(int direction) const {
 }
 
 void Backend::setTextZoom(qreal zoom) {
-    // Report the size even when the ladder has run out, so a keypress that
-    // changes nothing still says why.
-    setStatus(QStringLiteral("Text size %1%").arg(qRound(zoom * 100)));
     if (qFuzzyCompare(m_textZoom, zoom))
         return;
 
@@ -541,7 +538,7 @@ bool Backend::editorTextChanged() {
             setStatus(QString());
     } else {
         setModified(true);
-        setStatus(QStringLiteral("Unsaved"));
+        setStatus(QString());
         scheduleRecovery();
         scheduleAutoSave();
     }

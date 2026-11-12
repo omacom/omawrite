@@ -2442,7 +2442,6 @@ private slots:
         backend.decreaseTextSize();
         backend.decreaseTextSize();
         QCOMPARE(backend.textScale(), 1.5 * 0.9);
-        QCOMPARE(backend.status(), QStringLiteral("Text size 90%"));
 
         // The ends of the ladder hold instead of running away.
         for (int step = 0; step < 8; ++step)
