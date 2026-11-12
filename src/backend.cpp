@@ -14,6 +14,7 @@
 #include <QProcess>
 #include <QPrintDialog>
 #include <QPrinter>
+#include <QQuickItem>
 #include <QQuickTextDocument>
 #include <QRegularExpression>
 #include <QScreen>
@@ -281,6 +282,11 @@ void Backend::attachDocument(QObject *textDocument) {
 
     if (m_highlighter)
         delete m_highlighter.data();
+
+    // Qt Quick draws only the visible part of a long text, but turns that on
+    // only for text set through TextEdit.text, never through its document.
+    if (auto *editor = qobject_cast<QQuickItem *>(quickDocument->parent()))
+        editor->setFlag(QQuickItem::ItemObservesViewport);
 
     m_document = quickDocument->textDocument();
     m_lastDocumentText = m_document->toPlainText();
@@ -806,12 +812,22 @@ void Backend::loadDocumentText(const QString &text) {
         return;
     }
 
+    // Inserting under the line height already set styles the text once, where
+    // setPlainText and a typography pass after it would restyle it twice.
     m_loading = true;
-    m_document->setPlainText(text);
+    const bool undoEnabled = m_document->isUndoRedoEnabled();
+    m_document->setUndoRedoEnabled(false);
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    cursor.select(QTextCursor::Document);
+    cursor.removeSelectedText();
+    cursor.setBlockFormat(lineHeightFormat());
+    cursor.insertText(text);
+    cursor.endEditBlock();
+    m_document->setUndoRedoEnabled(undoEnabled);
     m_lastDocumentText = text;
     m_loading = false;
 
-    applyDocumentTypography();
     m_wordCountTimer.stop();
     m_wordCountStale = true;
     m_wordCountAgain = false;
@@ -1305,8 +1321,9 @@ void Backend::applyDocumentTypography() {
     if (!m_document)
         return;
 
-    // A full pass is only used for freshly loaded/attached documents, so it is
-    // safe to drop undo history here (re-enabling clears the stack anyway).
+    // A full pass is only used for a freshly attached document, so it is safe
+    // to drop undo history here (re-enabling clears the stack anyway). A loaded
+    // file gets the line height as it is inserted, in loadDocumentText.
     const bool undoEnabled = m_document->isUndoRedoEnabled();
     m_document->setUndoRedoEnabled(false);
 
