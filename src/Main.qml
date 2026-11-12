@@ -13,7 +13,7 @@ ApplicationWindow {
     minimumWidth: 720
     minimumHeight: 520
     visible: true
-    title: (backend.modified ? "* " : "") + backend.fileName + " - Omawrite"
+    title: (backend.modified ? "* " : "") + backend.fileName + " - " + qsTr("Write")
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground

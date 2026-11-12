@@ -70,5 +70,6 @@
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "Ce fichier a été supprimé en dehors d'Omawrite. Conserver votre texte comme document non enregistré ?",
   "Undo": "Annuler",
   "Unsaved changes": "Modifications non enregistrées",
-  "Untitled": "Sans titre"
+  "Untitled": "Sans titre",
+  "Write": "Écrire"
 }

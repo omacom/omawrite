@@ -68,5 +68,6 @@
   "This file was removed outside Omawrite. Keep your text as an unsaved document?": "ไฟล์นี้ถูกลบภายนอก Omawrite ต้องการเก็บข้อความของคุณไว้เป็นเอกสารที่ยังไม่ได้บันทึกหรือไม่",
   "Undo": "เลิกทำ",
   "Unsaved changes": "การเปลี่ยนแปลงที่ยังไม่ได้บันทึก",
-  "Untitled": "ไม่มีชื่อ"
+  "Untitled": "ไม่มีชื่อ",
+  "Write": "เขียน"
 }
