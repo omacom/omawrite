@@ -12,7 +12,7 @@ Button {
     property real textScale: 1
     // A label that marks its access key with "&", as Qt writes them ("&Save",
     // "&&" for an ampersand), so each translation picks its own. The dialog
-    // binds Alt and the key; the button underlines it.
+    // binds the key; the button underlines it.
     property string mnemonicLabel: ""
     readonly property string mnemonic: {
         var match = /&([^&\s])/.exec(mnemonicLabel.replace(/&&/g, ""));

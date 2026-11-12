@@ -2746,7 +2746,7 @@ private slots:
         QCOMPARE(save->property("formattedText").toString(), QStringLiteral("Gem (<u>G</u>)"));
     }
 
-    void unsavedChangesDialogSupportsAltMnemonics() {
+    void unsavedChangesDialogPicksWithABareLetterOrAlt() {
         const QString dialogQmlPath = QFINDTESTDATA("../src/UnsavedChangesDialog.qml");
         QVERIFY(!dialogQmlPath.isEmpty());
 
@@ -2785,42 +2785,91 @@ private slots:
         QSignalSpy discardSpy(dialog, SIGNAL(discardRequested()));
         QSignalSpy saveSpy(dialog, SIGNAL(saveRequested()));
 
-        // Bare letters and Ctrl chords do nothing, so a stray keypress
-        // while typing can never discard work.
+        // There is nothing to type into, so the bare letter picks, and Alt
+        // with it still does. A Ctrl chord is not the button's key.
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
         QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+        QCOMPARE(cancelSpy.count(), 0);
+        QVERIFY(dialog->property("opened").toBool());
+
+        const auto pick = [&](Qt::Key key, Qt::KeyboardModifiers modifiers, QSignalSpy &spy) {
+            const int before = spy.count();
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QTest::keyClick(window, key, modifiers);
+            QTRY_COMPARE(spy.count(), before + 1);
+            QVERIFY(!dialog->property("opened").toBool());
+        };
+        pick(Qt::Key_C, Qt::NoModifier, cancelSpy);
+        pick(Qt::Key_D, Qt::NoModifier, discardSpy);
+        pick(Qt::Key_S, Qt::NoModifier, saveSpy);
+        pick(Qt::Key_C, Qt::AltModifier, cancelSpy);
+        pick(Qt::Key_D, Qt::AltModifier, discardSpy);
+        pick(Qt::Key_S, Qt::AltModifier, saveSpy);
+        if (QTest::currentTestFailed())
+            return;
+
+        // With the dialog closed, the keys are inert.
         QTest::keyClick(window, Qt::Key_C);
         QTest::keyClick(window, Qt::Key_D);
         QTest::keyClick(window, Qt::Key_S);
-        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
-        QCOMPARE(cancelSpy.count(), 0);
-        QCOMPARE(discardSpy.count(), 0);
-        QCOMPARE(saveSpy.count(), 0);
-        QVERIFY(dialog->property("opened").toBool());
-
         QTest::keyClick(window, Qt::Key_C, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_D, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_S, Qt::AltModifier);
+        QCOMPARE(cancelSpy.count(), 2);
+        QCOMPARE(discardSpy.count(), 2);
+        QCOMPARE(saveSpy.count(), 2);
+    }
+
+    void unsavedChangesDialogTakesTheLetterFromTheEditor() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("notes.md"));
+        writeFile(path, "on disk");
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(editor && dialog);
+        QSignalSpy cancelSpy(dialog, SIGNAL(cancelRequested()));
+        QSignalSpy discardSpy(dialog, SIGNAL(discardRequested()));
+
+        // The writer is typing when the prompt comes up.
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+        for (char c : QByteArrayLiteral("draft"))
+            QTest::keyClick(window, c);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("draft"));
+        QTRY_VERIFY(backend.modified());
+        QVERIFY(QMetaObject::invokeMethod(window, "requestOpen",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(path))));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+
+        // The letter goes to the dialog, never into the text behind it.
+        QTest::keyClick(window, Qt::Key_C);
         QTRY_COMPARE(cancelSpy.count(), 1);
         QVERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("draft"));
+        QCOMPARE(window->property("pendingAction").toString(), QString());
 
-        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QVERIFY(QMetaObject::invokeMethod(window, "requestOpen",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(path))));
         QTRY_VERIFY(dialog->property("opened").toBool());
-        QTest::keyClick(window, Qt::Key_D, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_D);
         QTRY_COMPARE(discardSpy.count(), 1);
-        QVERIFY(!dialog->property("opened").toBool());
-
-        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
-        QTRY_VERIFY(dialog->property("opened").toBool());
-        QTest::keyClick(window, Qt::Key_S, Qt::AltModifier);
-        QTRY_COMPARE(saveSpy.count(), 1);
-        QVERIFY(!dialog->property("opened").toBool());
-
-        // With the dialog closed, the mnemonics are inert.
-        QTest::keyClick(window, Qt::Key_C, Qt::AltModifier);
-        QTest::keyClick(window, Qt::Key_D, Qt::AltModifier);
-        QTest::keyClick(window, Qt::Key_S, Qt::AltModifier);
-        QCOMPARE(cancelSpy.count(), 1);
-        QCOMPARE(discardSpy.count(), 1);
-        QCOMPARE(saveSpy.count(), 1);
+        QTRY_COMPARE(editor->property("text").toString(), QStringLiteral("on disk"));
     }
 
     void scalesTextWithDesktopTextSize() {
@@ -3539,6 +3588,37 @@ private slots:
         QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
         QTRY_COMPARE(keepSpy.count(), 1);
+        QCOMPARE(reloadSpy.count(), 0);
+    }
+
+    void externalChangeDialogIgnoresABareLetter() {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick\nimport QtQuick.Controls\nApplicationWindow {"
+                          " width: 640; height: 420; visible: true\n"
+                          " property alias dialog: dialog\n"
+                          " ExternalChangeDialog { id: dialog; locallyModified: true } }",
+                          QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *dialog = window->property("dialog").value<QObject *>();
+        QVERIFY(dialog);
+        QSignalSpy keepSpy(dialog, SIGNAL(keepRequested()));
+        QSignalSpy reloadSpy(dialog, SIGNAL(reloadRequested()));
+
+        // It comes up on its own, often mid-sentence, and Reload throws the
+        // writer's changes away, so the next letter typed must not choose.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        for (char c : QByteArrayLiteral("rk"))
+            QTest::keyClick(window, c);
+        QTest::keyClick(window, Qt::Key_R, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_K, Qt::AltModifier);
+        QVERIFY(dialog->property("opened").toBool());
+        QCOMPARE(keepSpy.count(), 0);
         QCOMPARE(reloadSpy.count(), 0);
     }
 
