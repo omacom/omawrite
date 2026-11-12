@@ -2838,6 +2838,9 @@ private slots:
         QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
         QVERIFY2(component.isReady(), qPrintable(component.errorString()));
         QScopedPointer<QObject> object(component.create());
+        // A run that fails before Discard must not leave "draft" for the
+        // next run's editor to recover.
+        const auto forgetDraft = qScopeGuard([&backend] { backend.discardRecovery(); });
         auto *window = qobject_cast<QQuickWindow *>(object.data());
         QVERIFY(window);
         window->show();
