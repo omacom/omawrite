@@ -245,7 +245,6 @@ class OmawriteTest : public QObject {
 
 private slots:
     void initTestCase() {
-        QCoreApplication::setApplicationVersion(QStringLiteral("1.2.3-test"));
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(m_settingsDirectory.isValid());
         QQuickStyle::setStyle(QStringLiteral("Material"));
@@ -353,17 +352,12 @@ private slots:
         const QString usage = Cli::usage();
         QVERIFY(usage.contains(QStringLiteral("omawrite [FILE]")));
         QVERIFY(usage.contains(QStringLiteral("-h, --help")));
-        QVERIFY(usage.contains(QStringLiteral("-v, --version")));
 
-        const QString version = QStringLiteral("1.2.3");
-        const auto answer = [&](const QStringList &arguments) {
-            return Cli::handleArguments(QStringList{QStringLiteral("omawrite")} + arguments,
-                                        version);
+        const auto answer = [](const QStringList &arguments) {
+            return Cli::handleArguments(QStringList{QStringLiteral("omawrite")} + arguments);
         };
         QCOMPARE(answer({QStringLiteral("--help")}), std::optional<int>(0));
         QCOMPARE(answer({QStringLiteral("-h")}), std::optional<int>(0));
-        QCOMPARE(answer({QStringLiteral("--version")}), std::optional<int>(0));
-        QCOMPARE(answer({QStringLiteral("-v")}), std::optional<int>(0));
 
         // Everything else is the app's: no arguments, a file, and Qt's own
         // options, which a leading dash must not turn into an error.
@@ -3164,11 +3158,6 @@ private slots:
         for (auto key : {Qt::Key_Slash, Qt::Key_Question, Qt::Key_F1}) {
             QTest::keyClick(window, key, key == Qt::Key_F1 ? Qt::NoModifier : Qt::ControlModifier);
             QTRY_VERIFY(dialog->property("opened").toBool());
-            QObject *versionLabel = dialog->findChild<QObject *>(QStringLiteral("versionLabel"));
-            QVERIFY(versionLabel);
-            QVERIFY(versionLabel->property("visible").toBool());
-            QCOMPARE(versionLabel->property("text").toString(),
-                     QStringLiteral("Omawrite ") + QCoreApplication::applicationVersion());
             QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
             QCOMPARE(backend.textScale(), scale);
             QVERIFY(dialog->property("x").toReal() >= 0);

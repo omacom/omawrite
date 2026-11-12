@@ -15,12 +15,9 @@
 #include "systemtheme.h"
 #include "translator.h"
 
-#define OMAWRITE_VERSION "0.7.4"
-
 int main(int argc, char *argv[]) {
-    // Answered before the application exists, so they need no display.
-    if (const std::optional<int> exitCode =
-            Cli::handleArguments(argc, argv, QStringLiteral(OMAWRITE_VERSION)))
+    // Answered before the application exists, so it needs no display.
+    if (const std::optional<int> exitCode = Cli::handleArguments(argc, argv))
         return *exitCode;
 
     // Omarchy asks Qt for GTK 3 dialogs, which run inside this process, and a
@@ -32,7 +29,6 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("omawrite"));
-    app.setApplicationVersion(QStringLiteral(OMAWRITE_VERSION));
     app.setDesktopFileName(QStringLiteral("omawrite"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
 
