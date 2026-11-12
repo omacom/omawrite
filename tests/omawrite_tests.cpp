@@ -538,7 +538,11 @@ private slots:
         QTest::keyClick(window, Qt::Key_D);
         QVERIFY(document->isUndoAvailable());
 
+        // One change for the whole load: styling the text in a second pass
+        // over every block is what froze the window on long files.
+        QSignalSpy changes(document, &QTextDocument::contentsChange);
         backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(changes.count(), 1);
         QCOMPARE(editor->property("text").toString(), QString::fromUtf8(contents));
         QVERIFY(!document->isUndoAvailable());
         for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
