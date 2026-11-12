@@ -1112,7 +1112,8 @@ ApplicationWindow {
                 size: win.scaledSize(16)
                 iconColor: win.mutedColor
                 opacity: 0.55
-                tooltip: qsTr("Font")
+                // Its tooltip would sit on the list it just opened.
+                tooltip: fontPicker.opened ? "" : qsTr("Font")
                 tooltipColor: win.panelColor
                 tooltipTextColor: win.textColor
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()

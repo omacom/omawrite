@@ -21,8 +21,6 @@ Item {
     // Its own tooltip, since Material's is always the same dark grey.
     ToolTip {
         id: tip
-        // Above the font picker, which opens from the same button.
-        z: 1
         visible: hitArea.containsMouse && control.tooltip.length > 0
         text: control.tooltip
         background: Rectangle {
