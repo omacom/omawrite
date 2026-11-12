@@ -203,9 +203,18 @@ void Backend::setParentWindow(QWindow *window) {
     m_parentWindow = window;
 }
 
+// The name an untitled document goes by, which a save suggests too.
+QString Backend::untitledName() {
+    return tr("Untitled") + QStringLiteral(".md");
+}
+
+void Backend::retranslate() {
+    emit fileUrlChanged();
+}
+
 QString Backend::fileName() const {
     if (!m_fileUrl.isValid() || m_fileUrl.isEmpty())
-        return QStringLiteral("Untitled.md");
+        return untitledName();
 
     if (m_fileUrl.isLocalFile()) {
         const QFileInfo info(m_fileUrl.toLocalFile());
@@ -214,7 +223,7 @@ QString Backend::fileName() const {
     }
 
     const QString name = m_fileUrl.fileName();
-    return name.isEmpty() ? QStringLiteral("Untitled.md") : name;
+    return name.isEmpty() ? untitledName() : name;
 }
 
 void Backend::setDarkMode(bool darkMode) {
@@ -266,7 +275,7 @@ void Backend::setTextZoom(qreal zoom) {
 void Backend::attachDocument(QObject *textDocument) {
     auto *quickDocument = qobject_cast<QQuickTextDocument *>(textDocument);
     if (!quickDocument || !quickDocument->textDocument()) {
-        setStatus(QStringLiteral("Could not attach the Markdown renderer."));
+        setStatus(tr("Could not attach the Markdown renderer."));
         return;
     }
 
@@ -298,14 +307,14 @@ void Backend::openDialog() {
 
 void Backend::open(const QUrl &url) {
     if (!url.isLocalFile()) {
-        setStatus(QStringLiteral("Only local files can be opened."));
+        setStatus(tr("Only local files can be opened."));
         return;
     }
 
     const QString targetName = QFileInfo(url.toLocalFile()).fileName();
     QFile file(url.toLocalFile());
     if (!file.open(QIODevice::ReadOnly)) {
-        setStatus(QStringLiteral("Could not open %1.").arg(targetName));
+        setStatus(tr("Could not open %1.").arg(targetName));
         return;
     }
 
@@ -323,12 +332,12 @@ void Backend::open(const QUrl &url) {
     watchCurrentFile();
     setModified(false);
     if (savesUnchanged(raw)) {
-        setStatus(QStringLiteral("Opened %1").arg(fileName()));
+        setStatus(tr("Opened %1").arg(fileName()));
     } else {
         // Saving writes UTF-8 with plain line endings, which would change
         // bytes this file holds. Leave that to an explicit save.
         suspendAutoSave();
-        setStatus(QStringLiteral("Opened %1. Auto-save is off to keep its encoding and line endings.")
+        setStatus(tr("Opened %1. Auto-save is off to keep its encoding and line endings.")
                       .arg(fileName()));
     }
 }
@@ -369,7 +378,7 @@ void Backend::openOrStartFile(const QUrl &requestedUrl) {
         ? QUrl::fromLocalFile(info.absoluteFilePath()) : requestedUrl;
     if (m_modified) {
         // A recovered draft fills this window; opening over it would lose it.
-        setStatus(QStringLiteral("Recovered unsaved changes; %1 was not opened.")
+        setStatus(tr("Recovered unsaved changes; %1 was not opened.")
                       .arg(info.fileName()));
         return;
     }
@@ -386,7 +395,7 @@ void Backend::openOrStartFile(const QUrl &requestedUrl) {
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
-    setStatus(QStringLiteral("New file %1").arg(fileName()));
+    setStatus(tr("New file %1").arg(fileName()));
 }
 
 void Backend::reloadFromDisk() {
@@ -413,7 +422,7 @@ void Backend::keepExternalVersion() {
     scheduleRecovery();
     scheduleAutoSave();
     watchCurrentFile();
-    setStatus(QStringLiteral("Kept your version"));
+    setStatus(tr("Kept your version"));
 }
 
 QFont Backend::printFont(const QFont &editorFont, qreal screenDpi) {
@@ -430,13 +439,13 @@ QFont Backend::printFont(const QFont &editorFont, qreal screenDpi) {
 
 void Backend::printDocument() {
     if (!m_document) {
-        setStatus(QStringLiteral("There is no document to print."));
+        setStatus(tr("There is no document to print."));
         return;
     }
 
     QPrinter printer(QPrinter::HighResolution);
     QPrintDialog dialog(&printer);
-    dialog.setWindowTitle(QStringLiteral("Print %1").arg(fileName()));
+    dialog.setWindowTitle(tr("Print %1").arg(fileName()));
     dialog.winId();
     if (dialog.windowHandle() && m_parentWindow)
         dialog.windowHandle()->setTransientParent(m_parentWindow);
@@ -456,7 +465,7 @@ void Backend::newWindow() {
     const bool started = QProcess::startDetached(QCoreApplication::applicationFilePath(),
                                                  QStringList());
     if (!started)
-        setStatus(QStringLiteral("Could not open a new window."));
+        setStatus(tr("Could not open a new window."));
 }
 
 void Backend::copyAsHtml() {
@@ -474,7 +483,7 @@ void Backend::copyAsHtml() {
     mimeData->setHtml(html);
     mimeData->setText(rendered.toPlainText());
     QGuiApplication::clipboard()->setMimeData(mimeData);
-    setStatus(QStringLiteral("Copied as HTML."));
+    setStatus(tr("Copied as HTML."));
 }
 
 QString Backend::clipboardUrl() const {
@@ -534,7 +543,7 @@ bool Backend::editorTextChanged() {
         setModified(false);
         clearRecovery();
         if (m_hasKnownFileContents)
-            setStatus(QStringLiteral("Saved %1").arg(fileName()));
+            setStatus(tr("Saved %1").arg(fileName()));
         else
             setStatus(QString());
     } else {
@@ -793,7 +802,7 @@ void Backend::documentFontChanged() {
 
 void Backend::loadDocumentText(const QString &text) {
     if (!m_document) {
-        setStatus(QStringLiteral("Could not attach the Markdown renderer."));
+        setStatus(tr("Could not attach the Markdown renderer."));
         return;
     }
 
@@ -835,7 +844,7 @@ void Backend::setStatus(const QString &status) {
 
 void Backend::saveTo(const QUrl &url) {
     if (!url.isLocalFile()) {
-        setStatus(QStringLiteral("Only local files can be saved."));
+        setStatus(tr("Only local files can be saved."));
         emit saveFailed();
         return;
     }
@@ -846,7 +855,7 @@ void Backend::saveTo(const QUrl &url) {
     // may be written in, write the file in place rather than fail.
     file.setDirectWriteFallback(true);
     if (!file.open(QIODevice::WriteOnly | QIODevice::Text)) {
-        setStatus(QStringLiteral("Could not save %1.").arg(targetName));
+        setStatus(tr("Could not save %1.").arg(targetName));
         emit saveFailed();
         return;
     }
@@ -862,7 +871,7 @@ void Backend::saveTo(const QUrl &url) {
     // returning false (and leaving the original untouched) on any write error.
     if (!file.commit()) {
         watchCurrentFile();
-        setStatus(QStringLiteral("Could not write %1.").arg(targetName));
+        setStatus(tr("Could not write %1.").arg(targetName));
         emit saveFailed();
         return;
     }
@@ -875,7 +884,7 @@ void Backend::saveTo(const QUrl &url) {
     QSettings().setValue(lastSaveDirectorySetting,
                          QFileInfo(url.toLocalFile()).absolutePath());
     setModified(false);
-    setStatus(QStringLiteral("Saved %1").arg(fileName()));
+    setStatus(tr("Saved %1").arg(fileName()));
     clearRecovery();
     emit saveSucceeded();
 }
@@ -1005,7 +1014,7 @@ void Backend::restoreRecovery() {
     m_autoSaveSuspended = recoveredUrl.isLocalFile();
     watchCurrentFile();
     setModified(true);
-    setStatus(QStringLiteral("Recovered unsaved changes"));
+    setStatus(tr("Recovered unsaved changes"));
 }
 
 void Backend::clearRecovery() {
@@ -1262,7 +1271,7 @@ QString Backend::suggestedFileName(const QString &text) {
                  QStringLiteral("-"));
     name = name.left(120).trimmed();
     if (name.isEmpty() || name == QStringLiteral(".") || name == QStringLiteral(".."))
-        name = QStringLiteral("Untitled");
+        name = tr("Untitled");
     if (!name.endsWith(QStringLiteral(".md"), Qt::CaseInsensitive))
         name += QStringLiteral(".md");
     return name;

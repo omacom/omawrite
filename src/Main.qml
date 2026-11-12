@@ -330,17 +330,17 @@ ApplicationWindow {
 
     Dialogs.FileDialog {
         id: openFileDialog
-        title: "Open File"
+        title: qsTr("Open File")
         fileMode: Dialogs.FileDialog.OpenFile
-        nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
+        nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
         onAccepted: win.requestOpen(selectedFile)
     }
 
     Dialogs.FileDialog {
         id: saveFileDialog
-        title: "Save File"
+        title: qsTr("Save File")
         fileMode: Dialogs.FileDialog.SaveFile
-        nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
+        nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
         onAccepted: backend.saveAs(selectedFile)
         onRejected: {
             win.awaitingPendingSave = false;
@@ -404,8 +404,12 @@ ApplicationWindow {
         containerHeight: win.height
     }
 
+    // Right-to-left languages mirror the window; the Translator sets the
+    // application's layout direction.
     Item {
         anchors.fill: parent
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
 
         Flickable {
             id: editorFlick
@@ -695,7 +699,7 @@ ApplicationWindow {
                     var end = selectionEnd;
                     var selected = rawText().slice(start, end);
                     var url = backend.clipboardUrl();
-                    var label = selected.length > 0 ? selected : "link text";
+                    var label = selected.length > 0 ? selected : qsTr("link text");
                     var markdown = markdownLink(label, url.length > 0 ? url : "https://");
                     var labelLength = escapeMarkdownLinkText(label).length;
                     if (selected.length === 0) {
@@ -996,7 +1000,7 @@ ApplicationWindow {
                 Text {
                     anchors.left: parent.left
                     anchors.top: parent.top
-                    text: "# Start writing"
+                    text: "# " + qsTr("Start writing")
                     visible: editor.length === 0 && !editor.activeFocus
                     color: win.mutedColor
                     font.family: editor.font.family
@@ -1080,7 +1084,7 @@ ApplicationWindow {
                 size: win.scaledSize(16)
                 iconColor: backend.modified ? win.textColor : win.mutedColor
                 opacity: backend.modified ? 0.9 : 0.55
-                tooltip: "Save"
+                tooltip: qsTr("Save")
                 onClicked: backend.save()
             }
 
@@ -1090,7 +1094,7 @@ ApplicationWindow {
                 size: win.scaledSize(16)
                 iconColor: win.mutedColor
                 opacity: 0.55
-                tooltip: "Open"
+                tooltip: qsTr("Open")
                 onClicked: backend.openDialog()
             }
 
@@ -1101,7 +1105,7 @@ ApplicationWindow {
                 size: win.scaledSize(16)
                 iconColor: win.mutedColor
                 opacity: 0.55
-                tooltip: "Font"
+                tooltip: qsTr("Font")
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
 
@@ -1124,7 +1128,9 @@ ApplicationWindow {
             // Parented to its button, so a press on the button is not a press
             // outside that closes it only for the click to open it again.
             parent: fontButton
-            x: -8
+            // A popup is not mirrored with its parent, so it opens towards the
+            // window's middle from the footer's end it sits at.
+            x: Qt.application.layoutDirection === Qt.RightToLeft ? fontButton.width - width + 8 : -8
             y: -height - 10
             width: win.scaledSize(320)
             maximumHeight: Math.min(win.scaledSize(440), win.height - 80)
@@ -1145,7 +1151,7 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.rightMargin: 12
             anchors.bottomMargin: 10
-            text: backend.wordCount + (backend.wordCount === 1 ? " Word" : " Words")
+            text: qsTr("%n Words", "", backend.wordCount)
             color: win.mutedColor
             opacity: 0.75
             font.family: "IBM Plex Mono"
@@ -1230,7 +1236,7 @@ ApplicationWindow {
 
                     Label {
                         anchors.verticalCenter: replaceField.verticalCenter
-                        text: "Replace with"
+                        text: qsTr("Replace with")
                         visible: win.replaceOpen && replaceField.text.length === 0
                         color: win.mutedColor
                         font.pixelSize: win.scaledSize(17)
@@ -1238,7 +1244,7 @@ ApplicationWindow {
 
                     Label {
                         anchors.verticalCenter: searchField.verticalCenter
-                        text: "Find"
+                        text: qsTr("Find")
                         visible: searchField.text.length === 0
                         color: win.mutedColor
                         font.pixelSize: win.scaledSize(17)
@@ -1261,7 +1267,7 @@ ApplicationWindow {
                     id: replaceCurrentButton
                     objectName: "replaceButton"
                     visible: win.replaceOpen
-                    text: "Replace"
+                    text: qsTr("Replace")
                     onClicked: {
                         win.flushSearch();
                         if (win.searchMatchIndex < 0) return;
@@ -1281,7 +1287,7 @@ ApplicationWindow {
                 Button {
                     objectName: "replaceAllButton"
                     visible: win.replaceOpen
-                    text: "All"
+                    text: qsTr("All")
                     onClicked: {
                         win.flushSearch();
                         var query = searchField.text;

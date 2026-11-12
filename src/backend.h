@@ -68,6 +68,7 @@ public:
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
+    static QString untitledName();
     static QString tomlValue(const QString &text);
     static QString readableOn(const QString &color);
     static QFont printFont(const QFont &editorFont, qreal screenDpi);
@@ -104,6 +105,10 @@ public:
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
     Q_INVOKABLE void documentFontChanged();
+
+public slots:
+    // The untitled name follows the language.
+    void retranslate();
 
 signals:
     void fileUrlChanged();
