@@ -14,8 +14,9 @@ Dialog {
     property int containerWidth: 520
     property int containerHeight: 320
     property real textScale: 1
-    // Closing without a choice, as with Escape, keeps the writer's text: it
-    // decides nothing destructive and leaves auto-save able to resume.
+    // Closing without a choice, as with Escape, decides nothing destructive:
+    // auto-save stays paused over a changed file, and a removed one's text
+    // is kept as unsaved, so closing the window still asks about it.
     property bool decided: false
 
     signal keepRequested()
@@ -37,7 +38,7 @@ Dialog {
             keepButton.forceActiveFocus();
     }
     onClosed: {
-        if (!decided)
+        if (!decided && deleted)
             keepRequested();
     }
 

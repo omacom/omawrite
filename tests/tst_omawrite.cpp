@@ -3080,7 +3080,17 @@ private slots:
         QSignalSpy keepSpy(dialog, SIGNAL(keepRequested()));
         QSignalSpy reloadSpy(dialog, SIGNAL(reloadRequested()));
 
-        // Escape closes it without a choice.
+        // Escape closes it without a choice. Keeping over a changed file
+        // would let auto-save write the editor's text over the outside edit.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(keepSpy.count(), 0);
+        QCOMPARE(reloadSpy.count(), 0);
+
+        // A removed file's text is kept as unsaved, so it is not lost on close.
+        QVERIFY(dialog->setProperty("deleted", true));
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
         QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
