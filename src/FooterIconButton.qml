@@ -34,9 +34,10 @@ Item {
 
         onPaint: {
             var context = getContext("2d");
+            context.setTransform(1, 0, 0, 1, 0, 0);
+            context.clearRect(0, 0, width, height);
             var unit = dpr * control.size / 16;
             context.setTransform(unit, 0, 0, unit, 0, 0);
-            context.clearRect(0, 0, width, height);
             context.strokeStyle = control.iconColor;
             context.lineWidth = 1.4;
             context.lineCap = "round";
