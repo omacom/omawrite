@@ -8,6 +8,8 @@ Item {
     property string iconName
     property color iconColor: "#666666"
     property string tooltip
+    property color tooltipColor: "#22221f"
+    property color tooltipTextColor: "#d0d0d0"
     // The icons are drawn on a 16-pixel grid and scaled to this size.
     property real size: 16
 
@@ -16,8 +18,21 @@ Item {
     width: size
     height: size
 
-    ToolTip.visible: hitArea.containsMouse && tooltip.length > 0
-    ToolTip.text: tooltip
+    // Its own tooltip, since Material's is always the same dark grey.
+    ToolTip {
+        id: tip
+        visible: hitArea.containsMouse && control.tooltip.length > 0
+        text: control.tooltip
+        background: Rectangle {
+            radius: 4
+            color: control.tooltipColor
+        }
+        contentItem: Text {
+            text: tip.text
+            font: tip.font
+            color: control.tooltipTextColor
+        }
+    }
 
     Canvas {
         id: iconCanvas

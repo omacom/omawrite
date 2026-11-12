@@ -292,7 +292,7 @@ void Backend::attachDocument(QObject *textDocument) {
     m_lastDocumentText = m_document->toPlainText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setTheme(m_darkMode, m_themeBackground, m_themeForeground, m_themeAccent,
-                            m_themeCodeBackground);
+                            m_themePanelBackground);
     m_highlighter->setCaret(m_caretPosition);
 
     connect(m_document, &QTextDocument::contentsChange, this,
@@ -1147,7 +1147,7 @@ void Backend::loadOmarchyTheme() {
     const bool wasDark = m_darkMode;
     const QStringList previousColors{m_themeBackground, m_themeForeground, m_themeAccent,
                                      m_themeSelection, m_themeSelectionForeground,
-                                     m_themeCodeBackground};
+                                     m_themePanelBackground};
 
     bool themeIsDark = m_systemDarkMode;
     if (themeMode == QStringLiteral("dark")) {
@@ -1193,20 +1193,20 @@ void Backend::loadOmarchyTheme() {
     // unlike lightening, still moves on a pure black background.
     const QColor page(m_themeBackground);
     const QColor lighter(lighterBackground);
-    m_themeCodeBackground = (lighter.isValid() && lighter != page
+    m_themePanelBackground = (lighter.isValid() && lighter != page
                                  ? lighter
                                  : blend(page, QColor(m_themeForeground), 0.06)).name();
 
     if (m_highlighter) {
         m_highlighter->setTheme(m_darkMode, m_themeBackground, m_themeForeground,
-                                m_themeAccent, m_themeCodeBackground);
+                                m_themeAccent, m_themePanelBackground);
     }
 
     if (m_darkMode != wasDark)
         emit darkModeChanged();
     const QStringList colors{m_themeBackground, m_themeForeground, m_themeAccent,
                              m_themeSelection, m_themeSelectionForeground,
-                             m_themeCodeBackground};
+                             m_themePanelBackground};
     if (colors != previousColors)
         emit themeColorsChanged();
 }

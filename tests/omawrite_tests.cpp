@@ -1534,7 +1534,7 @@ private slots:
             // Reload the same backend so a missing key cannot inherit the
             // previous theme's panel color.
             backend.setDarkMode(!backend.darkMode());
-            return QColor(backend.themeCodeBackground());
+            return QColor(backend.themePanelBackground());
         };
 
         // The shade the theme names for panels wins.
