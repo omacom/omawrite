@@ -233,10 +233,14 @@ Backend::Backend(std::unique_ptr<SpellingDictionary> dictionary, QObject *parent
     m_fileCheckTimer.setSingleShot(true);
     m_fileCheckTimer.setInterval(100);
     connect(&m_fileCheckTimer, &QTimer::timeout, this, &Backend::checkWatchedFile);
-    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, &m_fileCheckTimer,
-            qOverload<>(&QTimer::start));
-    connect(&m_fileWatcher, &QFileSystemWatcher::directoryChanged, &m_fileCheckTimer,
-            qOverload<>(&QTimer::start));
+    // Continuous activity beside the document must not postpone its check
+    // indefinitely. Coalesce a burst without restarting the pending deadline.
+    const auto scheduleFileCheck = [this] {
+        if (!m_fileCheckTimer.isActive())
+            m_fileCheckTimer.start();
+    };
+    connect(&m_fileWatcher, &QFileSystemWatcher::fileChanged, this, scheduleFileCheck);
+    connect(&m_fileWatcher, &QFileSystemWatcher::directoryChanged, this, scheduleFileCheck);
 
     loadOmarchyTheme();
     watchOmarchyTheme();
@@ -1433,10 +1437,21 @@ bool Backend::diskMatchesKnownContents() const {
 }
 
 void Backend::reportExternalChange(bool deleted) {
+    // The parent watch also sees unrelated sibling changes. Do not reopen a
+    // dismissed conflict for the same disk state, but still report a later edit.
+    QFile file(m_fileUrl.toLocalFile());
+    const bool readable = !deleted && file.open(QIODevice::ReadOnly | QIODevice::Text);
+    QByteArray state = deleted ? QByteArray("missing") : QByteArray("unreadable");
+    if (readable)
+        state = "contents:" + QCryptographicHash::hash(file.readAll(), QCryptographicHash::Sha256);
+    if (state == m_lastReportedFileState)
+        return;
+
     // Whatever is on disk now, it is not what we last read, so the baseline is
     // unknown until the writer picks a version. A deletion counts: the old
     // text is not saved anywhere either.
     setKnownFileContents(QByteArray(), false);
+    m_lastReportedFileState = state;
     suspendAutoSave();
     emit externalChangeDetected(deleted, m_modified);
 }
@@ -1448,6 +1463,7 @@ bool Backend::savesUnchanged(const QByteArray &raw) {
 }
 
 void Backend::setKnownFileContents(const QByteArray &contents, bool known) {
+    m_lastReportedFileState.clear();
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = known;
     // Every caller reads in text mode or writes plain line endings, so there
@@ -1546,18 +1562,30 @@ void Backend::unwatchFiles() {
         m_fileWatcher.removePaths(watched);
 }
 
-// A missing file cannot be watched, so watch its folder instead to notice it
-// coming back.
+// Keep the parent subscribed even while the file exists: replacement can
+// invalidate the file watch without delivering a useful fileChanged event.
+// Reconcile incrementally so rearming never tears down the healthy parent.
 void Backend::watchCurrentFile() {
-    unwatchFiles();
-    if (!m_fileUrl.isLocalFile())
-        return;
-    const QFileInfo info(m_fileUrl.toLocalFile());
-    m_fileMissing = !info.exists();
-    if (info.exists())
-        m_fileWatcher.addPath(info.filePath());
-    else if (info.dir().exists())
-        m_fileWatcher.addPath(info.dir().path());
+    QString filePath;
+    QString directoryPath;
+    if (m_fileUrl.isLocalFile()) {
+        const QFileInfo info(m_fileUrl.toLocalFile());
+        m_fileMissing = !info.exists();
+        if (!m_fileMissing)
+            filePath = info.absoluteFilePath();
+        if (info.absoluteDir().exists())
+            directoryPath = info.absolutePath();
+    }
+    for (const QString &path : m_fileWatcher.files())
+        if (path != filePath)
+            m_fileWatcher.removePath(path);
+    for (const QString &path : m_fileWatcher.directories())
+        if (path != directoryPath)
+            m_fileWatcher.removePath(path);
+    if (!directoryPath.isEmpty() && !m_fileWatcher.directories().contains(directoryPath))
+        m_fileWatcher.addPath(directoryPath);
+    if (!filePath.isEmpty() && !m_fileWatcher.files().contains(filePath))
+        m_fileWatcher.addPath(filePath);
 }
 
 void Backend::checkWatchedFile() {

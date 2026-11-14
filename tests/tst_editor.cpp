@@ -5675,7 +5675,17 @@ private slots:
         QVERIFY(!backend.modified());
     }
 
+    void keepsWatchingAFileReplacedFromOutside_data() {
+        QTest::addColumn<bool>("parentOnly");
+        QTest::addColumn<bool>("busyParent");
+        QTest::newRow("file-and-parent") << false << false;
+        QTest::newRow("parent-fallback") << true << false;
+        QTest::newRow("busy-parent-fallback") << true << true;
+    }
+
     void keepsWatchingAFileReplacedFromOutside() {
+        QFETCH(bool, parentOnly);
+        QFETCH(bool, busyParent);
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QString path = directory.filePath(QStringLiteral("watched.md"));
@@ -5687,13 +5697,83 @@ private slots:
         backend.open(QUrl::fromLocalFile(path));
         QSignalSpy externalSpy(&backend, &Backend::externalChangeDetected);
 
-        // Editors and sync tools often replace a file rather than write into it.
+        QVERIFY(backend.m_fileWatcher.files().contains(path));
+        QVERIFY(backend.m_fileWatcher.directories().contains(directory.path()));
+        QTimer churn;
+        int churnCount = 0;
+        const QString sibling = directory.filePath(QStringLiteral("sibling"));
+        connect(&churn, &QTimer::timeout, this, [&] {
+            if (++churnCount % 2)
+                writeFile(sibling, "unrelated");
+            else
+                QFile::remove(sibling);
+        });
+        if (busyParent)
+            churn.start(20);
+        // No yield before replacement: an immediate save must also be noticed.
         const QString replacement = directory.filePath(QStringLiteral("replacement"));
-        writeFile(replacement, "second");
-        QVERIFY(QFile::remove(path));
-        QVERIFY(QFile::rename(replacement, path));
-        QTRY_VERIFY(externalSpy.count() >= 1);
-        QTRY_VERIFY(backend.m_fileWatcher.files().contains(path));
+        for (const QByteArray &contents : {QByteArray("second"), QByteArray("third")}) {
+            externalSpy.clear();
+            if (parentOnly)
+                QVERIFY(backend.m_fileWatcher.removePath(path));
+            writeFile(replacement, contents);
+            QVERIFY(QFile::remove(path));
+            QVERIFY(QFile::rename(replacement, path));
+            QTRY_VERIFY(externalSpy.count() >= 1);
+            if (busyParent) {
+                QVERIFY(churn.isActive());
+                QVERIFY(churnCount > 0);
+            }
+            QVERIFY(!externalSpy.first().at(0).toBool());
+            QVERIFY(backend.m_autoSaveSuspended);
+            QTRY_VERIFY(backend.m_fileWatcher.files().contains(path));
+            QVERIFY(backend.m_fileWatcher.directories().contains(directory.path()));
+            backend.reloadFromDisk();
+            QCOMPARE(backend.currentDocumentText(), QString::fromUtf8(contents));
+        }
+    }
+
+    void directoryActivityDoesNotRepeatAnUnresolvedConflict() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("watched.md"));
+        const QString sibling = directory.filePath(QStringLiteral("sibling"));
+        writeFile(path, "first");
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.open(QUrl::fromLocalFile(path));
+        QSignalSpy externalSpy(&backend, &Backend::externalChangeDetected);
+        writeFile(sibling, "unrelated");
+        backend.checkWatchedFile();
+        QCOMPARE(externalSpy.count(), 0);
+
+        writeFile(path, "second");
+        QTRY_COMPARE(externalSpy.count(), 1);
+        QCOMPARE(backend.currentDocumentText(), QStringLiteral("first"));
+        QVERIFY(backend.m_autoSaveSuspended);
+        QVERIFY(!backend.m_hasKnownFileContents);
+        QVERIFY(QFile::remove(sibling));
+        backend.checkWatchedFile();
+        QTest::qWait(250);
+        QCOMPARE(externalSpy.count(), 1);
+
+        // A genuinely different conflict must still be reported.
+        writeFile(path, "third");
+        QTRY_COMPARE(externalSpy.count(), 2);
+        backend.reloadFromDisk();
+        QVERIFY(!backend.m_autoSaveSuspended);
+        writeFile(path, "second");
+        QTRY_COMPARE(externalSpy.count(), 3);
+
+        // Moving to another document drops the obsolete file and parent.
+        QTemporaryDir other;
+        QVERIFY(other.isValid());
+        const QString otherPath = other.filePath(QStringLiteral("other.md"));
+        writeFile(otherPath, "other");
+        backend.open(QUrl::fromLocalFile(otherPath));
+        QCOMPARE(backend.m_fileWatcher.files(), QStringList{otherPath});
+        QCOMPARE(backend.m_fileWatcher.directories(), QStringList{other.path()});
     }
 
     void keepsTheWritersTextWhenTheChangeDialogIsDismissed() {
@@ -6068,7 +6148,7 @@ private:
     // Writes while the backend is not watching, as when an event is missed.
     static void writeFileUnwatched(Backend &backend, const QString &path,
                                    const QByteArray &contents) {
-        backend.m_fileWatcher.removePath(path);
+        backend.unwatchFiles();
         writeFile(path, contents);
     }
 
