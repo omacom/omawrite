@@ -254,6 +254,8 @@ private:
     QByteArray m_lastKnownFileContents;
     QString m_lastKnownFileText;
     bool m_hasKnownFileContents = false;
+    // Conflict fingerprint only; never an accepted baseline for auto-save.
+    QByteArray m_lastReportedFileState;
     bool m_autoSaveSuspended = false;
     bool m_autoSaveHeld = false;
     bool m_recoverDraft = true;
