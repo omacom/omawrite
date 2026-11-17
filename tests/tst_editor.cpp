@@ -228,7 +228,17 @@ private slots:
         auto *source = root->findChild<QObject *>("sourceEditor");
         auto *view = root->findChild<QQuickItem *>("previewEditor");
         auto *projection = root->findChild<LivePreview *>(); QVERIFY(source && view && projection);
-        if (QGuiApplication::platformName() != "offscreen") QVERIFY(QTest::qWaitForWindowExposed(window));
+        // Keep the fixture inside the logical desktop and prevent native DPI
+        // clamping/desktop tilers from changing wrapping during the comparison.
+        // This is a rendering test, not an OS keyboard-focus test.
+        if (QGuiApplication::platformName() != "offscreen") {
+            window->setFlag(Qt::WindowDoesNotAcceptFocus);
+            const QSize available = window->screen()->availableGeometry().size() - QSize(64, 64);
+            const QSize size = QSize(640, 560).boundedTo(available);
+            window->setMinimumSize(size); window->setMaximumSize(size);
+            window->resize(size); window->show();
+            QVERIFY(QTest::qWaitForWindowExposed(window));
+        }
         const QString text = "# This is a beautiful app.\n\nI like how everything is displayed\n\n\nhere is a table\n\nasdsa\nasdsada\n\n\n| header 1 | header 2 | header 3 |\n| --- | :---: | --- |\n| pepe | pepe | pepe|";
         source->setProperty("text", text);
         source->setProperty("cursorPosition", 0);
@@ -242,17 +252,29 @@ private slots:
         // pixel comparisons without changing the editor's focus/selection.
         auto *caret = root->findChild<QQuickItem *>("visibleEditorCaret"); QVERIFY(caret);
         caret->setOpacity(0);
+        auto *scroll = root->findChild<QObject *>("editorScroll"); QVERIFY(scroll);
         QImage baseline;
         const auto headingImage = [window, view] {
-            const QPoint p = view->mapToScene(QPointF(0, 0)).toPoint();
+            // Compare a fixed leading heading region, not the entire editor
+            // width: native DPI/window clamping can change trailing whitespace
+            // without changing any glyphs. The leaked separator/body starts
+            // here, so the original regression remains fully detectable.
+            if (view->width() < 360) return QImage();
+            const QRectF strip(view->mapToScene(QPointF()), QSizeF(360, 80));
             const QImage image = window->grabWindow();
             const qreal scale = image.devicePixelRatio();
-            return image.copy(QRect(p.x() * scale, p.y() * scale, view->width() * scale, 80 * scale));
+            // Round once, in physical pixels; rounding logical coordinates
+            // first can move the crop on a 150% Windows desktop.
+            const QRect pixels = QRectF(strip.topLeft() * scale, strip.size() * scale).toAlignedRect();
+            if (!image.rect().contains(pixels)) return QImage();
+            return image.copy(pixels);
         };
         QTest::qWait(80);
         if (QGuiApplication::platformName() != "offscreen") {
-            baseline = headingImage();
-            QVERIFY2(!baseline.isNull(), "Native heading capture is required for the glyph regression");
+            QSignalSpy frames(window, &QQuickWindow::frameSwapped);
+            window->requestUpdate();
+            QTRY_VERIFY_WITH_TIMEOUT(frames.count() > 0, 5000);
+            QTRY_VERIFY_WITH_TIMEOUT((baseline = headingImage(), !baseline.isNull()), 5000);
         }
         for (int i = 0; i < 3; ++i) {
             projection->setTableSource(panel["id"].toInt(), true);
@@ -276,7 +298,25 @@ private slots:
                 ++bodyCells;
             }
             QCOMPARE(bodyCells, 3);
-            if (!baseline.isNull()) QCOMPARE(headingImage(), baseline);
+            if (!baseline.isNull()) {
+                QImage actual;
+                const auto diagnostics = qScopeGuard([&] {
+                    if (actual == baseline) return;
+                    QDir().mkpath("table-render-diagnostics");
+                    baseline.save("table-render-diagnostics/expected.png");
+                    actual.save("table-render-diagnostics/actual.png");
+                    window->grabWindow().save("table-render-diagnostics/window.png");
+                    qWarning() << "Heading capture mismatch, iteration" << i
+                               << "DPR" << window->devicePixelRatio()
+                               << "expected/actual pixels" << baseline.size() << actual.size()
+                               << "view size" << view->size()
+                               << "view origin" << view->mapToScene(QPointF())
+                               << "scrollY" << scroll->property("contentY");
+                });
+                // Keep exact pixels: stale glyphs must not be hidden by a
+                // tolerance. Retry only while the native render/scroll settles.
+                QTRY_VERIFY_WITH_TIMEOUT((actual = headingImage(), actual == baseline), 5000);
+            }
             QCOMPARE(source->property("text").toString(), text);
         }
     }
