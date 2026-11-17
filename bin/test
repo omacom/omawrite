@@ -64,7 +64,7 @@ if [ "${1:-}" = --rendered ]; then
   case "${QT_QPA_PLATFORM:-}" in
     offscreen|minimal) echo "Rendered tests require a native desktop platform, not $QT_QPA_PLATFORM." >&2; exit 2 ;;
   esac
-  run_suite tests/tests.pro tst_editor "$BUILD_DIR" rendersModeSwitchesWithDocumentImages tableScreenshotRegression
+  run_suite tests/tests.pro tst_editor "$BUILD_DIR" rendersModeSwitchesWithDocumentImages tableScreenshotRegression modeSwitchScreenshotRegression
   run_suite tests/livepreview/livepreview.pro tst_livepreview "$BUILD_DIR/livepreview" sceneGraphModeSwitchWithImages
   exit 0
 fi

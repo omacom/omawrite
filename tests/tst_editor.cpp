@@ -1845,6 +1845,71 @@ private slots:
         QDir(QStandardPaths::writableLocation(QStandardPaths::AppDataLocation)).removeRecursively();
     }
 
+    void modeSwitchScreenshotRegression_data() {
+        QTest::addColumn<QString>("text");
+        QTest::newRow("footnotes") << QStringLiteral("# this is a header\n\nthis is a reference[^1]\n\nthis is another[^2]\n\nthis is a reference[^3]\n\nthis is another type of reference[The poncho blog's][ref1]\n\n[^1]: https://www.google.com\n[^2]: ref\n[^3]: https://ponchoalv.github.io/\n[ref1]: <https://ponchoalv.github.io/>\n");
+        QTest::newRow("table") << QStringLiteral("# this is a header\n\nBefore the table.\n\n| First | Second |\n| --- | --- |\n| alpha | beta |\n\nAfter the table.\n");
+    }
+    void modeSwitchScreenshotRegression() {
+        if (QGuiApplication::platformName() == QStringLiteral("offscreen"))
+            QSKIP("Native scene graph required to detect retained glyphs");
+        QFETCH(QString, text);
+        QTemporaryDir directory; QVERIFY(directory.isValid());
+        Backend backend; backend.m_recoveryPath = directory.filePath("recovery.json");
+        QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> root(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+        auto *source = root->findChild<QObject *>("sourceEditor");
+        auto *view = root->findChild<QQuickItem *>("previewEditor");
+        auto *caret = root->findChild<QQuickItem *>("visibleEditorCaret");
+        QVERIFY(source && view && caret);
+        caret->setOpacity(0);
+        // Native desktop tilers/clamping must not change wrapping between the
+        // two captures: only the scenegraph cache may differ in this oracle.
+        window->setFlag(Qt::WindowDoesNotAcceptFocus);
+        window->setMinimumSize(QSize(640, 560));
+        window->setMaximumSize(QSize(640, 560));
+        window->resize(640, 560);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QTest::mouseMove(window, QPoint(10, 10));
+        source->setProperty("text", text);
+        source->setProperty("cursorPosition", 0);
+        QTest::qWait(100);
+        const auto capture = [&] {
+            const QImage image = window->grabWindow();
+            const qreal dpr = image.devicePixelRatio();
+            const QPointF p = view->mapToScene(QPointF());
+            const QRect area = QRectF(p * dpr, QSizeF(360 * dpr, 320 * dpr)).toAlignedRect();
+            return image.rect().contains(area) ? image.copy(area) : QImage();
+        };
+        for (int i = 0; i < 6; ++i) {
+            QVERIFY(QMetaObject::invokeMethod(window, "toggleReadMode"));
+            QCOMPARE(window->property("readMode").toBool(), i % 2 == 0);
+            QTest::qWait(150);
+            const qreal width = view->width();
+            const QImage actual = capture(); QVERIFY(!actual.isNull());
+            // A full scene-graph rebuild of the SAME document is an independent
+            // oracle: it must not change a single visible pixel. No document,
+            // layout, cursor or viewport mutation is involved in this repair.
+            QSignalSpy frames(window, &QQuickWindow::frameSwapped);
+            QVERIFY(QMetaObject::invokeMethod(view, "q_invalidate", Qt::QueuedConnection));
+            window->requestUpdate();
+            QTRY_VERIFY_WITH_TIMEOUT(!frames.isEmpty(), 5000);
+            const QImage expected = capture(); QVERIFY(!expected.isNull());
+            QCOMPARE(view->width(), width);
+            if (actual != expected) {
+                QDir().mkpath("mode-render-diagnostics");
+                actual.save(QStringLiteral("mode-render-diagnostics/%1-%2-actual.png").arg(QLatin1String(QTest::currentDataTag())).arg(i));
+                expected.save(QStringLiteral("mode-render-diagnostics/%1-%2-expected.png").arg(QLatin1String(QTest::currentDataTag())).arg(i));
+            }
+            QCOMPARE(actual, expected);
+            QCOMPARE(source->property("text").toString(), text);
+        }
+    }
+
     void rendersModeSwitchesWithDocumentImages() {
         if (QGuiApplication::platformName() == QStringLiteral("offscreen"))
             QSKIP("Run with the native window-system platform and threaded scene graph.");
@@ -3294,6 +3359,203 @@ private slots:
         QCOMPARE(markup.at(0).content.length, 4);
         QCOMPARE(markup.at(2).content.length, 4);
         QCOMPARE(markup.at(2).markers[0].length, 1);
+    }
+
+    void resolvesDocumentReferencesAndFootnotes() {
+        const QString text = QStringLiteral("See [site][ Docs ] and [docs][] and [docs], note[^N].\n\n"
+            "[docs]: <https://example.com/a(b)> \"Title\"\n[^n]: First **bold** line.\n    Second line.\n");
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        editor->setProperty("text", text);
+        const QString note = MarkdownReferences::noteUrl(QStringLiteral("n"));
+        QCOMPARE(backend.linkUrlAt(text.indexOf("site")), QStringLiteral("https://example.com/a(b)"));
+        QCOMPARE(backend.linkUrlAt(text.indexOf("[docs][]") + 1), QStringLiteral("https://example.com/a(b)"));
+        QCOMPARE(backend.linkUrlAt(text.indexOf("[docs],") + 1), QStringLiteral("https://example.com/a(b)"));
+        QCOMPARE(backend.linkUrlAt(text.indexOf("[^N]")), note);
+        QCOMPARE(backend.footnoteSourcePosition(note), text.indexOf("[^n]:"));
+        const QString hover = backend.linkHoverText(note);
+        QVERIFY(hover.contains(QStringLiteral("First bold line.")));
+        QVERIFY(hover.contains(QStringLiteral("Second line.")));
+        QVERIFY(!hover.contains(QStringLiteral("**")));
+        QCOMPARE(backend.linkHoverText(QStringLiteral("https://example.com")), QStringLiteral("https://example.com"));
+        QCOMPARE(backend.nextReferenceLabel(false), QStringLiteral("ref1"));
+        QCOMPARE(backend.nextReferenceLabel(true), QStringLiteral("1"));
+        QVERIFY(backend.linkHoverText(MarkdownReferences::noteUrl(QStringLiteral("missing"))).isEmpty());
+
+        editor->setProperty("text", QStringLiteral("Note[^1].\n\n[^1]: Old\n"));
+        QCOMPARE(backend.linkHoverText(MarkdownReferences::noteUrl(QStringLiteral("1"))), QStringLiteral("Old"));
+        editor->setProperty("text", QStringLiteral("Note[^1].\n\n[^1]: New\n"));
+        QCOMPARE(backend.linkHoverText(MarkdownReferences::noteUrl(QStringLiteral("1"))), QStringLiteral("New"));
+        editor->setProperty("text", QStringLiteral("Note[^1].\n"));
+        QVERIFY(backend.linkUrlAt(5).isEmpty());
+        const QString multiline = QStringLiteral("[site][ref] and [quote][q]. Note[^1].\n\n[ref]:\n  https://example.com\n> [q]: https://quoted.example\n[^1]: See [site][ref].\n");
+        editor->setProperty("text", multiline);
+        QCOMPARE(backend.linkUrlAt(1), QStringLiteral("https://example.com"));
+        QCOMPARE(backend.linkUrlAt(multiline.indexOf("quote")), QStringLiteral("https://quoted.example"));
+        QCOMPARE(backend.linkHoverText(MarkdownReferences::noteUrl(QStringLiteral("1"))), QStringLiteral("See site."));
+    }
+
+    void leavesLiteralAndUnresolvedReferencesAlone() {
+        const QString literal = QStringLiteral("`[label][ref] [^1]`\n\n"
+            "```md\n[label][ref] [^1]\n[bad]: https://bad.example\n```\n\n"
+            "    [label][ref] [^1]\n\n<!-- [label][ref] [^1] -->\n\n"
+            "> ```\n> [^1]\n> ```\n\n- ```\n  [^1]\n  ```\n\n"
+            "\\[label]\\[ref] and ![label][ref] and [ordinary](https://example.com/[^1])\n\n"
+            "[missing][unknown] [^missing]\n\n[ref]: https://example.com\n[^1]: note\n");
+        const MarkdownReferences::Index index(literal);
+        QVERIFY(index.occurrences.isEmpty());
+        QVERIFY(!index.links.contains(QStringLiteral("bad")));
+        QCOMPARE(MarkdownReferences::readMarkdown(literal), literal);
+        const MarkdownReferences::Index first(QStringLiteral("[x][id]\n\n[id]: https://first.example\n[id]: https://second.example\n"));
+        QCOMPARE(first.urlAt(1), QStringLiteral("https://first.example"));
+        const MarkdownReferences::Index unfinished(QStringLiteral("[draft](\n\n[site][ref]\n\n[ref]: https://example.com\n"));
+        QCOMPARE(unfinished.occurrences.size(), 1);
+        const MarkdownReferences::Index codeLabel(QStringLiteral("[a `b`]\n\n[a]: https://wrong.example\n[a `b`]: https://right.example\n"));
+        QCOMPARE(codeLabel.urlAt(1), QStringLiteral("https://right.example"));
+        const MarkdownReferences::Index outsideQuote(QStringLiteral("> ```\n> code\n\nOutside [site][ref].\n\n[ref]: https://example.com\n"));
+        QCOMPARE(outsideQuote.occurrences.size(), 1);
+        const MarkdownReferences::Index reserved(QStringLiteral("Unresolved [label][ref1] and [^1]."));
+        QCOMPARE(reserved.nextLabel(false), QStringLiteral("ref2"));
+        QCOMPARE(reserved.nextLabel(true), QStringLiteral("2"));
+        const MarkdownReferences::Index multiline(QStringLiteral("Text[^n].\n\n[^n]: First paragraph.\n\n    Second paragraph.\n\nOutside.\n"));
+        QCOMPARE(multiline.notes.value(QStringLiteral("n")).text, QStringLiteral("First paragraph.\n\nSecond paragraph."));
+        QVERIFY(MarkdownReferences::readMarkdown(QStringLiteral("Text[^n].\n\n[^n]: First paragraph.\n\n    Second paragraph.\n\nOutside.\n")).contains(QStringLiteral("Outside.")));
+    }
+
+    void rehighlightsReferencesWhenDefinitionsChange() {
+        QTextDocument document;
+        document.setPlainText(QStringLiteral("[site][ref]\n\nend"));
+        document.documentLayout();
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setCaret(document.characterCount() - 1);
+        QCoreApplication::processEvents();
+        auto underlined = [&] {
+            for (const auto &range : document.begin().layout()->formats())
+                if (range.start <= 2 && range.start + range.length > 2) return range.format.fontUnderline();
+            return false;
+        };
+        QVERIFY(!underlined());
+        QTextCursor cursor(&document); cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral("\n\n[ref]: https://example.com\n"));
+        QTRY_VERIFY(underlined());
+        cursor.setPosition(document.toPlainText().indexOf("[ref]:"));
+        cursor.movePosition(QTextCursor::End, QTextCursor::KeepAnchor); cursor.removeSelectedText();
+        QTRY_VERIFY(!underlined());
+        QVERIFY(MarkdownReferences::Index(QString(20000, '[')).occurrences.isEmpty());
+    }
+
+    void insertsReferencesWithClipboardAndOneUndo() {
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> root(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+        activateInputWindow(window);
+        if (QGuiApplication::platformName() == QStringLiteral("cocoa")) {
+            window->requestActivate();
+            if (!QTest::qWaitForWindowActive(window)) QSKIP("Native desktop did not activate the shortcut fixture");
+        }
+        QObject *editor = root->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        const QString oldClipboard = QGuiApplication::clipboard()->text();
+        const auto restore = qScopeGuard([&] { QGuiApplication::clipboard()->setText(oldClipboard); });
+        struct Case { bool note; QString source, clipboard, expected, selected; int selection; };
+        const QList<Case> cases = {
+            {false, "alpha", "https://example.com", "[alpha][ref1]\n\n[ref1]: <https://example.com>\n", "", 5},
+            {false, "first\nsecond", "https://example.com", "[first second][ref1]\n\n[ref1]: <https://example.com>\n", "", 12},
+            {false, "", "clipboard label", "[clipboard label][ref1]\n\n[ref1]: <https://>\n", "https://", 0},
+            {false, "", "", "[link text][ref1]\n\n[ref1]: <https://>\n", "link text", 0},
+            {true, "", "First line\nsecond line", "[^1]\n\n[^1]: First line\n    second line\n", "", 0},
+            {true, "alpha", "ignored", "[^1]\n\n[^1]: alpha\n", "", 5},
+            {true, "", "", "[^1]\n\n[^1]: Footnote text\n", "Footnote text", 0},
+            {true, "```\ncode", "note", "[^1]: note\n\n[^1]```\ncode", "", 0},
+            {false, "[ref1]: https://old.example\n", "https://example.com", "[link text][ref2][ref1]: https://old.example\n\n[ref2]: <https://example.com>\n", "link text", 0}
+        };
+        for (const auto &test : cases) {
+            editor->setProperty("text", test.source);
+            auto *doc = qvariant_cast<QQuickTextDocument *>(editor->property("textDocument"))->textDocument();
+            doc->clearUndoRedoStacks();
+            QCoreApplication::processEvents();
+            QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 0), Q_ARG(int, test.selection));
+            QGuiApplication::clipboard()->setText(test.clipboard);
+            editorKeyClick(window, Qt::Key_K, Qt::ControlModifier | (test.note ? Qt::AltModifier : Qt::ShiftModifier));
+            QTRY_COMPARE(backend.documentText(), test.expected);
+            QCOMPARE(editor->property("selectedText").toString(), test.selected);
+            editorKeyClick(window, Qt::Key_Z, Qt::ControlModifier);
+            QTRY_COMPARE(backend.documentText(), test.source);
+        }
+        root->setProperty("readMode", true);
+        const QString unchanged = backend.documentText();
+        editorKeyClick(window, Qt::Key_K, Qt::ControlModifier | Qt::ShiftModifier);
+        QCOMPARE(backend.documentText(), unchanged);
+    }
+
+    void previewsFootnotesOnHoverInBothModes() {
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> root(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QVERIFY(window);
+        window->show(); QVERIFY(QTest::qWaitForWindowExposed(window));
+        activateInputWindow(window);
+        auto *editor = root->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        auto *viewItem = root->findChild<QQuickItem *>(QStringLiteral("previewEditor"));
+        auto *preview = root->findChild<LivePreview *>(QStringLiteral("livePreviewController"));
+        auto *tooltip = root->findChild<QObject *>(QStringLiteral("linkTooltipText"));
+        QVERIFY(editor && viewItem && preview && tooltip);
+        auto *scroll = root->findChild<QObject *>(QStringLiteral("editorScroll")); QVERIFY(scroll);
+        const QString source = QStringLiteral("A note[^n] and [site][ref].\n\n")
+            + QStringLiteral("A paragraph separating the marker from its definition.\n\n").repeated(40)
+            + QStringLiteral("[^n]: First **bold** line.\n    Second line.\n\n[ref]: https://example.com\n");
+        const QString url = MarkdownReferences::noteUrl(QStringLiteral("n"));
+        editor->setProperty("text", source);
+        editor->setProperty("cursorPosition", 0);
+        for (bool read : {false, true}) {
+            editor->setProperty("cursorPosition", 0);
+            root->setProperty("readMode", read);
+            QCoreApplication::processEvents(); QCoreApplication::processEvents();
+            scroll->setProperty("contentY", 0);
+            QTest::qWait(30);
+            auto *doc = qvariant_cast<QQuickTextDocument *>(viewItem->property("textDocument"))->textDocument();
+            const int position = read ? doc->toPlainText().indexOf('1') : preview->viewPosition(source.indexOf("[^n]"));
+            QVERIFY(position >= 0);
+            QRectF box;
+            QVERIFY(QMetaObject::invokeMethod(viewItem, "positionToRectangle", Q_RETURN_ARG(QRectF, box), Q_ARG(int, position)));
+            const QPointF point(box.x() + 1, box.center().y());
+            QVariant under;
+            QVERIFY(QMetaObject::invokeMethod(viewItem, "linkUrlUnder", Q_RETURN_ARG(QVariant, under), Q_ARG(QVariant, point.x()), Q_ARG(QVariant, point.y())));
+            QCOMPARE(under.toString(), url);
+            QTest::mouseMove(window, QPoint(1, 1));
+            QTest::mouseMove(window, viewItem->mapToScene(point).toPoint());
+            QTRY_COMPARE(editor->property("hoveredLinkUrl").toString(), url);
+            QTRY_VERIFY(tooltip->property("text").toString().contains(QStringLiteral("First bold line.")));
+            QVERIFY(tooltip->property("text").toString().contains(QStringLiteral("Second line.")));
+            QCOMPARE(tooltip->property("textFormat").toInt(), int(Qt::PlainText));
+            if (read) {
+                const int destination = preview->footnoteViewPosition(url);
+                QVERIFY(destination > position);
+                QRectF target;
+                QVERIFY(QMetaObject::invokeMethod(viewItem, "positionToRectangle", Q_RETURN_ARG(QRectF, target), Q_ARG(int, destination)));
+                const qreal expectedY = qBound<qreal>(0, viewItem->y() + target.y() - 24,
+                    qMax<qreal>(0, scroll->property("contentHeight").toReal() - scroll->property("height").toReal()));
+                QVERIFY(expectedY > scroll->property("height").toReal());
+                QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, viewItem->mapToScene(point).toPoint());
+                QTRY_VERIFY(qAbs(scroll->property("contentY").toReal() - expectedY) <= 1);
+                QVERIFY(root->property("readMode").toBool());
+            } else {
+                QTest::mouseClick(window, Qt::LeftButton, Qt::ControlModifier, viewItem->mapToScene(point).toPoint());
+                QTRY_COMPARE(editor->property("cursorPosition").toInt(), source.indexOf("[^n]:"));
+            }
+            QCOMPARE(backend.documentText(), source);
+        }
     }
 
     void findsLinkUrlAtPosition() {

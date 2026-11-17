@@ -1,6 +1,7 @@
 #pragma once
 
 #include "codehighlighter.h"
+#include "markdownreferences.h"
 
 #include <QRegularExpression>
 #include <QTextBlock>
@@ -13,6 +14,7 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
 
 public:
     explicit MarkdownHighlighter(QTextDocument *document);
+    void setDocument(QTextDocument *document);
 
     void setTheme(bool darkMode, const QString &background, const QString &foreground,
                   const QString &accent, const QString &codeBackground);
@@ -77,6 +79,7 @@ protected:
 private:
     void rebuildFormats();
     void propagateCodeState();
+    MarkdownReferences::Index m_references;
     CodeHighlighter m_codeHighlighter;
     QTextBlock m_pendingCodeBlock;
     bool m_propagatingCodeState = false;

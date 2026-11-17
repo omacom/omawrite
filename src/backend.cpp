@@ -1081,7 +1081,50 @@ QString Backend::linkUrlAt(int position) const {
             || block.previous().userState() >= MarkdownHighlighter::InsideFence)
         return {};
 
+    const QString reference = referenceIndex().urlAt(position);
+    if (!reference.isEmpty()) return reference;
     return MarkdownHighlighter::linkUrlAt(block.text(), position - block.position());
+}
+
+const MarkdownReferences::Index &Backend::referenceIndex() const {
+    const int revision = m_document ? m_document->revision() : -1;
+    if (m_referenceDocument != m_document || revision != m_referenceRevision) {
+        m_referenceDocument = m_document;
+        m_referenceRevision = revision;
+        m_referenceIndex = MarkdownReferences::Index(currentDocumentText());
+    }
+    return m_referenceIndex;
+}
+
+QString Backend::linkHoverText(const QString &url) const {
+    if (!url.startsWith(QStringLiteral("write-footnote:"))) return url;
+    const auto &index = referenceIndex();
+    const auto note = index.notes.constFind(MarkdownReferences::noteKey(url));
+    if (note == index.notes.cend()) return {};
+    QString markdown = note->text;
+    for (auto it = index.links.cbegin(); it != index.links.cend(); ++it) {
+        QString label = it.key();
+        label.replace('\\', QStringLiteral("\\\\")).replace('[', QStringLiteral("\\[")).replace(']', QStringLiteral("\\]"));
+        QString destination = it->text;
+        destination.replace('<', QStringLiteral("%3C")).replace('>', QStringLiteral("%3E"));
+        markdown += QStringLiteral("\n\n[%1]: <%2>\n").arg(label, destination);
+    }
+    // Plain, multiline preview. Do not interpret HTML or load note images.
+    class NoteDocument : public QTextDocument {
+        QVariant loadResource(int, const QUrl &) override { return {}; }
+    } rendered;
+    rendered.setMarkdown(markdown, QTextDocument::MarkdownDialectGitHub);
+    return rendered.toPlainText();
+}
+
+int Backend::footnoteSourcePosition(const QString &url) const {
+    const auto &notes = referenceIndex().notes;
+    const auto note = notes.constFind(MarkdownReferences::noteKey(url));
+    return note == notes.cend() ? -1 : note->start;
+}
+
+QString Backend::nextReferenceLabel(bool footnote) const {
+    return referenceIndex().nextLabel(footnote);
 }
 
 int Backend::cursorPositionStep(int position, int direction) const

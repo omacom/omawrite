@@ -44,6 +44,7 @@ HEADERS += \
     src/mermaidrenderer.h \
     src/previewblocks.h \
     src/markdownhighlighter.h \
+    src/markdownreferences.h \
     src/systemtheme.h \
     src/translator.h
 

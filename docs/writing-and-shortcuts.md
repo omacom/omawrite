@@ -42,6 +42,8 @@ Qt normally maps a source-code `Ctrl` modifier to **Command** on macOS and `Meta
 | Inline code | Cmd+T | Ctrl+T |
 | Fenced code block | Cmd+Shift+T | Ctrl+Shift+T |
 | Insert Markdown link | Cmd+K | Ctrl+K |
+| Insert reference link | Cmd+Shift+K | Ctrl+Shift+K |
+| Insert footnote | Cmd+Option+K | Ctrl+Alt+K |
 | Copy selection as HTML (whole document if no selection) | Cmd+Shift+C | Ctrl+Shift+C |
 | Increase text size | Cmd+= or Cmd++ | Ctrl+= or Ctrl++ |
 | Decrease text size | Cmd+- | Ctrl+- |
@@ -58,6 +60,16 @@ Usual cut/copy/paste/select-all keys come from Qt's text editor. There is no use
 ## Opening links
 
 In **Edit**, ordinary clicking keeps editing. **Cmd-click on macOS / Ctrl-click elsewhere** opens the link through your OS; right-click a link and choose **Open Link** for the same action. Blank space does not activate the nearest link, and image menus take priority. **Read** keeps ordinary single-click links. Native macOS pointer/context checks pass; Windows/Linux remain untested.
+
+### Reference links and footnotes
+
+Both modes resolve full `[label][ref]`, collapsed `[ref][]` and shortcut `[ref]` links from `[ref]: https://example.com` definitions. Hover shows the URL; opening follows the same rules as inline links. Labels ignore case and repeated whitespace. Code and unresolved references stay literal.
+
+Footnotes use `Text[^1]` and `[^1]: Note text` (indent continuation lines by four spaces). Hover over the marker to preview its text **without clicking**. Cmd/Ctrl-click in Edit jumps to its definition; a regular click in Read jumps to the numbered note. Both modes number notes by first use. Edit shows a small superscript number while the caret/selection is outside the marker; moving into it with the arrow keys or selecting it reveals the original `[^id]` syntax. Definitions and unresolved markers stay editable Markdown. Saved source is unchanged.
+
+- **Cmd/Ctrl+Shift+K** inserts a reference link and a uniquely named definition. Selected text becomes the label; a clipboard URL becomes the destination. With clipboard prose instead, that text becomes the label and `https://` is selected for editing. Without either, the `link text` placeholder is selected.
+- **Cmd+Option+K / Ctrl+Alt+K** inserts a footnote. Selected text is moved into the note; otherwise clipboard text becomes its body, or a selected `Footnote text` placeholder is provided.
+- Marker and definition are inserted together: **one Undo** restores the original text. These shortcuts are Edit-only and do not operate inside an active table cell.
 
 ## Code formatting and automatic pairs
 

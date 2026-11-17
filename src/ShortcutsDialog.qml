@@ -48,6 +48,8 @@ Dialog {
         { key: "Ctrl+T", desc: "Inline code" },
         { key: "Ctrl+Shift+T", desc: "Fenced code block" },
         { key: "Ctrl+K", desc: qsTr("Link") },
+        { key: "Ctrl+Shift+K", desc: qsTr("Reference link") },
+        { key: "Ctrl+Alt+K", desc: qsTr("Footnote") },
         { key: "Ctrl+Shift+C", desc: qsTr("Copy as HTML") },
         { key: "Ctrl+= / Ctrl++", desc: qsTr("Increase Text Size") },
         { key: "Ctrl+-", desc: qsTr("Decrease Text Size") },

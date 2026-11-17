@@ -39,8 +39,22 @@ MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
     rebuildFormats();
     // Connected after QSyntaxHighlighter's edit handler: propagate semantic
     // lexer changes synchronously, even when the public fence integer stays put.
+    m_references = MarkdownReferences::Index(document->toPlainText());
     connect(document, &QTextDocument::contentsChange, this,
-            [this](int, int, int) { propagateCodeState(); });
+            [this](int, int removed, int added) {
+        propagateCodeState();
+        if (!this->document() || (!removed && !added)) return; // Detached or formatting-only.
+        MarkdownReferences::Index next(this->document()->toPlainText());
+        const bool changed = next.links != m_references.links || next.notes != m_references.notes;
+        m_references = std::move(next);
+        // A definition can change the appearance of earlier, untouched blocks.
+        if (changed) rehighlightAll();
+    });
+}
+
+void MarkdownHighlighter::setDocument(QTextDocument *doc) {
+    m_references = MarkdownReferences::Index(doc ? doc->toPlainText() : QString());
+    QSyntaxHighlighter::setDocument(doc);
 }
 
 void MarkdownHighlighter::propagateCodeState() {
@@ -777,6 +791,12 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         return format;
     }();
     QList<InlineMarkup> markup = inlineMarkup(text);
+    for (const auto &ref : m_references.scan(MarkdownReferences::proseMask(text), text)) {
+        const int contentEnd = ref.contentStart + ref.contentLength;
+        markup.append({InlineKind::Link, {ref.contentStart, ref.contentLength},
+                       {{ref.start, ref.contentStart - ref.start},
+                        {contentEnd, ref.end - contentEnd}}, {}});
+    }
     std::stable_sort(markup.begin(), markup.end(),
                      [](const InlineMarkup &a, const InlineMarkup &b) {
                          return a.content.length > b.content.length;
