@@ -438,7 +438,14 @@ private slots:
         QTRY_VERIFY((expanded = root->findChild<QQuickItem *>("expandedTableGrid")));
         QVERIFY(expanded->property("readOnly").toBool()); QVERIFY(!inlinePanel->isEnabled());
         QCOMPARE(expanded->property("modelData").toMap()["model"].value<QObject *>(), model);
-        QVERIFY(expanded->width() > inlinePanel->width()); QVERIFY(expanded->height() > inlinePanel->height());
+        QTRY_VERIFY2(expanded->width() > inlinePanel->width(), qPrintable(QStringLiteral("Expanded/inline/window widths: %1/%2/%3").arg(expanded->width()).arg(inlinePanel->width()).arg(window->width())));
+        // A native desktop can clamp the window height at fractional scaling.
+        // The modal's header/footer may then leave less than the inline 480px
+        // cap. Expansion must fill its content area, not exceed that cap.
+        auto *dialogContent = dialog->property("contentItem").value<QQuickItem *>(); QVERIFY(dialogContent);
+        QTRY_VERIFY(expanded->height() > 0);
+        QTRY_COMPARE(expanded->height(), dialogContent->height());
+        if (window->height() >= 820) QTRY_VERIFY(expanded->height() > inlinePanel->height());
         for (auto *item : visualDescendants(expanded)) if (item->objectName() == "tableSourceButton" || item->objectName() == "tableActionsButton" || item->objectName() == "tableExpandButton") QVERIFY(!item->isVisible());
         auto *grid = expanded->findChild<QQuickItem *>("tableCellView"); QVERIFY(grid);
         const qreal row = std::ceil(QFontMetricsF(qvariant_cast<QFont>(view->property("font"))).height()) + 16;
@@ -523,7 +530,28 @@ private slots:
                         if (target == url) { label = item; point = QPointF(x,y); break; }
                     }
                 }
-                if (!label) return false;
+                if (!label) {
+                    // A virtualized offscreen column has no delegate to find.
+                    // Locate the logical cell first, then expose its column.
+                    auto *model = qobject_cast<MarkdownTableModel *>(panel->property("modelData").toMap()["model"].value<QObject *>());
+                    if (!model) return false;
+                    qreal columnX = 0; bool found = false;
+                    for (int column = 0; column < model->columnCount() && !found; ++column) {
+                        for (int row = 0; row < model->rowCount(); ++row) {
+                            if (!model->data(model->index(row, column), MarkdownTableModel::MarkdownRole).toString().contains(url)) continue;
+                            grid->setProperty("contentX", qBound<qreal>(0, columnX,
+                                qMax<qreal>(0, grid->property("contentWidth").toReal() - grid->width())));
+                            const qreal rowHeight = std::ceil(QFontMetricsF(qvariant_cast<QFont>(view->property("font"))).height()) + 16;
+                            grid->setProperty("contentY", qBound<qreal>(0, row * rowHeight,
+                                qMax<qreal>(0, grid->property("contentHeight").toReal() - grid->height())));
+                            found = true; break;
+                        }
+                        columnX += model->columnWidth(column);
+                    }
+                    if (!found) return false;
+                    QTest::qWait(30);
+                    continue;
+                }
                 const auto inGrid = label->mapToItem(grid, point);
                 // A cell can be loaded yet clipped horizontally, especially
                 // with large fonts/raw-image destinations in another row.
@@ -544,9 +572,15 @@ private slots:
                 QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier, expand->mapToScene(QPointF(expand->width()/2, expand->height()/2)).toPoint());
                 QTRY_VERIFY((panel = root->findChild<QQuickItem *>("expandedTableGrid"))); QTest::qWait(30);
             }
-            QVERIFY(clickLink(panel, "https://example.invalid/explicit")); QTRY_COMPARE(receiver.urls.size(), mode * 2 + 1);
+            // Delegates/rich-text anchor layout can become available after the
+            // popup itself. Retry discovery, but never dispatch a second click
+            // when QTRY re-evaluates a successful condition.
+            bool explicitClicked = false, autoClicked = false;
+            QTRY_VERIFY(explicitClicked || (explicitClicked = clickLink(panel, "https://example.invalid/explicit")));
+            QTRY_COMPARE(receiver.urls.size(), mode * 2 + 1);
             QCOMPARE(receiver.urls.last(), QUrl("https://example.invalid/explicit"));
-            QVERIFY(clickLink(panel, "https://example.invalid/auto")); QTRY_COMPARE(receiver.urls.size(), mode * 2 + 2);
+            QTRY_VERIFY(autoClicked || (autoClicked = clickLink(panel, "https://example.invalid/auto")));
+            QTRY_COMPARE(receiver.urls.size(), mode * 2 + 2);
             QCOMPARE(receiver.urls.last(), QUrl("https://example.invalid/auto"));
         }
         auto *dialog = root->findChild<QObject *>("expandedTableDialog"); QVERIFY(dialog);
@@ -1879,6 +1913,9 @@ private slots:
         // Native rendering tests persist zoom too. Isolate each test/data row,
         // while preserving persistence between backends within a single test.
         QSettings().remove(QStringLiteral("text/zoom"));
+        // Each UI test owns its geometry. Resized screenshot fixtures must not
+        // persist small native windows into subsequent table/popup tests.
+        QSettings().remove(QStringLiteral("window"));
     }
 
     void cleanupTestCase() {
