@@ -18,7 +18,20 @@ try {
         if ($errors) { throw ($errors | Out-String) }
     }
     New-Item -ItemType Directory -Path "$temp/dist/notices" -Force | Out-Null
-    # Exercise the actual build.bat guard, including caches created before renaming.
+    # The upstream installer must not share downstream install/shortcut paths.
+    $installer = Get-Content -LiteralPath (Join-Path $root 'packaging/windows.iss') -Raw
+    foreach ($line in @(
+        'AppId={{752B3E5A-F81B-52B2-B78D-C00D485A4CFB}',
+        'AppPublisherURL=https://github.com/omacom/omawrite',
+        'DefaultDirName={localappdata}\Programs\Omawrite',
+        'DefaultGroupName=Omawrite',
+        'Name: "{autodesktop}\Omawrite"; Filename: "{app}\omawrite.exe"; Tasks: desktopicon'
+    )) {
+        if ($installer -notmatch ('(?m)^' + [regex]::Escape($line) + '\r?$')) {
+            throw ('Unexpected upstream installer identity/path: ' + $line)
+        }
+    }
+    # Exercise the actual build.bat toolchain guard.
     $batch = Get-Content -LiteralPath (Join-Path $root 'build.bat') -Raw
     $stampCommand = [regex]::Match($batch, '(?m)^powershell -NoProfile -Command "([^"\r\n]*\$env:OMAWRITE_STAMP[^"\r\n]*)"\r?$').Groups[1].Value
     if (!$stampCommand) { throw 'Missing toolchain stamp guard' }
@@ -39,13 +52,7 @@ try {
         return $LASTEXITCODE
     }
     if ((Invoke-StampCheck) -ne 0) { throw 'Fresh stamp failed' }
-    Remove-Item -LiteralPath $env:OMAWRITE_STAMP
-    $legacyStamp = Join-Path $temp 'poncho-toolchain.txt'
-    Set-Content -LiteralPath $legacyStamp -Value $env:OMAWRITE_SIGNATURE
-    if ((Invoke-StampCheck) -ne 0 -or !(Test-Path -LiteralPath $env:OMAWRITE_STAMP)) { throw 'Matching legacy stamp was not adopted' }
-    Set-Content -LiteralPath $legacyStamp -Value 'different old compiler'
-    if ((Invoke-StampCheck) -eq 0) { throw 'Legacy toolchain mismatch bypassed guard' }
-    Set-Content -LiteralPath $legacyStamp -Value $env:OMAWRITE_SIGNATURE
+    if ((Invoke-StampCheck) -ne 0) { throw 'Matching current stamp was rejected' }
     Set-Content -LiteralPath $env:OMAWRITE_STAMP -Value 'different new compiler'
     if ((Invoke-StampCheck) -eq 0) { throw 'Current toolchain mismatch bypassed guard' }
     Set-Content -LiteralPath "$temp/dist/notices/COPYRIGHT.md" -Value 'test notice'

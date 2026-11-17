@@ -18,4 +18,4 @@ The dependency bootstrap verifies both archives. Extracted original source, incl
 
 This feature has been exercised as a local development build. **A complete resource-license/source-compliance audit has not been performed.** No prebuilt release is being published. Do not describe the resulting binary as MIT-only, or assume static linking removes resource obligations. Before distributing a binary, determine the applicable terms for all included resources, preserve the required notices, and provide the corresponding sources/build information required by those terms. Merely linking to this repository or copying the engine's MIT text is not a substitute for that work.
 
-The historical Arch `pkgbuild/PKGBUILD` is intentionally disabled for this fork until that audit and a maintained fork packaging recipe are available. Existing upstream packages remain separate from this feature branch.
+The historical Arch `pkgbuild/PKGBUILD` is intentionally disabled until that audit and an updated packaging recipe are available. Published packages remain separate from this development branch.

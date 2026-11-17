@@ -12,14 +12,14 @@
   #error NeedsVCRuntime is required
 #endif
 [Setup]
-; Stable ID retains upgrades from the formerly named PonchoWriter installer.
-AppId={{E2711809-4A86-4F2C-B612-2BE5C46E057A}
-AppName=Write
+; Stable upstream installer identity, independent of downstream distributions.
+AppId={{752B3E5A-F81B-52B2-B78D-C00D485A4CFB}
+AppName=Write (Omawrite)
 AppVersion={#AppVersion}
 AppPublisher=Omacom and contributors
-AppPublisherURL=https://github.com/ponchoalv/PonchoWriter
-DefaultDirName={localappdata}\Programs\Write
-DefaultGroupName=Write
+AppPublisherURL=https://github.com/omacom/omawrite
+DefaultDirName={localappdata}\Programs\Omawrite
+DefaultGroupName=Omawrite
 PrivilegesRequired=lowest
 ArchitecturesAllowed=x64compatible
 ArchitecturesInstallIn64BitMode=x64compatible
@@ -51,15 +51,9 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; Flags: unchecked
 [Files]
 Source: "{#DistDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-[InstallDelete]
-; Upgrade cleanup is confined to the previous installer's binary/shortcuts.
-Type: files; Name: "{app}\ponchowriter.exe"
-Type: files; Name: "{group}\PonchoWriter.lnk"
-Type: files; Name: "{autodesktop}\PonchoWriter.lnk"
-
 [Icons]
 Name: "{group}\Write"; Filename: "{app}\omawrite.exe"
-Name: "{autodesktop}\Write"; Filename: "{app}\omawrite.exe"; Tasks: desktopicon
+Name: "{autodesktop}\Omawrite"; Filename: "{app}\omawrite.exe"; Tasks: desktopicon
 
 [Run]
 Filename: "{app}\omawrite.exe"; Description: "Launch Write"; Flags: nowait postinstall skipifsilent

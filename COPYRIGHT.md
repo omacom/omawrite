@@ -1,8 +1,8 @@
 # Write — copyright and third-party notices
 
-This feature-rich fork is maintained by Alfonso Alvarez (ponchoalv). Original fork contributions are provided under the root [MIT license](LICENSE). The Write/Omawrite branding and application artwork follow upstream; this fork does not claim upstream endorsement.
+[Write/Omawrite](https://github.com/omacom/omawrite) is copyright © 2026 David Heinemeier Hansson, with additional contributions copyright © 2026 Alfonso Alvarez. The application is provided under the root [MIT license](LICENSE). Both copyright notices, the permission notice and disclaimer remain applicable.
 
-The application is derived from [Omawrite](https://github.com/omacom/omawrite), copyright © 2026 David Heinemeier Hansson. Its MIT copyright, permission notice and disclaimer remain applicable and are retained in `LICENSE`. Rebranding and substantial modifications do not transfer the upstream author's copyright. Git history and historical benchmark reports remain factual records, not current branding.
+Git history and historical benchmark reports retain their original attribution and environment details; these are historical records, not product branding.
 
 ## Separately licensed components
 
@@ -11,8 +11,8 @@ The application is derived from [Omawrite](https://github.com/omacom/omawrite), 
 - **Sonnet Core 6.13.0**: separately licensed KDE code, including LGPL obligations for static linking, source and relinking; see [notices](third_party/sonnet/README.md).
 - Qt and platform libraries retain their own licenses. The application MIT license does not relicense dependencies, resources or bundled fonts.
 
-**No prebuilt distribution is cleared by this rename.** The syntax-resource audit and static-library distribution obligations remain unresolved; the packaging guard remains enabled. Local development builds are not a declaration of distribution compliance.
+**These notices do not establish clearance for prebuilt distribution.** The syntax-resource audit and static-library distribution obligations remain unresolved; the packaging guard remains enabled. Local development builds are not a declaration of distribution compliance.
 
-## Compatibility is not branding
+## Application identity
 
-`src/profile.h` deliberately retains the previous application/settings/IPC identifiers. Existing preferences are imported without overwriting new values; existing recovery files and staged images remain together in their original store, with the same slot locks. The selected storage root is remembered. No recovery files are copied, deleted or renamed. The shared IPC endpoint prevents old and renamed versions from becoming independent primary editors. Quit old copies before launching the renamed build to avoid forwarding to an already-running previous version.
+The application uses upstream's `omawrite` / `Omacom` / `omacom.io` settings identity and standard data locations. It does not discover or import other applications' preferences or recovery stores. Existing Write preferences remain untouched by startup. Quit other running Write builds before testing this branch so the single-instance broker does not forward file opens to an older build.

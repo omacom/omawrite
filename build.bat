@@ -245,7 +245,7 @@ exit /b %errorlevel%
 
 :checkToolchain
 rem Validate legacy stamps too, so a rename cannot bypass cache/toolchain safety.
-powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $p=$env:OMAWRITE_STAMP; foreach ($s in @($p,(Join-Path (Split-Path $p) 'poncho-toolchain.txt'))) { if ((Test-Path -LiteralPath $s) -and ((Get-Content -LiteralPath $s -Raw).TrimEnd() -ne $env:OMAWRITE_SIGNATURE)) { Write-Error ('Toolchain changed. Move/remove this generated build directory: '+(Split-Path $p)); exit 1 } }; New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null; [IO.File]::WriteAllText($p,$env:OMAWRITE_SIGNATURE)"
+powershell -NoProfile -Command "$ErrorActionPreference='Stop'; $p=$env:OMAWRITE_STAMP; if ((Test-Path -LiteralPath $p) -and ((Get-Content -LiteralPath $p -Raw).TrimEnd() -ne $env:OMAWRITE_SIGNATURE)) { Write-Error ('Toolchain changed. Move/remove this generated build directory: '+(Split-Path $p)); exit 1 }; New-Item -ItemType Directory -Force -Path (Split-Path $p) | Out-Null; [IO.File]::WriteAllText($p,$env:OMAWRITE_SIGNATURE)"
 exit /b %errorlevel%
 
 :require

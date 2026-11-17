@@ -128,53 +128,32 @@ private slots:
             QCOMPARE(pixmap.size(), QSize(size, size));
         }
     }
-    void renamedProfileKeepsDraftStoreAndImportsOnlyMissingPreferences() {
-        QTemporaryDir temporary; QVERIFY(temporary.isValid());
-        const QString old = temporary.filePath("previous");
-        const QString fresh = temporary.filePath("current");
-        QVERIFY(QDir().mkpath(old + "/attachments/id"));
-        const QByteArray draft = "{\"text\":\"unsaved\",\"attachments\":{\"id\":\"draft.png\"}}";
-        QFile file(old + "/recovery-0.json"); QVERIFY(file.open(QIODevice::WriteOnly)); file.write(draft); file.close();
-        QFile image(old + "/attachments/id/draft.png"); QVERIFY(image.open(QIODevice::WriteOnly)); image.write("original image bytes"); image.close();
-        QSettings settings(temporary.filePath("preferences.ini"), QSettings::IniFormat);
-        settings.setValue("zoom", 1.4);
-        const QVariantMap legacy{{"zoom", 1.0}, {"font", "IBM Plex Mono"}, {"readingPositions/file", 0.6}};
-        QVERIFY(Profile::adopt(settings, legacy, old, fresh));
-        QCOMPARE(settings.value("zoom").toDouble(), 1.4);
-        QCOMPARE(settings.value("font").toString(), QString("IBM Plex Mono"));
-        QCOMPARE(settings.value("readingPositions/file").toDouble(), 0.6);
-        QCOMPARE(settings.value("profileStorageRoot").toString(), old);
-        settings.setValue("font", "new preference");
-        QVERIFY(Profile::adopt(settings, legacy, {}, fresh));
-        QCOMPARE(settings.value("font").toString(), QString("new preference"));
-        QCOMPARE(settings.value("profileStorageRoot").toString(), old);
-        QVERIFY(!QFileInfo::exists(fresh)); // No snapshot/image copying or collision.
-        QVERIFY(file.open(QIODevice::ReadOnly)); QCOMPARE(file.readAll(), draft);
-        QVERIFY(image.open(QIODevice::ReadOnly)); QCOMPARE(image.readAll(), QByteArray("original image bytes"));
-        QSettings clean(temporary.filePath("clean.ini"), QSettings::IniFormat);
-        QVERIFY(Profile::adopt(clean, {}, temporary.filePath("absent"), fresh));
-        QCOMPARE(clean.value("profileStorageRoot").toString(), fresh);
-        QCOMPARE(Profile::ipcDirectoryName(), QStringLiteral("omawrite-instance")); // Stable cross-version lock namespace.
-        QSettings returning(temporary.filePath("returning.ini"), QSettings::IniFormat);
-        const QVariantMap poncho{{"profileStorageRoot", old}, {"profileMigrationVersion", 1}};
-        QVERIFY(Profile::adopt(returning, poncho, fresh, fresh));
-        QCOMPARE(returning.value("profileStorageRoot").toString(), old);
-        QSettings chosen(temporary.filePath("chosen.ini"), QSettings::IniFormat);
-        chosen.setValue("profileStorageRoot", old);
-        QVERIFY(Profile::adopt(chosen, {}, fresh, fresh));
-        QCOMPARE(chosen.value("profileStorageRoot").toString(), old);
-        QSettings write(temporary.filePath("write.ini"), QSettings::IniFormat);
-        write.setValue("profileMigrationVersion", 1);
-        write.setValue("profileStorageRoot", fresh);
-        write.setValue("textZoom", 1.0);
-        const QVariantMap latest{{"textZoom", 1.5}, {"profileStorageRoot", old}};
-        QVERIFY(Profile::adoptWrite(write, latest, old, fresh));
-        QCOMPARE(write.value("profileStorageRoot").toString(), old);
-        QCOMPARE(write.value("textZoom").toDouble(), 1.5);
-        write.setValue("textZoom", 2.0);
-        QVERIFY(Profile::adoptWrite(write, latest, fresh, fresh));
-        QCOMPARE(write.value("profileStorageRoot").toString(), old);
-        QCOMPARE(write.value("textZoom").toDouble(), 2.0);
+    void profileUsesUpstreamIdentityAndLeavesPreferencesAlone() {
+        const QString name = QCoreApplication::applicationName();
+        const QString organization = QCoreApplication::organizationName();
+        const QString domain = QCoreApplication::organizationDomain();
+        const auto restore = qScopeGuard([&] {
+            QCoreApplication::setApplicationName(name);
+            QCoreApplication::setOrganizationName(organization);
+            QCoreApplication::setOrganizationDomain(domain);
+        });
+        Profile::configureIdentity();
+        QCOMPARE(QCoreApplication::applicationName(), QStringLiteral("omawrite"));
+        QCOMPARE(QCoreApplication::organizationName(), QStringLiteral("Omacom"));
+        QCOMPARE(QCoreApplication::organizationDomain(), QStringLiteral("omacom.io"));
+        // initTestCase redirects QSettings into a temporary directory.
+        QSettings settings;
+        settings.setValue("text/zoom", 1.4);
+        settings.setValue("editor/font", "IBM Plex Mono");
+        const auto keys = settings.allKeys();
+        QVERIFY(Profile::activate());
+        QCOMPARE(settings.allKeys(), keys);
+        QCOMPARE(settings.value("text/zoom").toDouble(), 1.4);
+        QCOMPARE(settings.value("editor/font").toString(), QStringLiteral("IBM Plex Mono"));
+        QCOMPARE(Profile::dataLocation(), QStandardPaths::writableLocation(QStandardPaths::AppDataLocation));
+        QCOMPARE(Profile::runtimeLocation(), QStandardPaths::writableLocation(QStandardPaths::RuntimeLocation));
+        QCOMPARE(Profile::ipcDirectoryName(), QStringLiteral("omawrite-instance"));
+        QCOMPARE(Profile::pipePrefix(), QStringLiteral("omawrite-"));
     }
     void emptyDocumentHintSurvivesStartupFocusAndTracksIme() {
         QTemporaryDir directory; QVERIFY(directory.isValid());
@@ -1924,7 +1903,7 @@ private slots:
 
     void modeSwitchScreenshotRegression_data() {
         QTest::addColumn<QString>("text");
-        QTest::newRow("footnotes") << QStringLiteral("# this is a header\n\nthis is a reference[^1]\n\nthis is another[^2]\n\nthis is a reference[^3]\n\nthis is another type of reference[The poncho blog's][ref1]\n\n[^1]: https://www.google.com\n[^2]: ref\n[^3]: https://ponchoalv.github.io/\n[ref1]: <https://ponchoalv.github.io/>\n");
+        QTest::newRow("footnotes") << QStringLiteral("# this is a header\n\nthis is a reference[^1]\n\nthis is another[^2]\n\nthis is a reference[^3]\n\nthis is another type of reference[The project website][ref1]\n\n[^1]: https://www.google.com\n[^2]: ref\n[^3]: https://example.org/\n[ref1]: <https://example.org/>\n");
         QTest::newRow("table") << QStringLiteral("# this is a header\n\nBefore the table.\n\n| First | Second |\n| --- | --- |\n| alpha | beta |\n\nAfter the table.\n");
     }
     void modeSwitchScreenshotRegression() {

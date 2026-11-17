@@ -1,6 +1,6 @@
 # Writing, visual blocks, attachments and shortcuts
 
-This is the user guide for this feature-rich [Write/Omawrite fork](https://github.com/ponchoalv/PonchoWriter). See [copyright and dependency notices](../COPYRIGHT.md). Markdown remains the file format; this is not a rich-text document format or an Obsidian plugin.
+This is the user guide for [Write/Omawrite](https://github.com/omacom/omawrite). See [copyright and dependency notices](../COPYRIGHT.md). Markdown remains the file format; this is not a rich-text document format or an Obsidian plugin.
 
 ## Files and windows
 
@@ -205,7 +205,7 @@ system service, with no dictionary download.
 
 ## Optional Mermaid
 
-Mermaid is not built into Qt. If **`mmdc`** (Mermaid CLI) is already installed and available on the app's **PATH**, the fork can render a constrained set of local diagrams asynchronously. Check from the terminal:
+Mermaid is not built into Qt. If **`mmdc`** (Mermaid CLI) is already installed and available on the app's **PATH**, Write can render a constrained set of local diagrams asynchronously. Check from the terminal:
 
 ```sh
 command -v mmdc

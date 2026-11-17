@@ -2,7 +2,7 @@
 
 Use the book/pencil button or **Cmd+Shift+M** on macOS (**Ctrl+Shift+M** on Linux).
 
-Move the caret into this heading to reveal its markers. Existing **bold**, *italic*, ~~strike~~ and [links](https://github.com/ponchoalv/omawrite) keep their source Markdown.
+Move the caret into this heading to reveal its markers. Existing **bold**, *italic*, ~~strike~~ and [links](https://github.com/omacom/omawrite) keep their source Markdown.
 
 ## Table
 

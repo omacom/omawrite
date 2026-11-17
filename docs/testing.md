@@ -3,7 +3,7 @@
 Build/dependency/kit requirements are in [install.md](install.md).
 
 ```sh
-./bin/test                 # CMake/CTest: upstream + fork offscreen suites
+./bin/test                 # CMake/CTest: core + extended editor offscreen suites
 ./bin/test --rendered
 ./bin/test --native-spelling
 ```
