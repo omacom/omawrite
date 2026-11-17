@@ -40,6 +40,7 @@ HEADERS += \
     ../src/spellingprose.h \
     ../src/cli.h \
     ../src/markdownhighlighter.h \
+    ../src/markdownreferences.h \
     ../src/markdowntablemodel.h \
     ../src/livepreview.h \
     ../src/previewblocks.h \

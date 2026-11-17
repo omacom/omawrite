@@ -305,7 +305,7 @@ ApplicationWindow {
             visible: editorContextMenu.linkUrl.length > 0
             enabled: visible
             height: visible ? implicitHeight : 0
-            onTriggered: Qt.openUrlExternally(editorContextMenu.linkUrl)
+            onTriggered: presentation.activateLink(editorContextMenu.linkUrl)
         }
         MenuSeparator { visible: editorContextMenu.linkUrl.length > 0; height: visible ? implicitHeight : 0 }
 
@@ -641,6 +641,18 @@ ApplicationWindow {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+K"
+        context: Qt.WindowShortcut
+        onActivated: editor.insertReference(false)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Alt+K"
+        context: Qt.WindowShortcut
+        onActivated: editor.insertReference(true)
     }
 
     Shortcut {
@@ -1184,6 +1196,14 @@ ApplicationWindow {
                     }
                 }
 
+                function insertReference(footnote) {
+                    if (win.activeTableCell || win.readMode) return;
+                    presentation.forceActiveFocus();
+                    EditorMutations.insertReference(editor, backend.nextReferenceLabel(footnote), footnote,
+                        backend.clipboardUrl(), backend.clipboardText(), qsTr("link text"), qsTr("Footnote text"),
+                        backend.insideFence(Math.max(0, rawText().length - 1)));
+                }
+
                 function smartReturn(softBreak) {
                     if (softBreak) {
                         replaceSelectionWith("\n");
@@ -1568,7 +1588,25 @@ ApplicationWindow {
                         && y + height > editorFlick.contentY - presentation.y
                         && y < editorFlick.contentY - presentation.y + editorFlick.height
                 }
-                onLinkActivated: function(link) { if (win.readMode) Qt.openUrlExternally(link); }
+                function activateLink(link) {
+                    if (link.indexOf("write-footnote:") !== 0) {
+                        Qt.openUrlExternally(link);
+                        return;
+                    }
+                    if (win.readMode) {
+                        var position = livePreview.footnoteViewPosition(link);
+                        if (position >= 0) {
+                            var box = positionToRectangle(position);
+                            editorFlick.scrollTo(editorFlick.clampContentY(y + box.y - 24));
+                        }
+                    } else {
+                        var sourcePosition = backend.footnoteSourcePosition(link);
+                        if (sourcePosition >= 0) editor.cursorPosition = sourcePosition;
+                        forceActiveFocus();
+                        Qt.callLater(function() { editorFlick.ensureCursorVisible(); });
+                    }
+                }
+                onLinkActivated: function(link) { if (win.readMode) activateLink(link); }
                 function updateViewport() {
                     livePreview.setViewport(editorFlick.contentY - y, editorFlick.height);
                 }
@@ -1608,7 +1646,7 @@ ApplicationWindow {
                             && !(mouse.modifiers & (Qt.AltModifier | Qt.ShiftModifier | Qt.MetaModifier));
                         var link = commandClick ? presentation.linkUrlUnder(mouse.x, mouse.y) : "";
                         mouse.accepted = link.length > 0;
-                        if (mouse.accepted) Qt.openUrlExternally(link);
+                        if (mouse.accepted) presentation.activateLink(link);
                     }
                     hoverEnabled: true
                     cursorShape: Qt.IBeamCursor
@@ -1621,18 +1659,19 @@ ApplicationWindow {
                 }
 
                 ToolTip {
-                    visible: editor.hoveredLinkUrl.length > 0
-                    x: editor.linkHoverX + 12
+                    visible: editor.hoveredLinkUrl.length > 0 && tooltipLabel.text.length > 0
+                    x: Math.max(0, Math.min(editor.linkHoverX + 12, presentation.width - width))
                     y: editor.linkHoverY + 20
                     contentItem: Label {
+                        id: tooltipLabel
                         objectName: "linkTooltipText"
                         textFormat: Text.PlainText
-                        text: editor.hoveredLinkUrl
+                        text: backend.linkHoverText(editor.hoveredLinkUrl)
                         font.family: backend.editorFont
                         font.pixelSize: win.scaledSize(12)
-                        elide: Text.ElideMiddle
+                        wrapMode: Text.Wrap
                     }
-                    width: Math.min(implicitWidth, win.width - 32)
+                    width: Math.min(implicitWidth, 520 * win.textScale, win.width - 32)
                 }
 
                 Keys.priority: Keys.BeforeItem

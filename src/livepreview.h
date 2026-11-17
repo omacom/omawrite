@@ -6,6 +6,7 @@
 #include <QTextLayout>
 #include <QVariant>
 #include "previewblocks.h"
+#include "markdownreferences.h"
 #include "listpreview.h"
 
 class MarkdownHighlighter;
@@ -46,6 +47,7 @@ public:
     Q_PROPERTY(qreal viewportBottom READ viewportBottom NOTIFY viewportChanged)
     qreal viewportBottom() const { return m_viewportHeight < 0 ? -1 : m_viewportTop + m_viewportHeight; }
     Q_INVOKABLE QString linkAtPoint(qreal x, qreal y) const;
+    Q_INVOKABLE int footnoteViewPosition(const QString &url) const;
     Q_INVOKABLE void copySource();
     Q_INVOKABLE bool copyReadSelection(bool asHtml = false);
     Q_INVOKABLE bool copyCodeBlock(int panelIndex);
@@ -111,9 +113,11 @@ private:
     void completeProjectionLayout();
     void recordViewChange(int position, int removed, const QString &added);
     void updateSourceSnapshot();
-    void syncEditProjection(bool revealBoundary = false);
+    void syncEditProjection(bool revealBoundary = false, bool preparingEdit = false);
     void styleProjection(bool fontChanged);
     PreviewBlocks::Parser m_blockParser;
+    MarkdownReferences::Index m_noteReferences;
+    quint64 m_noteGeneration = quint64(-1);
     ListPreview::Parser m_listParser;
     int m_listDirtyFirst = 0;
     bool m_sourceDirty = true, m_viewSyncedSource = false, m_forceReset = true;

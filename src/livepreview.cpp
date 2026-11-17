@@ -10,6 +10,7 @@
 #include <QInputMethodEvent>
 #include <QInputMethod>
 #include <QFontMetricsF>
+#include <QPainter>
 #include <QKeyEvent>
 #include <QQuickTextDocument>
 #include <QScopedValueRollback>
@@ -474,6 +475,7 @@ void LivePreview::refresh() {
 void LivePreview::setSearchHighlight(const QString &query, int currentMatchStart) {
     m_searchQuery = query;
     m_currentMatch = currentMatchStart;
+    if (!m_readMode && m_projectionSource.contains(QStringLiteral("[^"))) schedule();
     if (m_highlighter && !m_readMode)
         m_highlighter->setSearch(query, currentMatchStart < 0 ? -1 : viewPosition(currentMatchStart));
 }
@@ -637,6 +639,8 @@ void LivePreview::buildReadDocument(const QString &source) {
         // One descending pass: neither table nor Mermaid source offsets drift.
         markdown.replace(it->start, it->end - it->start, QStringLiteral("![%1](%2)").arg(table ? "Table" : "Mermaid diagram", name));
     }
+    const MarkdownReferences::Index references(source);
+    markdown = MarkdownReferences::readMarkdown(markdown, &references);
     const QString originalReadMarkdown = markdown;
     QStringList hardBreaks;
     markdown = ListPreview::readHardBreaks(markdown, &hardBreaks);
@@ -1132,6 +1136,14 @@ void LivePreview::finishProjectionChange() {
     updateCodeBlockPanels(); updateListMarkers();
     m_projectionChanging = false;
     emit projectionChanged();
+    // TextEdit can retain glyph nodes from a previous document or collapsed
+    // table even though the current QTextDocument/layout is correct. Dirtying
+    // the layout alone does not clear that scenegraph cache. Invalidate after
+    // attachment, styling and QML scroll restoration, queued so their updates
+    // cannot downgrade UpdateAll. Ordinary native typing never enters here.
+    // Private Qt slot: retain native pixel regressions when upgrading Qt.
+    if (!QMetaObject::invokeMethod(m_viewItem, "q_invalidate", Qt::QueuedConnection))
+        qWarning("TextEdit scenegraph invalidation hook unavailable");
 }
 void LivePreview::rebuild() {
     if (!m_source || !m_view || m_guard || m_composing) return;
@@ -1191,9 +1203,9 @@ void LivePreview::rebuild() {
     // document replacement on an ordinary keystroke/caret move.
     scheduleCodeBlockPanels();
 }
-void LivePreview::syncEditProjection(bool revealBoundary) {
+void LivePreview::syncEditProjection(bool revealBoundary, bool preparingEdit) {
     const QString &source = m_projectionSource;
-    struct Replacement { PreviewBlocks::Block block; QImage image; };
+    struct Replacement { PreviewBlocks::Block block; QImage image; bool footnote = false; };
     QList<Replacement> replacements;
     const int low = qMin(m_anchor, m_caret), high = qMax(m_anchor, m_caret);
     qsizetype projectionBytes = 0;
@@ -1217,6 +1229,56 @@ void LivePreview::syncEditProjection(bool revealBoundary) {
             replacements.append({block, image});
         }
     }
+    if (m_noteGeneration != m_sourceGeneration) {
+        MarkdownReferences::Index next(source.contains(QStringLiteral("[^")) ? source : QString());
+        if (next.numbers != m_noteReferences.numbers) m_renderDirty = true;
+        m_noteReferences = std::move(next);
+        m_noteGeneration = m_sourceGeneration;
+    }
+    for (const auto &ref : m_noteReferences.occurrences) {
+        if (!ref.footnote) continue;
+        if (replacements.size() >= MaxProjectionObjects || projectionBytes >= MaxProjectionBytes) break;
+        const bool active = preparingEdit
+            ? low <= ref.end + (revealBoundary ? 1 : 0) && high >= ref.start - (revealBoundary ? 1 : 0)
+            : low == high ? low > ref.start && low < ref.end : low < ref.end && high > ref.start;
+        const bool searched = m_currentMatch >= 0 && m_currentMatch < ref.end
+            && m_currentMatch + m_searchQuery.size() > ref.start;
+        if (active || searched) continue;
+        // Source-visible table panels copy their literal text; never insert an
+        // inline object into that Markdown (collapsed tables own the whole range).
+        if (std::any_of(m_blockParser.blocks().cbegin(), m_blockParser.blocks().cend(), [&](const auto &block) {
+            return block.kind == PreviewBlocks::Kind::Table && ref.start < block.end && ref.end > block.start;
+        })) continue;
+        if (std::any_of(replacements.cbegin(), replacements.cend(), [&](const auto &r) {
+            return ref.start < r.block.end && ref.end > r.block.start;
+        })) continue;
+        QFont font = m_view->defaultFont();
+        if (font.pixelSize() > 0) font.setPixelSize(qMax(1, qRound(font.pixelSize() * .7)));
+        else font.setPointSizeF(font.pointSizeF() * .7);
+        const QColor accent = m_viewItem->property("previewAccent").value<QColor>();
+        const QString number = QString::number(m_noteReferences.numbers.value(ref.label));
+        const QString key = QStringLiteral("footnote/") + number + font.toString() + accent.name(QColor::HexArgb);
+        QImage image = m_images.value(key);
+        if (image.isNull()) {
+            const QFontMetricsF metrics(font);
+            const QSize size(qMax(1, int(std::ceil(metrics.horizontalAdvance(number)))) + 2, int(std::ceil(metrics.height())));
+            image = QImage(size * 2, QImage::Format_ARGB32_Premultiplied);
+            image.setDevicePixelRatio(2);
+            image.fill(Qt::transparent);
+            QPainter painter(&image); painter.setFont(font); painter.setPen(accent);
+            painter.drawText(QPointF(1, metrics.ascent()), number);
+            painter.end();
+            qsizetype cachedBytes = image.sizeInBytes();
+            for (const auto &cached : m_images) cachedBytes += cached.sizeInBytes();
+            if (m_images.size() < MaxProjectionObjects && cachedBytes <= MaxProjectionBytes)
+                m_images.insert(key, image);
+        }
+        if (image.sizeInBytes() > MaxProjectionBytes - projectionBytes) break;
+        projectionBytes += image.sizeInBytes();
+        PreviewBlocks::Block block; block.start = ref.start; block.end = ref.end;
+        replacements.append({block, image, true});
+    }
+    std::sort(replacements.begin(), replacements.end(), [](const auto &a, const auto &b) { return a.block.start < b.block.start; });
     QList<QPair<int, int>> ranges, oldRanges;
     for (const auto &r : replacements) ranges.append({r.block.start, r.block.end});
     for (const auto &s : m_segments) if (s.object) oldRanges.append({s.sourceStart, s.sourceEnd});
@@ -1245,7 +1307,9 @@ void LivePreview::syncEditProjection(bool revealBoundary) {
     for (const auto &r : replacements) {
         QTextImageFormat format;
         format.setName(QStringLiteral("preview:edit/%1").arg(r.image.cacheKey()));
-        format.setWidth(r.image.width()); format.setHeight(r.image.height());
+        format.setWidth(r.image.width() / r.image.devicePixelRatio());
+        format.setHeight(r.image.height() / r.image.devicePixelRatio());
+        if (r.footnote) format.setVerticalAlignment(QTextCharFormat::AlignSuperScript);
         const QUrl url(format.name());
         m_view->addResource(QTextDocument::ImageResource, url, r.image);
         formats.append(format); resources.append(url);
@@ -1308,18 +1372,6 @@ void LivePreview::syncEditProjection(bool revealBoundary) {
         ++image;
     }
     batch.endEditBlock();
-    if (!patches.isEmpty() && ranges != oldRanges) {
-        // Qt Quick can retain glyph nodes for paragraphs removed by an object
-        // collapse, even though QTextDocument/layout contain only the image.
-        // markContentsDirty() does not clear that scenegraph cache. Use the
-        // TextEdit image-resource invalidation hook, without replacing the
-        // document or disturbing native cursors/undo. This is a private Qt
-        // slot: keep the native screenshot regression when upgrading Qt.
-        // Queue it so subsequent highlighting/layout cannot downgrade UpdateAll.
-        // Ordinary prose keystrokes (unchanged object topology) stay incremental.
-        if (!QMetaObject::invokeMethod(m_viewItem, "q_invalidate", Qt::QueuedConnection))
-            qWarning("TextEdit scenegraph invalidation hook unavailable");
-    }
     for (const auto &url : m_resourceNames) if (!resources.contains(url))
         m_view->addResource(QTextDocument::ImageResource, url, QVariant());
     m_resourceNames = resources;
@@ -1344,7 +1396,7 @@ void LivePreview::prepareEdit(bool revealBoundary) {
     }
     if (boundary) {
         QScopedValueRollback<bool> guard(m_guard, true);
-        syncEditProjection(revealBoundary); // Ordinary neighboring prose must not expand a large object.
+        syncEditProjection(revealBoundary, true); // Ordinary neighboring prose must not expand a large object.
         styleEditLists(); styleCodeBlocks(); styleOverflow();
         select(m_viewItem, viewPosition(m_anchor), viewPosition(m_caret));
         completeProjectionLayout(); finishProjectionChange();
@@ -1358,6 +1410,13 @@ QString LivePreview::linkAtPoint(qreal x, qreal y) const {
     QMetaObject::invokeMethod(m_resolver, "linkUrlAt", Qt::DirectConnection,
         Q_RETURN_ARG(QString, result), Q_ARG(int, sourcePosition(at)));
     return result;
+}
+int LivePreview::footnoteViewPosition(const QString &url) const {
+    if (!m_readMode || !m_view || !url.startsWith(QStringLiteral("write-footnote:"))) return -1;
+    for (auto block = m_view->begin(); block.isValid(); block = block.next())
+        for (auto it = block.begin(); !it.atEnd(); ++it)
+            if (it.fragment().charFormat().anchorNames().contains(url)) return it.fragment().position();
+    return -1;
 }
 QString LivePreview::imagePathAtPoint(qreal x, qreal y) const {
     const int position = characterAtPoint(x, y);

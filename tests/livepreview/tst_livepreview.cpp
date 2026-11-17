@@ -13,6 +13,7 @@
 #include <QTextImageFormat>
 #include <QTextLayout>
 #include <QFontDatabase>
+#include <QFontMetricsF>
 #include <QAbstractTextDocumentLayout>
 #include <QTextTable>
 #include <QInputMethodEvent>
@@ -91,6 +92,63 @@ private slots:
         flush();
     }
     void cleanup() { controller.reset(); root.reset(); }
+    void footnoteNumbersStayConsistentAroundTables() {
+        const QString text = QStringLiteral("# Heading\n\n| A | B |\n| --- | --- |\n| note[^a] | cell |\n\nProse[^b]\n\n[^a]: Table note\n[^b]: Prose note\n");
+        source->setPlainText(text); sourceItem->setProperty("cursorPosition", 0); flush();
+        source->clearUndoRedoStacks();
+        const MarkdownReferences::Index index(text);
+        QCOMPARE(index.numbers.value("b"), 2);
+        const int marker = text.indexOf("[^b]");
+        QCOMPARE(view->characterAt(controller->viewPosition(marker)), QChar::ObjectReplacementCharacter);
+        controller->setReadMode(true); flush();
+        bool found = false;
+        for (auto block = view->begin(); block.isValid(); block = block.next())
+            for (auto it = block.begin(); !it.atEnd(); ++it)
+                if (it.fragment().charFormat().anchorHref() == MarkdownReferences::noteUrl("b")) {
+                    QCOMPARE(it.fragment().text(), QStringLiteral("2")); found = true;
+                }
+        QVERIFY(found);
+        QVERIFY(view->toPlainText().contains("1. Table note"));
+        QVERIFY(view->toPlainText().contains("2. Prose note"));
+        QCOMPARE(source->toPlainText(), text); QVERIFY(!source->isUndoAvailable());
+    }
+    void editFootnotesCollapseRevealRenumberAndPreserveUndo() {
+        const QString text = QStringLiteral("A[^b] B[^a] C[^b]\n\n[^a]: Alpha\n[^b]: Beta\n");
+        source->setPlainText(text);
+        sourceItem->setProperty("cursorPosition", 0); flush();
+        source->clearUndoRedoStacks();
+        const int first = text.indexOf("[^b]"), last = text.indexOf("C[^b]") + 1;
+        const auto imageAt = [&](int position) {
+            QTextCursor cursor(view); cursor.setPosition(controller->viewPosition(position));
+            cursor.movePosition(QTextCursor::NextCharacter, QTextCursor::KeepAnchor);
+            return cursor.charFormat().toImageFormat();
+        };
+        QCOMPARE(view->characterAt(controller->viewPosition(first)), QChar::ObjectReplacementCharacter);
+        const auto initial = imageAt(last);
+        QVERIFY(initial.isImageFormat());
+        QCOMPARE(initial.verticalAlignment(), QTextCharFormat::AlignSuperScript);
+        QVERIFY(initial.height() < QFontMetricsF(view->defaultFont()).height());
+        sourceItem->setProperty("cursorPosition", first + 2); flush();
+        QVERIFY(view->toPlainText().contains("A[^b]"));
+        QCOMPARE(source->toPlainText(), text); QVERIFY(!source->isUndoAvailable());
+        sourceItem->setProperty("cursorPosition", 0); flush();
+        QCOMPARE(view->characterAt(controller->viewPosition(first)), QChar::ObjectReplacementCharacter);
+        controller->setSearchHighlight(QStringLiteral("A[^b]"), 0); flush();
+        QVERIFY(view->toPlainText().contains("A[^b]"));
+        controller->setSearchHighlight({}, -1); flush();
+        QCOMPARE(view->characterAt(controller->viewPosition(first)), QChar::ObjectReplacementCharacter);
+        // Renumber a different, unchanged range without changing marker lengths.
+        QTextCursor edit(source); edit.setPosition(first + 2);
+        edit.setPosition(first + 3, QTextCursor::KeepAnchor); edit.insertText("a"); flush();
+        QVERIFY(imageAt(last).name() != initial.name());
+        source->undo(); flush(); QCOMPARE(source->toPlainText(), text);
+        select(viewItem, controller->viewPosition(first + 4), controller->viewPosition(first + 4));
+        QKeyEvent backspace(QEvent::KeyPress, Qt::Key_Backspace, Qt::NoModifier);
+        QCoreApplication::sendEvent(viewItem, &backspace); flush();
+        QString deleted = text; deleted.remove(first + 3, 1);
+        QCOMPARE(source->toPlainText(), deleted);
+        source->undo(); flush(); QCOMPARE(source->toPlainText(), text);
+    }
     void tableModelEditsAreSignalOnlyBoundedAndSafe() {
         MarkdownTableModel model;
         QString table = "| A | B |\n| :--- | ---: |\n| x | y |";
@@ -1752,6 +1810,25 @@ private slots:
         QVERIFY(renderer.request("```mermaid\nflowchart LR\nA-->B", false, 500).isNull());
 #endif
     }
+    void readFootnotesKeepSeparateBlocksAndSource() {
+        const QString text = QStringLiteral("A[^a] and B[^b] and repeated[^a].\n\n"
+            "[^a]: One **bold** note.\n[^b]: Another note.\n\n    A second paragraph.\n\nOutside.\n");
+        source->setPlainText(text); source->clearUndoRedoStacks(); flush();
+        controller->setReadMode(true); flush();
+        const QString plain = view->toPlainText();
+        QVERIFY2(!plain.contains(QStringLiteral("[^")), qPrintable(plain));
+        QVERIFY2(plain.contains(QStringLiteral("One bold note.")), qPrintable(plain));
+        QVERIFY2(plain.contains(QStringLiteral("A second paragraph.")), qPrintable(plain));
+        const int first = controller->footnoteViewPosition(MarkdownReferences::noteUrl(QStringLiteral("a")));
+        const int second = controller->footnoteViewPosition(MarkdownReferences::noteUrl(QStringLiteral("b")));
+        QVERIFY(first >= 0 && second > first);
+        QVERIFY(view->findBlock(first) != view->findBlock(second));
+        for (int i = 0; i < 3; ++i) { controller->setReadMode(false); flush(); controller->setReadMode(true); flush(); }
+        QCOMPARE(view->toPlainText(), plain);
+        QCOMPARE(source->toPlainText(), text);
+        QVERIFY(!source->isUndoAvailable());
+    }
+
     void readLinks() {
         source->setPlainText("[Example](https://example.com)\n\n**bold**"); flush();
         controller->setReadMode(true);

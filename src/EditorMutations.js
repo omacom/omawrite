@@ -161,6 +161,55 @@ function toggleInlineCode(editor) {
     }
 }
 
+// Insert the marker and its definition atomically, so one Undo removes both.
+function insertReference(editor, id, footnote, clipboardUrl, clipboardText,
+                         linkPlaceholder, notePlaceholder, prependDefinition) {
+    var source = editor.rawText();
+    var start = editor.selectionStart, end = editor.selectionEnd;
+    var selected = source.slice(start, end);
+    var escapeLabel = function(text) { return text.replace(/\\/g, "\\\\").replace(/\[/g, "\\[").replace(/\]/g, "\\]"); };
+    var marker, definition, selectFrom, selectTo;
+    var placeholder = false;
+    if (footnote) {
+        var body = normalizePlainText(selected || clipboardText || notePlaceholder);
+        placeholder = !selected && !clipboardText;
+        marker = "[^" + id + "]";
+        definition = "[^" + id + "]: " + body.replace(/\n/g, "\n    ");
+        selectFrom = selectTo = marker.length;
+    } else {
+        var label = normalizePlainText(selected || (!clipboardUrl ? clipboardText : "")).replace(/\n/g, " ") || linkPlaceholder;
+        placeholder = !selected && (clipboardUrl.length > 0 || !clipboardText);
+        marker = "[" + escapeLabel(label) + "][" + id + "]";
+        var destination = (clipboardUrl || "https://").replace(/</g, "%3C").replace(/>/g, "%3E");
+        definition = "[" + id + "]: <" + destination + ">";
+        selectFrom = placeholder ? 1 : marker.length;
+        selectTo = placeholder ? 1 + escapeLabel(label).length : marker.length;
+    }
+    var tail = source.slice(end);
+    var replacement, definitionStart;
+    if (prependDefinition) {
+        // An unfinished code fence at EOF would swallow an appended definition.
+        var prefix = definition + "\n\n";
+        replacement = prefix + source.slice(0, start) + marker + tail;
+        definitionStart = 0;
+        selectFrom += prefix.length + start; selectTo += prefix.length + start;
+        start = 0;
+    } else {
+        var beforeDefinition = source.slice(0, start) + marker + tail;
+        var separator = beforeDefinition.endsWith("\n\n") ? "" : beforeDefinition.endsWith("\n") ? "\n" : "\n\n";
+        replacement = marker + tail + separator + definition + "\n";
+        definitionStart = marker.length + tail.length + separator.length;
+    }
+    if (footnote && placeholder) {
+        selectFrom = definitionStart + id.length + 5;
+        selectTo = selectFrom + notePlaceholder.length;
+    } else if (!footnote && !placeholder && !clipboardUrl) {
+        selectFrom = definitionStart + id.length + 5;
+        selectTo = selectFrom + 8; // Editable https:// destination, not angle brackets.
+    }
+    replaceRange(editor, start, source.length, replacement, selectFrom, selectTo);
+}
+
 function toggleCodeBlock(editor) {
     var start = editor.selectionStart, end = editor.selectionEnd;
     var text = editor.text, body = text.slice(start, end);

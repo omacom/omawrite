@@ -1,5 +1,7 @@
 #pragma once
 
+#include "markdownreferences.h"
+
 #include <QObject>
 #include <QPointer>
 #include <QByteArray>
@@ -132,6 +134,9 @@ public:
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE void setCaretPosition(int position);
     Q_INVOKABLE QString linkUrlAt(int position) const;
+    Q_INVOKABLE QString linkHoverText(const QString &url) const;
+    Q_INVOKABLE int footnoteSourcePosition(const QString &url) const;
+    Q_INVOKABLE QString nextReferenceLabel(bool footnote) const;
     Q_INVOKABLE QVariantMap emphasisSpanAt(int position, const QString &marker) const;
     Q_INVOKABLE int cursorPositionStep(int position, int direction) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
@@ -242,6 +247,10 @@ private:
     bool m_wordCountAgain = false;
     QTimer m_recoveryTimer;
     QTimer m_autoSaveTimer;
+    const MarkdownReferences::Index &referenceIndex() const;
+    mutable QPointer<QTextDocument> m_referenceDocument;
+    mutable int m_referenceRevision = -1;
+    mutable MarkdownReferences::Index m_referenceIndex;
     QFileSystemWatcher m_fileWatcher;
     QTimer m_fileCheckTimer;
     bool m_fileMissing = false;
