@@ -1,41 +1,72 @@
 # Write (Omawrite)
 
-A feature-rich fork of [Omawrite](https://github.com/omacom/omawrite), following upstream's Write branding and development.
+A native Markdown writing app built with Qt Quick and C++. Plain-text files,
+caret-aware formatting, and a focused writing surface that follows the desktop.
 
-- Caret-aware Markdown Edit/Read modes, translated UI, font picker and search/replace.
-- Editable virtualized tables, syntax-colored code fences, local images and clipboard screenshots.
-- Independent document windows, recovery drafts, native spelling and Print/PDF snapshots.
-- Optional Mermaid diagrams through an external CLI; no embedded browser.
-- Windows, macOS and Linux support.
+![Native Markdown editing with code highlighting](docs/screenshots/markdown-edit.png)
 
-## Use and build
+## Writing features
 
-- [Features and shortcuts](docs/writing-and-shortcuts.md)
-- [Dependencies, setup, architecture checks and installers](docs/install.md)
-- [Tests](docs/testing.md)
-- Examples: [preview](docs/preview-example.md), [code](docs/code-highlighting-example.md), [spelling](docs/spellchecking-example.md)
+- **Edit and Read:** caret-aware Markdown markers, incremental native previews,
+  preserved selections and reading position, ordinary Markdown on disk.
+- **Tables:** editable virtualized grids, column alignment, rectangular fill,
+  horizontal scrolling, and an expanded view backed by the same table model.
+- **Code:** language-aware highlighting, continuous code panels, language labels,
+  copying, and local horizontal overflow.
+- **References and footnotes:** full/collapsed reference links, numbered footnote
+  previews in Edit and Read, hover text, internal footnote navigation, and
+  clipboard-aware insertion shortcuts.
+- **Images and diagrams:** local images, pasted clipboard screenshots, attachment
+  naming/repair/copy commands, and optional Mermaid previews through a local CLI.
+- **Desktop integration:** per-document windows, single-instance file routing,
+  recoverable drafts, external-change protection, native spelling, and Print/PDF
+  snapshots with wide-table appendices.
+- **Everyday tools:** translated UI, installed-font picker, zoom, search/replace,
+  formatting shortcuts, and rendered HTML/plain-text copying.
 
-Windows x64, from CMD:
+See the [screenshot gallery](docs/screenshots/README.md),
+[complete writing guide and shortcuts](docs/writing-and-shortcuts.md), and
+[enhancement review notes](docs/upstream-review.md).
 
-```bat
-setup.bat -Install -Installer
-build.bat --check --installer
-build.bat --test --installer
-```
+## Install and build
 
-macOS/Linux, with the [dependencies](docs/install.md#macos-and-linux) installed:
+Published Omarchy installations provide the `omawrite` package. Development
+features on this branch are not necessarily available in released packages.
+
+For local builds, use the [dependency and installation guide](docs/install.md).
+This branch supports Linux, macOS and Windows; its additional KDE dependencies
+and packaging changes require review before distribution.
 
 ```sh
 ./bin/build
 ./bin/test
 ```
 
-On macOS: `open -a "$PWD/build/cmake/Write.app" document.md`. On Linux: `./build/cmake/omawrite document.md`.
+On Linux: `./build/cmake/omawrite document.md`.
+On macOS: `open -a "$PWD/build/cmake/Write.app" document.md`.
+`omawrite --help` describes command-line options without opening a window.
 
-Quit older copies before upgrading. Existing fork settings, recovery storage and ownership locks are reused in place; internal legacy identifiers are intentionally retained for compatibility. No documents or drafts are copied or deleted by the rename.
+Windows x64, from CMD:
 
-Installer automation is unsigned and requires native Windows validation. MSVC targets need the VC++ Redistributable; Node/Mermaid remain external. Bundling libraries is not a fully static Qt build.
+```bat
+setup.bat -Install -Installer
+build.bat --test --installer
+```
 
-## License
+Installer automation is unsigned. Native installer, printer and dictionary
+validation remain separate from automated tests. Mermaid/Node are optional
+external tools; Write does not embed a browser. Quit other running Write builds
+before testing so file requests do not reach an older instance.
 
-The application retains its [MIT license](LICENSE). Bundled dependencies/resources have additional terms, including static LGPL relinking obligations and mixed-license syntax resources: see [copyright and notices](COPYRIGHT.md). Building or packaging does **not** establish redistribution clearance.
+More documentation:
+[testing](docs/testing.md) · [preview example](docs/preview-example.md) ·
+[code example](docs/code-highlighting-example.md) ·
+[spelling example](docs/spellchecking-example.md).
+
+## License and distribution
+
+The application retains its [MIT license](LICENSE) and contributor attribution.
+Dependencies/resources have additional terms, including static LGPL relinking
+obligations and mixed-license syntax resources. See [copyright and dependency
+notices](COPYRIGHT.md). Building or packaging does **not** establish
+redistribution clearance; the existing packaging guard remains enabled.

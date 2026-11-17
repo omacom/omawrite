@@ -11,6 +11,7 @@
 #include <QSemaphore>
 #include <QFont>
 #include <QFontDatabase>
+#include <QPainter>
 #include <QIcon>
 #include <QAbstractTextDocumentLayout>
 #include <QTextTable>
@@ -118,6 +119,91 @@ class OmawriteEditorTest : public QObject {
     }
 
 private slots:
+    void capturesDocumentationGallery() {
+        const QString output = qEnvironmentVariable("OMAWRITE_SCREENSHOT_DIR");
+        if (output.isEmpty()) QSKIP("Opt-in documentation capture; set OMAWRITE_SCREENSHOT_DIR");
+        QVERIFY(QDir().mkpath(output));
+        const QString fixtures = QFileInfo(QFINDTESTDATA("../docs/screenshots/editor.md")).absolutePath();
+        // Synthetic local-image fixture: no personal clipboard or documents.
+        QImage attachment(960, 220, QImage::Format_ARGB32_Premultiplied);
+        attachment.fill(QColor("#202938"));
+        {
+            QPainter painter(&attachment);
+            painter.setPen(QColor("#e5edf7")); painter.setFont(QFont("IBM Plex Mono", 22));
+            painter.drawText(32, 48, "Local image attachment");
+            painter.setFont(QFont("IBM Plex Mono", 13));
+            painter.drawText(32, 78, "Sample data — images remain ordinary files beside your Markdown.");
+            for (int i = 0; i < 5; ++i)
+                painter.fillRect(32 + i * 178, 174 - i * 14, 140, 24 + i * 14, QColor("#66c3b7"));
+        }
+        QVERIFY(attachment.save(QDir(fixtures).filePath("attachment-example.png")));
+        struct Shot { const char *document; const char *name; bool read; bool expand; bool hover; };
+        const Shot shots[] = {
+            {"editor.md", "markdown-edit.png", false, false, false},
+            {"editor.md", "markdown-read.png", true, false, false},
+            {"tables.md", "tables-edit.png", false, false, false},
+            {"tables.md", "tables-expanded.png", true, true, false},
+            {"references.md", "footnotes-edit.png", false, false, false},
+            {"references.md", "footnotes-hover.png", true, false, true},
+            {"media.md", "images-and-diagrams.png", true, false, false},
+        };
+        for (const auto &shot : shots) {
+            QSettings().remove(QStringLiteral("window"));
+            QTemporaryDir directory; QVERIFY(directory.isValid());
+            Backend backend; backend.m_recoveryPath = directory.filePath("recovery.json");
+            backend.setDarkMode(true);
+            QQmlEngine engine; engine.rootContext()->setContextProperty("backend", &backend);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+            QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+            // Set the no-focus flag before the native window is ever shown.
+            QScopedPointer<QObject> root(component.createWithInitialProperties({{"visible", false}}));
+            auto *window = qobject_cast<QQuickWindow *>(root.data()); QVERIFY(window);
+            window->setFlag(Qt::WindowDoesNotAcceptFocus);
+            window->setMinimumSize(QSize(960, 760)); window->setMaximumSize(QSize(960, 760));
+            window->resize(960, 760); window->show();
+            auto *editor = root->findChild<QObject *>("sourceEditor");
+            auto *view = root->findChild<QQuickItem *>("previewEditor");
+            auto *preview = root->findChild<LivePreview *>("livePreviewController");
+            auto *scroll = root->findChild<QObject *>("editorScroll");
+            QVERIFY(editor && view && preview && scroll);
+            // Never open repository fixtures as writable autosave documents.
+            const QString documentPath = directory.filePath(shot.document);
+            QVERIFY(QFile::copy(QDir(fixtures).filePath(shot.document), documentPath));
+            QVERIFY(QFile::copy(QDir(fixtures).filePath("attachment-example.png"), directory.filePath("attachment-example.png")));
+            backend.open(QUrl::fromLocalFile(documentPath));
+            QTRY_VERIFY(!backend.documentText().isEmpty());
+            const QString original = backend.documentText();
+            editor->setProperty("cursorPosition", original.indexOf("\n\n") + 2);
+            root->setProperty("readMode", shot.read);
+            QTest::qWait(500); scroll->setProperty("contentY", 0); QTest::qWait(100);
+            auto *caret = root->findChild<QQuickItem *>("visibleEditorCaret"); QVERIFY(caret); caret->setOpacity(0);
+            if (shot.expand) {
+                QTRY_COMPARE(preview->tablePanels().size(), 1);
+                auto *panel = root->findChild<QQuickItem *>("markdownTableGrid"); QVERIFY(panel);
+                auto *expand = panel->findChild<QQuickItem *>("tableExpandButton"); QVERIFY(expand);
+                QTest::mouseClick(window, Qt::LeftButton, Qt::NoModifier,
+                    expand->mapToScene(QPointF(expand->width()/2, expand->height()/2)).toPoint());
+                QTRY_VERIFY(root->findChild<QQuickItem *>("expandedTableGrid"));
+            }
+            if (shot.hover) {
+                auto *document = qvariant_cast<QQuickTextDocument *>(view->property("textDocument"))->textDocument();
+                const int position = document->toPlainText().indexOf('1'); QVERIFY(position >= 0);
+                QRectF box;
+                QVERIFY(QMetaObject::invokeMethod(view, "positionToRectangle", Q_RETURN_ARG(QRectF, box), Q_ARG(int, position)));
+                QTest::mouseMove(window, QPoint(1, 1));
+                QTest::mouseMove(window, view->mapToScene(QPointF(box.x() + 1, box.center().y())).toPoint());
+                auto *tooltip = root->findChild<QObject *>("linkTooltipText"); QVERIFY(tooltip);
+                QTRY_VERIFY(tooltip->property("text").toString().contains("Notes can contain"));
+            }
+            // The external Mermaid CLI is optional and asynchronous. Allow it
+            // time to render when installed; missing tools leave source visible.
+            if (QString::fromLatin1(shot.document) == "media.md") QTest::qWait(10000);
+            QTest::qWait(300);
+            const QImage image = window->grabWindow(); QVERIFY(!image.isNull());
+            QVERIFY(image.save(QDir(output).filePath(shot.name)));
+            QCOMPARE(backend.documentText(), original);
+        }
+    }
     void bundledApplicationIconWorksWithoutSystemTheme() {
         const QIcon fallback(QStringLiteral(":/icons/omawrite.png"));
         QVERIFY(!fallback.isNull());
