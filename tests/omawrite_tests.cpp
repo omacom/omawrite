@@ -541,6 +541,7 @@ private slots:
         QCOMPARE(changes.count(), 1);
         QCOMPARE(editor->property("text").toString(), QString::fromUtf8(contents));
         QVERIFY(!document->isUndoAvailable());
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
         for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
             QCOMPARE(block.blockFormat().lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
             QCOMPARE(block.blockFormat().lineHeight(), qreal(140));
