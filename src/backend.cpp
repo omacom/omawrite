@@ -331,6 +331,7 @@ void Backend::open(const QUrl &url) {
     file.seek(0);
     const QByteArray contents = file.readAll();
     loadDocumentText(QString::fromUtf8(contents));
+    emit fileOpened();
     clearRecovery();
     setKnownFileContents(contents, true);
     m_autoSaveSuspended = false;
