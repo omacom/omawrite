@@ -30,8 +30,10 @@ class Backend : public QObject {
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeForeground READ themeForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeAccent READ themeAccent NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themeAccentForeground READ themeAccentForeground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelection READ themeSelection NOTIFY themeColorsChanged)
     Q_PROPERTY(QString themeSelectionForeground READ themeSelectionForeground NOTIFY themeColorsChanged)
+    Q_PROPERTY(QString themePanelBackground READ themePanelBackground NOTIFY themeColorsChanged)
     Q_PROPERTY(QString editorFont READ editorFont WRITE setEditorFont NOTIFY editorFontChanged)
     Q_PROPERTY(QStringList availableFonts READ availableFonts CONSTANT)
 
@@ -55,8 +57,9 @@ public:
     QString themeBackground() const { return m_themeBackground; }
     QString themeForeground() const { return m_themeForeground; }
     QString themeAccent() const { return m_themeAccent; }
+    QString themeAccentForeground() const { return readableOn(m_themeAccent); }
     QString themeSelection() const { return m_themeSelection; }
-    QString themeCodeBackground() const { return m_themeCodeBackground; }
+    QString themePanelBackground() const { return m_themePanelBackground; }
     QString themeSelectionForeground() const { return m_themeSelectionForeground; }
     QString editorFont() const { return m_editorFont; }
     void setEditorFont(const QString &family);
@@ -66,7 +69,9 @@ public:
     static int countWords(const QString &text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
+    static QString untitledName();
     static QString tomlValue(const QString &text);
+    static QString readableOn(const QString &color);
     static QFont printFont(const QFont &editorFont, qreal screenDpi);
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
@@ -88,6 +93,7 @@ public:
     Q_INVOKABLE void newWindow();
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
+    Q_INVOKABLE QString documentText() const { return currentDocumentText(); }
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE void setCaretPosition(int position);
     Q_INVOKABLE QString linkUrlAt(int position) const;
@@ -100,6 +106,10 @@ public:
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
     Q_INVOKABLE void documentFontChanged();
+
+public slots:
+    // The untitled name follows the language.
+    void retranslate();
 
 signals:
     void fileUrlChanged();
@@ -191,7 +201,7 @@ private:
     QString m_themeForeground;
     QString m_themeAccent;
     QString m_themeSelection;
-    QString m_themeCodeBackground;
+    QString m_themePanelBackground;
     QString m_themeSelectionForeground;
     QString m_editorFont;
     QFileSystemWatcher m_themeWatcher;

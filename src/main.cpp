@@ -13,13 +13,11 @@
 #include "backend.h"
 #include "cli.h"
 #include "systemtheme.h"
-
-#define OMAWRITE_VERSION "0.7.2"
+#include "translator.h"
 
 int main(int argc, char *argv[]) {
-    // Answered before the application exists, so they need no display.
-    if (const std::optional<int> exitCode =
-            Cli::handleArguments(argc, argv, QStringLiteral(OMAWRITE_VERSION)))
+    // Answered before the application exists, so it needs no display.
+    if (const std::optional<int> exitCode = Cli::handleArguments(argc, argv))
         return *exitCode;
 
     // Omarchy asks Qt for GTK 3 dialogs, which run inside this process, and a
@@ -31,7 +29,6 @@ int main(int argc, char *argv[]) {
 
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("omawrite"));
-    app.setApplicationVersion(QStringLiteral(OMAWRITE_VERSION));
     app.setDesktopFileName(QStringLiteral("omawrite"));
     app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
 
@@ -43,6 +40,11 @@ int main(int argc, char *argv[]) {
     app.setOrganizationDomain(QStringLiteral("omacom.io"));
 
     QQuickStyle::setStyle(QStringLiteral("Material"));
+
+    // Installed before anything is translated, and every qsTr() binding is
+    // re-evaluated when the Omarchy language changes.
+    Translator translator;
+    app.installTranslator(&translator);
 
     Backend backend(&app);
     SystemTheme systemTheme(&app);
@@ -79,6 +81,9 @@ int main(int argc, char *argv[]) {
         for (const QQmlError &warning : warnings)
             qWarning().noquote() << warning.toString();
     });
+    QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
+    QObject::connect(&translator, &Translator::changed, &backend, &Backend::retranslate);
+    engine.rootContext()->setContextProperty(QStringLiteral("translator"), &translator);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
 
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));

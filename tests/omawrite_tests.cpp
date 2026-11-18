@@ -24,6 +24,12 @@
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "translator.h"
+
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QRegularExpression>
+#include <QSet>
 
 // Wraps the active platform theme and swaps the keys for the next and
 // previous character, as a theme like KDE Plasma's or qt6ct may change them.
@@ -71,12 +77,198 @@ private:
     QtMessageHandler m_previous = nullptr;
 };
 
+// Omawrite's sources, beside the tests.
+static QString sourceFolder() {
+    return QFileInfo(QFINDTESTDATA("../src/Main.qml")).absolutePath();
+}
+
+// A source file with its comments left out (their examples aren't calls)
+// and its strings kept whole, so neither hides the other.
+static QString withoutComments(const QString &text, bool cpp) {
+    QString out;
+    for (qsizetype i = 0; i < text.size();) {
+        const QChar c = text.at(i);
+        if (text.mid(i, 2) == QLatin1String("//")) {
+            const qsizetype end = text.indexOf(QLatin1Char('\n'), i);
+            i = end < 0 ? text.size() : end;
+        } else if (text.mid(i, 2) == QLatin1String("/*")) {
+            const qsizetype end = text.indexOf(QLatin1String("*/"), i + 2);
+            i = end < 0 ? text.size() : end + 2;
+        } else if (cpp && c == QLatin1Char('"') && i > 0 && text.at(i - 1) == QLatin1Char('R')) {
+            // A raw string (a pattern) is no translation; it is left out whole.
+            const qsizetype open = text.indexOf(QLatin1Char('('), i);
+            const QString close = QLatin1Char(')') + text.mid(i + 1, open - i - 1) + QLatin1Char('"');
+            out += QLatin1String("\"\"");
+            i = text.indexOf(close, open) + close.size();
+        } else if (c == QLatin1Char('"') || c == QLatin1Char('\'') || c == QLatin1Char('`')) {
+            qsizetype end = i + 1;
+            while (end < text.size() && text.at(end) != c)
+                end += text.at(end) == QLatin1Char('\\') ? 2 : 1;
+            out += text.mid(i, end + 1 - i);
+            i = end + 1;
+        } else {
+            out += c;
+            ++i;
+        }
+    }
+    return out;
+}
+
+// Every text the sources hand to qsTr() or tr(), and whether any call also
+// passes it a count (its third argument). A call whose text isn't a literal
+// can't be in a catalog, and is reported in `problems`.
+static QMap<QString, bool> translatables(const QString &folder, QStringList *problems) {
+    static const QRegularExpression call(QString::fromLatin1(R"(\b(qsTr|tr)\s*\()"));
+    static const QRegularExpression literal(QString::fromLatin1(R"(^\s*(["'])((?:\\.|(?!\1).)*)\1)"),
+                                            QRegularExpression::DotMatchesEverythingOption);
+    QMap<QString, bool> found;
+    const QStringList filters{QStringLiteral("*.qml"), QStringLiteral("*.js"),
+                              QStringLiteral("*.cpp"), QStringLiteral("*.h")};
+    for (const QFileInfo &info : QDir(folder).entryInfoList(filters, QDir::Files)) {
+        QFile file(info.filePath());
+        if (!file.open(QIODevice::ReadOnly))
+            continue;
+        const bool cpp = info.suffix() == QLatin1String("cpp") || info.suffix() == QLatin1String("h");
+        const QString code = withoutComments(QString::fromUtf8(file.readAll()), cpp);
+        for (auto calls = call.globalMatch(code); calls.hasNext();) {
+            const auto match = calls.next();
+            qsizetype at = match.capturedEnd();
+            const auto part = literal.match(code.mid(at));
+            if (!part.hasMatch()) {
+                *problems << info.fileName() + QStringLiteral(": not a literal: ")
+                                 + code.mid(match.capturedStart(), 60);
+                continue;
+            }
+            const QString text = part.captured(2).replace(QStringLiteral("\\\""), QStringLiteral("\""));
+            at += part.capturedEnd();
+            // The arguments after the text, up to the call's closing parenthesis.
+            int depth = 0, commas = 0;
+            for (; at < code.size(); ++at) {
+                const QChar c = code.at(at);
+                if (c == QLatin1Char('"') || c == QLatin1Char('\'')) {
+                    for (++at; at < code.size() && code.at(at) != c;
+                         at += code.at(at) == QLatin1Char('\\') ? 2 : 1) { }
+                } else if (c == QLatin1Char('(') || c == QLatin1Char('[') || c == QLatin1Char('{')) {
+                    ++depth;
+                } else if (c == QLatin1Char(')') || c == QLatin1Char(']') || c == QLatin1Char('}')) {
+                    if (depth-- == 0)
+                        break;
+                } else if (c == QLatin1Char(',') && depth == 0) {
+                    ++commas;
+                }
+            }
+            found[text] = found.value(text) || commas >= 2;
+        }
+    }
+    return found;
+}
+
+static QJsonObject readCatalog(const QString &path, QStringList *problems) {
+    QFile file(path);
+    if (!file.open(QIODevice::ReadOnly)) {
+        *problems << path + QStringLiteral(": can't be read");
+        return {};
+    }
+    QJsonParseError error;
+    const QJsonDocument document = QJsonDocument::fromJson(file.readAll(), &error);
+    if (!document.isObject())
+        *problems << path + QStringLiteral(": not a JSON object: ") + error.errorString();
+    return document.object();
+}
+
+// The placeholders in a text, sorted: %1 to %9, and the count (%n).
+static QStringList placeholders(const QString &text) {
+    static const QRegularExpression placeholder(QStringLiteral("%L?[1-9n]"));
+    QStringList found;
+    for (auto it = placeholder.globalMatch(text); it.hasNext();)
+        found << it.next().captured();
+    found.sort();
+    return found;
+}
+
+// The letter "&" marks in a button label, as SquareDialogButton reads it.
+static QString accessKey(const QString &label) {
+    static const QRegularExpression marked(QStringLiteral("&([^&\\s])"));
+    const auto match = marked.match(QString(label).remove(QStringLiteral("&&")));
+    return match.hasMatch() ? match.captured(1).toUpper() : QString();
+}
+
+// What's wrong with the translations in `folder`, measured against its
+// en.json: an unknown language, empty or broken translations, plural forms
+// that don't fit the language's rule, and access keys the unsaved-changes
+// prompt can't tell apart or bind. A string a catalog lacks is not a
+// problem: the app shows the English meanwhile, so a new string never waits
+// on 49 languages.
+static QStringList catalogProblems(const QString &folder) {
+    static const QStringList codes{
+        "ar", "bg", "bn", "ca", "cs", "da", "de", "el", "es-MX", "et", "fa", "fi", "fil",
+        "fr", "ga", "he", "hi", "hr", "hu", "id", "is", "it", "ja", "ko", "lt", "lv", "ms",
+        "nl", "no", "pl", "pt", "pt-BR", "ro", "ru", "si", "sk", "sl", "sr", "sv", "sw",
+        "ta", "th", "tr", "uk", "ur", "uz", "vi", "zh-CN", "zh-TW"};
+    QStringList problems;
+    const QJsonObject english = readCatalog(folder + QStringLiteral("/en.json"), &problems);
+    for (const QFileInfo &file : QDir(folder).entryInfoList({QStringLiteral("*.json")}, QDir::Files)) {
+        const QString code = file.completeBaseName();
+        if (code == QLatin1String("en"))
+            continue;
+        if (!codes.contains(code)) {
+            problems << file.fileName() + QStringLiteral(": not one of Omarchy's language codes");
+            continue;
+        }
+        const QJsonObject catalog = readCatalog(file.filePath(), &problems);
+
+        // The categories the language's rule reaches, and "other" always.
+        QSet<QString> categories{QStringLiteral("other"), Translator::pluralCategory(code, 1000000)};
+        for (long long n = 0; n <= 1000; ++n)
+            categories << Translator::pluralCategory(code, n);
+
+        for (auto it = english.begin(); it != english.end(); ++it) {
+            const QJsonValue translated = catalog.value(it.key());
+            const QString where = code + QStringLiteral(": ") + it.key() + QStringLiteral(": ");
+            if (translated.isUndefined())
+                continue;
+            if (it.value().isString()) {
+                if (!translated.isString() || translated.toString().isEmpty())
+                    problems << where + QStringLiteral("needs a translation");
+                else if (placeholders(translated.toString()) != placeholders(it.key()))
+                    problems << where + QStringLiteral("has other placeholders than the English");
+                continue;
+            }
+            const QJsonObject forms = translated.toObject();
+            const QStringList given = forms.keys();
+            if (!translated.isObject() || QSet<QString>(given.begin(), given.end()) != categories) {
+                QStringList wanted(categories.begin(), categories.end());
+                wanted.sort();
+                problems << where + QStringLiteral("needs exactly the plural forms ") + wanted.join(QStringLiteral(", "));
+                continue;
+            }
+            for (auto form = forms.begin(); form != forms.end(); ++form) {
+                if (!form.value().toString().contains(QStringLiteral("%n")))
+                    problems << where + form.key() + QStringLiteral(" needs its %n");
+            }
+        }
+
+        QStringList keys;
+        for (const char *label : {"&Cancel", "&Discard", "&Save"}) {
+            const QString translated = catalog.value(QLatin1String(label)).toString(QLatin1String(label));
+            const QString key = accessKey(translated);
+            if (key.isEmpty())
+                problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": needs an access key");
+            else if (keys.contains(key))
+                problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": shares its access key");
+            else if (QKeySequence(key).count() != 1 || QKeySequence(key)[0].key() == Qt::Key_unknown)
+                problems << code + QStringLiteral(": ") + QLatin1String(label) + QStringLiteral(": has an access key Qt cannot bind");
+            keys << key;
+        }
+    }
+    return problems;
+}
+
 class OmawriteTest : public QObject {
     Q_OBJECT
 
 private slots:
     void initTestCase() {
-        QCoreApplication::setApplicationVersion(QStringLiteral("1.2.3-test"));
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(m_settingsDirectory.isValid());
         QQuickStyle::setStyle(QStringLiteral("Material"));
@@ -184,17 +376,12 @@ private slots:
         const QString usage = Cli::usage();
         QVERIFY(usage.contains(QStringLiteral("omawrite [FILE]")));
         QVERIFY(usage.contains(QStringLiteral("-h, --help")));
-        QVERIFY(usage.contains(QStringLiteral("-v, --version")));
 
-        const QString version = QStringLiteral("1.2.3");
-        const auto answer = [&](const QStringList &arguments) {
-            return Cli::handleArguments(QStringList{QStringLiteral("omawrite")} + arguments,
-                                        version);
+        const auto answer = [](const QStringList &arguments) {
+            return Cli::handleArguments(QStringList{QStringLiteral("omawrite")} + arguments);
         };
         QCOMPARE(answer({QStringLiteral("--help")}), std::optional<int>(0));
         QCOMPARE(answer({QStringLiteral("-h")}), std::optional<int>(0));
-        QCOMPARE(answer({QStringLiteral("--version")}), std::optional<int>(0));
-        QCOMPARE(answer({QStringLiteral("-v")}), std::optional<int>(0));
 
         // Everything else is the app's: no arguments, a file, and Qt's own
         // options, which a leading dash must not turn into an error.
@@ -339,6 +526,63 @@ private slots:
         QVERIFY(allLinesSpaced());
     }
 
+    void opensFilesWithLineHeightAndNoUndo() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("notes.md"));
+        const QByteArray contents("# Title\n\nSome **bold** text\n\n```\ncode\n```\n");
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(contents), qint64(contents.size()));
+        file.close();
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        QVERIFY(editor);
+        QTextDocument *document = qobject_cast<QQuickTextDocument *>(
+            editor->property("textDocument").value<QObject *>())->textDocument();
+
+        // Typing first leaves something to undo, which opening must drop.
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTest::keyClick(window, Qt::Key_D);
+        QVERIFY(document->isUndoAvailable());
+
+        // One change for the whole load: styling the text in a second pass
+        // over every block is what froze the window on long files.
+        QSignalSpy changes(document, &QTextDocument::contentsChange);
+        backend.open(QUrl::fromLocalFile(path));
+        QCOMPARE(changes.count(), 1);
+        QCOMPARE(editor->property("text").toString(), QString::fromUtf8(contents));
+        QVERIFY(!document->isUndoAvailable());
+        for (QTextBlock block = document->begin(); block.isValid(); block = block.next()) {
+            QCOMPARE(block.blockFormat().lineHeightType(), int(QTextBlockFormat::ProportionalHeight));
+            QCOMPARE(block.blockFormat().lineHeight(), qreal(140));
+        }
+        QVERIFY(editor->flags().testFlag(QQuickItem::ItemObservesViewport));
+
+        // A shorter file replaces all of the longer one.
+        const QString shortPath = directory.filePath(QStringLiteral("short.md"));
+        QFile shortFile(shortPath);
+        QVERIFY(shortFile.open(QIODevice::WriteOnly));
+        QCOMPARE(shortFile.write("Short\n"), qint64(6));
+        shortFile.close();
+        backend.open(QUrl::fromLocalFile(shortPath));
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("Short\n"));
+        QCOMPARE(document->firstBlock().blockFormat().lineHeight(), qreal(140));
+        QVERIFY(!document->isUndoAvailable());
+    }
+
     void searchFollowsEditsWithoutTakingTheCaret() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());
@@ -458,6 +702,12 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a x b x c"));
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(editor->property("text").toString(), QStringLiteral("a foo b foo c"));
+
+        // The text between the matches is written back as it was, its
+        // non-breaking spaces too.
+        editor->setProperty("text", QStringLiteral("foo a\u00a0b foo"));
+        QMetaObject::invokeMethod(replaceAllButton, "clicked");
+        QCOMPARE(backend.documentText(), QStringLiteral("x a\u00a0b x"));
     }
 
     void countsWordsAfterEditsWithoutBlocking() {
@@ -1302,7 +1552,7 @@ private slots:
             // Reload the same backend so a missing key cannot inherit the
             // previous theme's panel color.
             backend.setDarkMode(!backend.darkMode());
-            return QColor(backend.themeCodeBackground());
+            return QColor(backend.themePanelBackground());
         };
 
         // The shade the theme names for panels wins.
@@ -1560,6 +1810,13 @@ private slots:
         QCOMPARE(mixed.size(), 2);
         QCOMPARE(mixed.at(0).kind, MarkdownHighlighter::InlineKind::Bold);
         QCOMPARE(mixed.at(1).kind, MarkdownHighlighter::InlineKind::Italic);
+    }
+
+    void labelsTheAccentInWhicheverReads() {
+        // A light accent takes a dark label, a dark one a light label.
+        QCOMPARE(Backend::readableOn(QStringLiteral("#FFD60A")), QStringLiteral("black"));
+        QCOMPARE(Backend::readableOn(QStringLiteral("#7aa2f7")), QStringLiteral("black"));
+        QCOMPARE(Backend::readableOn(QStringLiteral("#112233")), QStringLiteral("white"));
     }
 
     void loadsCurrentOmarchyTheme() {
@@ -2167,6 +2424,17 @@ private slots:
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(text(), QStringLiteral("- one\n- two"));
 
+        // Return carries an item's indentation onto the next as it is.
+        load(QStringLiteral("\u00a0- a"), 4);
+        QTest::keyClick(window, Qt::Key_Return);
+        QCOMPARE(backend.documentText(), QStringLiteral("\u00a0- a\n\u00a0- "));
+
+        // A line separator starts a line as a newline does, and stays one.
+        load(QStringLiteral("- a\u2028- b"), 0);
+        QMetaObject::invokeMethod(editor, "selectAll");
+        tabKey();
+        QCOMPARE(backend.documentText(), QStringLiteral("    - a\u2028    - b"));
+
         // The same step nests under ordered markers, the empty one Return
         // leaves included, and Shift+Tab steps back out one level.
         load(QStringLiteral("1. one"), 6);
@@ -2413,7 +2681,210 @@ private slots:
         QCOMPARE(caret(), 6);
     }
 
-    void unsavedChangesDialogSupportsAltMnemonics() {
+    void translatorFallsBackToEnglish() {
+        QTemporaryDir dir;
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(translator.language(), QStringLiteral("en"));
+        QVERIFY(translator.translate("Main", "Save").isNull());
+    }
+
+    void translatorFollowsTheLanguageFile() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/language"), "pt-BR\n");
+        writeFile(dir.path() + QStringLiteral("/pt.json"), R"({"Save": "Guardar", "Open": "Abrir"})");
+        writeFile(dir.path() + QStringLiteral("/pt-BR.json"), R"({"Save": "Salvar"})");
+
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(translator.language(), QStringLiteral("pt-BR"));
+        QCOMPARE(translator.translate("Main", "Save"), QStringLiteral("Salvar"));
+        QCOMPARE(translator.translate("Main", "Open"), QStringLiteral("Abrir"));
+        QVERIFY(translator.translate("Main", "Quit").isNull());
+    }
+
+    void translatorPicksPluralForms() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/language"), "ru\n");
+        writeFile(dir.path() + QStringLiteral("/en.json"), R"({"%n Words": {"one": "%n Word", "other": "%n Words"}})");
+        writeFile(dir.path() + QStringLiteral("/ru.json"),
+                  R"({"%n Words": {"one": "%n слово", "few": "%n слова", "many": "%n слов", "other": "%n слова"}})");
+
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(translator.translate("Main", "%n Words", nullptr, 21), QStringLiteral("%n слово"));
+        QCOMPARE(translator.translate("Main", "%n Words", nullptr, 22), QStringLiteral("%n слова"));
+        QCOMPARE(translator.translate("Main", "%n Words", nullptr, 25), QStringLiteral("%n слов"));
+    }
+
+    void translatorTakesEnglishPluralRulesForAnEnglishFallback() {
+        // A counted string the catalog lacks shows its English forms, picked
+        // by English rules: 21 is "one" in Russian, and 1 is "other" in Japanese.
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/en.json"), R"({"%n Words": {"one": "%n Word", "other": "%n Words"}})");
+        writeFile(dir.path() + QStringLiteral("/ru.json"), R"({"Save": "Сохранить"})");
+        writeFile(dir.path() + QStringLiteral("/ja.json"), R"({"Save": "保存"})");
+        const auto restore = qScopeGuard([locale = QLocale(), direction = QGuiApplication::layoutDirection()] {
+            QLocale::setDefault(locale);
+            QGuiApplication::setLayoutDirection(direction);
+        });
+
+        writeFile(dir.path() + QStringLiteral("/language"), "ru\n");
+        Translator russian(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(russian.translate("Main", "%n Words", nullptr, 21), QStringLiteral("%n Words"));
+
+        writeFile(dir.path() + QStringLiteral("/language"), "ja\n");
+        Translator japanese(dir.path() + QStringLiteral("/language"), dir.path());
+        QCOMPARE(japanese.translate("Main", "%n Words", nullptr, 1), QStringLiteral("%n Word"));
+    }
+
+    void translatorFollowsALanguageSwitch() {
+        QTemporaryDir dir;
+        const QString language = dir.path() + QStringLiteral("/language");
+        // omarchy-language replaces the file, which drops it from a watch.
+        const auto pick = [&](const QByteArray &code) {
+            writeFile(dir.path() + QStringLiteral("/next"), code + "\n");
+            QFile::remove(language);
+            QVERIFY(QFile::rename(dir.path() + QStringLiteral("/next"), language));
+        };
+        pick("da");
+        writeFile(dir.path() + QStringLiteral("/da.json"), R"({"Save": "Gem"})");
+        writeFile(dir.path() + QStringLiteral("/ar.json"), R"({"Save": "حفظ"})");
+
+        const auto restore = qScopeGuard([locale = QLocale(), direction = QGuiApplication::layoutDirection()] {
+            QLocale::setDefault(locale);
+            QGuiApplication::setLayoutDirection(direction);
+        });
+        Translator translator(language, dir.path());
+        QCOMPARE(translator.translate("Main", "Save"), QStringLiteral("Gem"));
+
+        pick("ar");
+        QTRY_COMPARE(translator.language(), QStringLiteral("ar"));
+        QCOMPARE(translator.translate("Main", "Save"), QStringLiteral("حفظ"));
+        QCOMPARE(QGuiApplication::layoutDirection(), Qt::RightToLeft);
+
+        pick("da");
+        QTRY_COMPARE(translator.language(), QStringLiteral("da"));
+        QCOMPARE(QGuiApplication::layoutDirection(), Qt::LeftToRight);
+    }
+
+    void englishCatalogMatchesTheSources() {
+        // en.json is what translators work from: every text the sources
+        // translate is in it, as itself or, when a count is passed, as its
+        // English plural forms, and nothing else is.
+        QStringList problems;
+        const QMap<QString, bool> used = translatables(sourceFolder(), &problems);
+        QVERIFY(used.value(QStringLiteral("%n Words")));
+        const QJsonObject english = readCatalog(sourceFolder() + QStringLiteral("/i18n/en.json"), &problems);
+        for (auto it = used.begin(); it != used.end(); ++it) {
+            const QJsonValue value = english.value(it.key());
+            if (value.isUndefined())
+                problems << QStringLiteral("missing from en.json: ") + it.key();
+            else if (it.value() && (value.toObject().keys() != QStringList{"one", "other"}
+                                    || value.toObject().value("other").toString() != it.key()))
+                problems << QStringLiteral("counted, so needs its one and other forms: ") + it.key();
+            else if (!it.value() && value.toString() != it.key())
+                problems << QStringLiteral("should be itself: ") + it.key();
+        }
+        for (const QString &key : english.keys())
+            if (!used.contains(key))
+                problems << QStringLiteral("in en.json but no source translates it: ") + key;
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+    }
+
+    void catalogsMatchTheEnglishOne() {
+        const QStringList problems = catalogProblems(sourceFolder() + QStringLiteral("/i18n"));
+        QVERIFY2(problems.isEmpty(), qPrintable(problems.join(QLatin1Char('\n'))));
+    }
+
+    void catalogChecksCatchBrokenTranslations() {
+        QTemporaryDir dir;
+        writeFile(dir.filePath(QStringLiteral("en.json")),
+                  R"({"Open %1": "Open %1", "&Cancel": "&Cancel", "&Discard": "&Discard", "&Save": "&Save",
+                      "%n Words": {"one": "%n Word", "other": "%n Words"}})");
+        writeFile(dir.filePath(QStringLiteral("pl.json")),
+                  R"({"Open %1": "Otwórz", "%n Words": {"one": "%n słowo", "few": "%n słowa", "other": "%n słowa"}})");
+        writeFile(dir.filePath(QStringLiteral("da.json")),
+                  R"({"Open %1": "Åbn %1", "&Cancel": "&Annuller", "&Discard": "&Afvis", "&Save": "Gem"})");
+        writeFile(dir.filePath(QStringLiteral("xx.json")), "{}");
+        QStringList problems = catalogProblems(dir.path());
+        problems.sort();
+        QCOMPARE(problems, QStringList({QStringLiteral("da: &Discard: shares its access key"),
+                                        QStringLiteral("da: &Save: needs an access key"),
+                                        QStringLiteral("pl: %n Words: needs exactly the plural forms few, many, one, other"),
+                                        QStringLiteral("pl: Open %1: has other placeholders than the English"),
+                                        QStringLiteral("xx.json: not one of Omarchy's language codes")}));
+    }
+
+    void everyCatalogIsCompiledIn() {
+        QFile resources(sourceFolder() + QStringLiteral("/resources.qrc"));
+        QVERIFY(resources.open(QIODevice::ReadOnly));
+        const QString listed = QString::fromUtf8(resources.readAll());
+        QStringList left;
+        for (const QString &name : QDir(sourceFolder() + QStringLiteral("/i18n"))
+                 .entryList({QStringLiteral("*.json")}, QDir::Files))
+            if (!listed.contains(QStringLiteral("<file>i18n/") + name + QStringLiteral("</file>")))
+                left << name;
+        QVERIFY2(left.isEmpty(), qPrintable(QStringLiteral("not in resources.qrc: ") + left.join(QStringLiteral(", "))));
+    }
+
+    void dialogButtonsTakeTheirAccessKeysFromTheTranslation() {
+        QTemporaryDir dir;
+        writeFile(dir.path() + QStringLiteral("/language"), "da\n");
+        writeFile(dir.path() + QStringLiteral("/da.json"),
+                  R"json({"&Cancel": "&Annuller", "&Discard": "&Kassér", "&Save": "Gem (&G)"})json");
+        Translator translator(dir.path() + QStringLiteral("/language"), dir.path());
+        QCoreApplication::installTranslator(&translator);
+        const auto removeTranslator = qScopeGuard([&translator] {
+            QCoreApplication::removeTranslator(&translator);
+        });
+
+        const QString dialogQmlPath = QFINDTESTDATA("../src/UnsavedChangesDialog.qml");
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData(R"QML(
+            import QtQuick
+            import QtQuick.Controls
+            ApplicationWindow {
+                width: 640
+                height: 420
+                visible: true
+                UnsavedChangesDialog { objectName: "dialog"; containerWidth: 640; containerHeight: 420 }
+            }
+        )QML", QUrl::fromLocalFile(QFileInfo(dialogQmlPath).absolutePath() + QStringLiteral("/Harness.qml")));
+        QScopedPointer<QObject> root(component.create());
+        QVERIFY2(root, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(root.data());
+        QObject *dialog = root->findChild<QObject *>(QStringLiteral("dialog"));
+        QVERIFY(window && dialog);
+
+        QSignalSpy cancelSpy(dialog, SIGNAL(cancelRequested()));
+        QSignalSpy discardSpy(dialog, SIGNAL(discardRequested()));
+        QSignalSpy saveSpy(dialog, SIGNAL(saveRequested()));
+        const auto press = [&](Qt::Key key) {
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QTest::keyClick(window, key, Qt::AltModifier);
+        };
+
+        // The English keys are the translation's now.
+        press(Qt::Key_C);
+        QCOMPARE(cancelSpy.count(), 0);
+        QTest::keyClick(window, Qt::Key_A, Qt::AltModifier);
+        QTRY_COMPARE(cancelSpy.count(), 1);
+        press(Qt::Key_K);
+        QTRY_COMPARE(discardSpy.count(), 1);
+        press(Qt::Key_G);
+        QTRY_COMPARE(saveSpy.count(), 1);
+
+        // The label shows without its marker, the key underlined.
+        QQuickItem *save = nullptr;
+        for (QQuickItem *item : root->findChildren<QQuickItem *>())
+            if (item->property("mnemonicLabel").toString() == QStringLiteral("Gem (&G)"))
+                save = item;
+        QVERIFY(save);
+        QCOMPARE(save->property("text").toString(), QStringLiteral("Gem (G)"));
+        QCOMPARE(save->property("formattedText").toString(), QStringLiteral("Gem (<u>G</u>)"));
+    }
+
+    void unsavedChangesDialogPicksWithABareLetterOrAlt() {
         const QString dialogQmlPath = QFINDTESTDATA("../src/UnsavedChangesDialog.qml");
         QVERIFY(!dialogQmlPath.isEmpty());
 
@@ -2452,42 +2923,94 @@ private slots:
         QSignalSpy discardSpy(dialog, SIGNAL(discardRequested()));
         QSignalSpy saveSpy(dialog, SIGNAL(saveRequested()));
 
-        // Bare letters and Ctrl chords do nothing, so a stray keypress
-        // while typing can never discard work.
+        // There is nothing to type into, so the bare letter picks, and Alt
+        // with it still does. A Ctrl chord is not the button's key.
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
         QTRY_VERIFY(dialog->property("opened").toBool());
+        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
+        QCOMPARE(cancelSpy.count(), 0);
+        QVERIFY(dialog->property("opened").toBool());
+
+        const auto pick = [&](Qt::Key key, Qt::KeyboardModifiers modifiers, QSignalSpy &spy) {
+            const int before = spy.count();
+            QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+            QTRY_VERIFY(dialog->property("opened").toBool());
+            QTest::keyClick(window, key, modifiers);
+            QTRY_COMPARE(spy.count(), before + 1);
+            QVERIFY(!dialog->property("opened").toBool());
+        };
+        pick(Qt::Key_C, Qt::NoModifier, cancelSpy);
+        pick(Qt::Key_D, Qt::NoModifier, discardSpy);
+        pick(Qt::Key_S, Qt::NoModifier, saveSpy);
+        pick(Qt::Key_C, Qt::AltModifier, cancelSpy);
+        pick(Qt::Key_D, Qt::AltModifier, discardSpy);
+        pick(Qt::Key_S, Qt::AltModifier, saveSpy);
+        if (QTest::currentTestFailed())
+            return;
+
+        // With the dialog closed, the keys are inert.
         QTest::keyClick(window, Qt::Key_C);
         QTest::keyClick(window, Qt::Key_D);
         QTest::keyClick(window, Qt::Key_S);
-        QTest::keyClick(window, Qt::Key_C, Qt::ControlModifier);
-        QCOMPARE(cancelSpy.count(), 0);
-        QCOMPARE(discardSpy.count(), 0);
-        QCOMPARE(saveSpy.count(), 0);
-        QVERIFY(dialog->property("opened").toBool());
-
         QTest::keyClick(window, Qt::Key_C, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_D, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_S, Qt::AltModifier);
+        QCOMPARE(cancelSpy.count(), 2);
+        QCOMPARE(discardSpy.count(), 2);
+        QCOMPARE(saveSpy.count(), 2);
+    }
+
+    void unsavedChangesDialogTakesTheLetterFromTheEditor() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("notes.md"));
+        writeFile(path, "on disk");
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        // A run that fails before Discard must not leave "draft" for the
+        // next run's editor to recover.
+        const auto forgetDraft = qScopeGuard([&backend] { backend.discardRecovery(); });
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(editor && dialog);
+        QSignalSpy cancelSpy(dialog, SIGNAL(cancelRequested()));
+        QSignalSpy discardSpy(dialog, SIGNAL(discardRequested()));
+
+        // The writer is typing when the prompt comes up.
+        QMetaObject::invokeMethod(editor, "forceActiveFocus");
+        QTRY_VERIFY(editor->property("activeFocus").toBool());
+        for (char c : QByteArrayLiteral("draft"))
+            QTest::keyClick(window, c);
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("draft"));
+        QTRY_VERIFY(backend.modified());
+        QVERIFY(QMetaObject::invokeMethod(window, "requestOpen",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(path))));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+
+        // The letter goes to the dialog, never into the text behind it.
+        QTest::keyClick(window, Qt::Key_C);
         QTRY_COMPARE(cancelSpy.count(), 1);
         QVERIFY(!dialog->property("opened").toBool());
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("draft"));
+        QCOMPARE(window->property("pendingAction").toString(), QString());
 
-        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QVERIFY(QMetaObject::invokeMethod(window, "requestOpen",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(path))));
         QTRY_VERIFY(dialog->property("opened").toBool());
-        QTest::keyClick(window, Qt::Key_D, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_D);
         QTRY_COMPARE(discardSpy.count(), 1);
-        QVERIFY(!dialog->property("opened").toBool());
-
-        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
-        QTRY_VERIFY(dialog->property("opened").toBool());
-        QTest::keyClick(window, Qt::Key_S, Qt::AltModifier);
-        QTRY_COMPARE(saveSpy.count(), 1);
-        QVERIFY(!dialog->property("opened").toBool());
-
-        // With the dialog closed, the mnemonics are inert.
-        QTest::keyClick(window, Qt::Key_C, Qt::AltModifier);
-        QTest::keyClick(window, Qt::Key_D, Qt::AltModifier);
-        QTest::keyClick(window, Qt::Key_S, Qt::AltModifier);
-        QCOMPARE(cancelSpy.count(), 1);
-        QCOMPARE(discardSpy.count(), 1);
-        QCOMPARE(saveSpy.count(), 1);
+        QTRY_COMPARE(editor->property("text").toString(), QStringLiteral("on disk"));
     }
 
     void scalesTextWithDesktopTextSize() {
@@ -2527,7 +3050,6 @@ private slots:
         backend.decreaseTextSize();
         backend.decreaseTextSize();
         QCOMPARE(backend.textScale(), 1.5 * 0.9);
-        QCOMPARE(backend.status(), QStringLiteral("Text size 90%"));
 
         // The ends of the ladder hold instead of running away.
         for (int step = 0; step < 8; ++step)
@@ -2721,11 +3243,6 @@ private slots:
         for (auto key : {Qt::Key_Slash, Qt::Key_Question, Qt::Key_F1}) {
             QTest::keyClick(window, key, key == Qt::Key_F1 ? Qt::NoModifier : Qt::ControlModifier);
             QTRY_VERIFY(dialog->property("opened").toBool());
-            QObject *versionLabel = dialog->findChild<QObject *>(QStringLiteral("versionLabel"));
-            QVERIFY(versionLabel);
-            QVERIFY(versionLabel->property("visible").toBool());
-            QCOMPARE(versionLabel->property("text").toString(),
-                     QStringLiteral("Omawrite ") + QCoreApplication::applicationVersion());
             QTest::keyClick(window, Qt::Key_Minus, Qt::ControlModifier);
             QCOMPARE(backend.textScale(), scale);
             QVERIFY(dialog->property("x").toReal() >= 0);
@@ -2774,6 +3291,39 @@ private slots:
         fallbackDocument.saveAsDialog();
         const QUrl fallbackUrl = fallbackDialogSpy.takeFirst().constFirst().toUrl();
         QCOMPARE(QFileInfo(fallbackUrl.toLocalFile()).absolutePath(), QDir::homePath());
+    }
+
+    void savesTheCharactersItOpened() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("spaces.md"));
+        // A non-breaking space and a line separator, which plain text
+        // export turns into a space and a newline.
+        const QByteArray original("prix\xc2\xa0" "10\nfirst\xe2\x80\xa8second\n");
+        writeFile(path, original);
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.open(QUrl::fromLocalFile(path));
+        QVERIFY(!backend.modified());
+
+        QTextCursor cursor(backend.m_document);
+        cursor.movePosition(QTextCursor::End);
+        cursor.insertText(QStringLiteral("more"));
+        QVERIFY(backend.editorTextChanged());
+        cursor.deletePreviousChar();
+        cursor.deletePreviousChar();
+        cursor.deletePreviousChar();
+        cursor.deletePreviousChar();
+        QVERIFY(backend.editorTextChanged());
+        // Back to what was opened, so nothing is unsaved.
+        QVERIFY(!backend.modified());
+
+        cursor.insertText(QStringLiteral("more"));
+        QVERIFY(backend.editorTextChanged());
+        backend.save();
+        QCOMPARE(readFile(path), original + "more");
     }
 
     void autoSavesTitledDocumentsAfterEdits() {
@@ -3159,11 +3709,52 @@ private slots:
         QSignalSpy keepSpy(dialog, SIGNAL(keepRequested()));
         QSignalSpy reloadSpy(dialog, SIGNAL(reloadRequested()));
 
-        // Escape closes it without a choice.
+        // Escape closes it without a choice. Keeping over a changed file
+        // would let auto-save write the editor's text over the outside edit.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QTRY_VERIFY(!dialog->property("visible").toBool());
+        QCOMPARE(keepSpy.count(), 0);
+        QCOMPARE(reloadSpy.count(), 0);
+
+        // A removed file's text is kept as unsaved, so it is not lost on close.
+        QVERIFY(dialog->setProperty("deleted", true));
         QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
         QTRY_VERIFY(dialog->property("opened").toBool());
         QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
         QTRY_COMPARE(keepSpy.count(), 1);
+        QCOMPARE(reloadSpy.count(), 0);
+    }
+
+    void externalChangeDialogIgnoresABareLetter() {
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick\nimport QtQuick.Controls\nApplicationWindow {"
+                          " width: 640; height: 420; visible: true\n"
+                          " property alias dialog: dialog\n"
+                          " ExternalChangeDialog { id: dialog; locallyModified: true } }",
+                          QUrl::fromLocalFile(QFINDTESTDATA("../src/Main.qml")));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *dialog = window->property("dialog").value<QObject *>();
+        QVERIFY(dialog);
+        QSignalSpy keepSpy(dialog, SIGNAL(keepRequested()));
+        QSignalSpy reloadSpy(dialog, SIGNAL(reloadRequested()));
+
+        // It comes up on its own, often mid-sentence, and Reload throws the
+        // writer's changes away, so the next letter typed must not choose.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "open"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        for (char c : QByteArrayLiteral("rk"))
+            QTest::keyClick(window, c);
+        QTest::keyClick(window, Qt::Key_R, Qt::AltModifier);
+        QTest::keyClick(window, Qt::Key_K, Qt::AltModifier);
+        QVERIFY(dialog->property("opened").toBool());
+        QCOMPARE(keepSpy.count(), 0);
         QCOMPARE(reloadSpy.count(), 0);
     }
 
@@ -3548,4 +4139,4 @@ private:
 };
 
 QTEST_MAIN(OmawriteTest)
-#include "tst_omawrite.moc"
+#include "omawrite_tests.moc"

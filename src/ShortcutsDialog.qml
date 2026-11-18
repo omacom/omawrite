@@ -10,37 +10,37 @@ Dialog {
     property color textColor: darkMode ? "#d0d0d0" : "#42464c"
     property color strongTextColor: darkMode ? "#eeeeee" : "#222324"
     property color activeButtonColor: "#428bca"
+    property color activeButtonLabelColor: "#ffffff"
     property real textScale: 1
     property int containerWidth: 1280
     property int containerHeight: 820
-    readonly property string versionText: "Omawrite " + Qt.application.version
     readonly property var shortcuts: [
-        { key: "Ctrl+S", desc: "Save" },
-        { key: "Ctrl+Shift+S", desc: "Save As" },
-        { key: "Ctrl+O", desc: "Open" },
-        { key: "Ctrl+N", desc: "New Window" },
-        { key: "Ctrl+P", desc: "Print" },
-        { key: "Ctrl+Z", desc: "Undo" },
-        { key: "Ctrl+Shift+Z / Ctrl+Y", desc: "Redo" },
-        { key: "F11 / Super+F", desc: "Fullscreen" },
-        { key: "Ctrl+F", desc: "Find" },
-        { key: "Ctrl+H", desc: "Find & Replace" },
-        { key: "Ctrl+G / Enter", desc: "Next Match in Find" },
-        { key: "Shift+Enter", desc: "Previous Match in Find" },
-        { key: "Escape", desc: "Close Find" },
-        { key: "Ctrl+B", desc: "Bold" },
-        { key: "Ctrl+I", desc: "Italic" },
-        { key: "Ctrl+Shift+X", desc: "Strikethrough" },
-        { key: "Ctrl+K", desc: "Link" },
-        { key: "Ctrl+Shift+C", desc: "Copy as HTML" },
-        { key: "Ctrl+= / Ctrl++", desc: "Increase Text Size" },
-        { key: "Ctrl+-", desc: "Decrease Text Size" },
-        { key: "Ctrl+0", desc: "Reset Text Size" },
-        { key: "Ctrl+scroll", desc: "Change Text Size" },
-        { key: "Ctrl+? / Ctrl+/ / F1", desc: "Shortcuts" }
+        { key: "Ctrl+S", desc: qsTr("Save") },
+        { key: "Ctrl+Shift+S", desc: qsTr("Save As") },
+        { key: "Ctrl+O", desc: qsTr("Open") },
+        { key: "Ctrl+N", desc: qsTr("New Window") },
+        { key: "Ctrl+P", desc: qsTr("Print") },
+        { key: "Ctrl+Z", desc: qsTr("Undo") },
+        { key: "Ctrl+Shift+Z / Ctrl+Y", desc: qsTr("Redo") },
+        { key: "F11 / Super+F", desc: qsTr("Fullscreen") },
+        { key: "Ctrl+F", desc: qsTr("Find") },
+        { key: "Ctrl+H", desc: qsTr("Find & Replace") },
+        { key: "Ctrl+G / Enter", desc: qsTr("Next Match in Find") },
+        { key: "Shift+Enter", desc: qsTr("Previous Match in Find") },
+        { key: "Escape", desc: qsTr("Close Find") },
+        { key: "Ctrl+B", desc: qsTr("Bold") },
+        { key: "Ctrl+I", desc: qsTr("Italic") },
+        { key: "Ctrl+Shift+X", desc: qsTr("Strikethrough") },
+        { key: "Ctrl+K", desc: qsTr("Link") },
+        { key: "Ctrl+Shift+C", desc: qsTr("Copy as HTML") },
+        { key: "Ctrl+= / Ctrl++", desc: qsTr("Increase Text Size") },
+        { key: "Ctrl+-", desc: qsTr("Decrease Text Size") },
+        { key: "Ctrl+0", desc: qsTr("Reset Text Size") },
+        { key: "Ctrl+scroll", desc: qsTr("Change Text Size") },
+        { key: "Ctrl+? / Ctrl+/ / F1", desc: qsTr("Shortcuts") }
     ]
 
-    title: "Keyboard shortcuts"
+    title: qsTr("Keyboard shortcuts")
     modal: true
     focus: true
     closePolicy: Popup.CloseOnEscape | Popup.CloseOnPressOutside
@@ -65,13 +65,16 @@ Dialog {
     }
 
     header: ColumnLayout {
+        // Popups sit outside the window's mirrored root, so they mirror here.
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         spacing: 6
         Label {
             Layout.fillWidth: true
             Layout.leftMargin: 24
             Layout.rightMargin: 24
             Layout.topMargin: 20
-            Layout.bottomMargin: Qt.application.version.length > 0 ? 0 : 8
+            Layout.bottomMargin: 8
             text: root.title
             color: root.strongTextColor
             font.family: "IBM Plex Mono"
@@ -79,23 +82,11 @@ Dialog {
             font.bold: true
             wrapMode: Text.Wrap
         }
-        Label {
-            objectName: "versionLabel"
-            Layout.fillWidth: true
-            Layout.leftMargin: 24
-            Layout.rightMargin: 24
-            Layout.bottomMargin: 8
-            text: root.versionText
-            visible: Qt.application.version.length > 0
-            color: root.textColor
-            opacity: 0.75
-            font.family: "IBM Plex Mono"
-            font.pixelSize: Math.round(11 * root.textScale)
-            wrapMode: Text.Wrap
-        }
     }
 
     contentItem: ScrollView {
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         id: shortcutsScroll
         objectName: "shortcutsScroll"
         clip: true
@@ -145,17 +136,20 @@ Dialog {
     }
 
     footer: Item {
+        LayoutMirroring.enabled: Qt.application.layoutDirection === Qt.RightToLeft
+        LayoutMirroring.childrenInherit: true
         implicitHeight: closeButton.implicitHeight + 20
         SquareDialogButton {
             id: closeButton
             anchors.right: parent.right
             anchors.rightMargin: 24
             anchors.verticalCenter: parent.verticalCenter
-            text: "Close"
+            text: qsTr("Close")
             primary: true
             darkMode: root.darkMode
             textScale: root.textScale
             activeColor: root.activeButtonColor
+            activeLabelColor: root.activeButtonLabelColor
             onClicked: root.close()
         }
     }

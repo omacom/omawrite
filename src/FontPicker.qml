@@ -8,8 +8,8 @@ Popup {
     property var fonts: []
     property string currentFont
     property string defaultFont
-    property bool darkMode: true
     property real textScale: 1
+    property color panelColor: "#22221f"
     property color textColor: "#d0d0d0"
     property color mutedColor: "#909191"
     property color highlightColor: "#428bca"
@@ -56,7 +56,7 @@ Popup {
 
     background: Rectangle {
         radius: 9
-        color: picker.darkMode ? "#22221f" : "#fffef2"
+        color: picker.panelColor
     }
 
     contentItem: Column {
@@ -88,7 +88,7 @@ Popup {
             Label {
                 anchors.left: filterField.left
                 anchors.verticalCenter: parent.verticalCenter
-                text: "Filter fonts"
+                text: qsTr("Filter fonts")
                 visible: filterField.text.length === 0
                 color: picker.mutedColor
                 font: filterField.font
@@ -149,7 +149,7 @@ Popup {
                         anchors.right: parent.right
                         anchors.verticalCenter: parent.verticalCenter
                         text: [row.modelData === picker.currentFont ? "✓" : "",
-                               row.modelData === picker.defaultFont ? "Default" : ""]
+                               row.modelData === picker.defaultFont ? qsTr("Default") : ""]
                               .filter(function(part) { return part.length > 0; }).join(" ")
                         color: picker.mutedColor
                         font.family: picker.defaultFont
