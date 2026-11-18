@@ -5,6 +5,7 @@ import QtQuick.Dialogs as Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 import "EditorMutations.js" as EditorMutations
+import Omawrite 1.0
 
 ApplicationWindow {
     id: win
@@ -12,12 +13,128 @@ ApplicationWindow {
     height: 820
     minimumWidth: 720
     minimumHeight: 520
-    visible: true
+    visible: !backend.routesFileOpen
+    signal windowCloseAccepted()
+    readonly property var visibleEditor: presentation
+    property var activeTablePanel: null
+    readonly property var activeTableCell: activeTablePanel ? activeTablePanel.activeEditor : null
+    readonly property bool tableExpanded: tableDialog.visible
+    readonly property int expandedTableId: tableDialog.tableData ? tableDialog.tableData.id : 0
+    function commitTableCell() {
+        if (tableDialog.visible && expandedTableLoader.item && !expandedTableLoader.item.commitCell()) return false;
+        return foregroundDecorations.commitTables() && !livePreview.tableDraftsPending;
+    }
+    function expandTable(panel) {
+        if (!commitTableCell()) return;
+        tableDialog.tableData = panel.modelData;
+        tableDialog.open();
+    }
+    function updateExpandedTable() {
+        if (!tableDialog.visible) return;
+        var panels = livePreview.tablePanels;
+        for (var n = 0; n < panels.length; ++n) {
+            if (panels[n].id === expandedTableId && panels[n].model === tableDialog.tableData.model) {
+                tableDialog.tableData = panels[n]; return;
+            }
+        }
+        // A removed/replaced session must never keep an editor on new source.
+        if (expandedTableLoader.item) expandedTableLoader.item.discardCell();
+        tableDialog.close();
+    }
+    Dialog {
+        id: tableDialog
+        objectName: "expandedTableDialog"
+        property var tableData: null
+        parent: Overlay.overlay
+        modal: true
+        focus: true
+        closePolicy: Popup.NoAutoClose
+        title: win.readMode ? "Table" : "Edit table"
+        width: Math.max(1, win.width - 48)
+        height: Math.max(1, win.height - 48)
+        x: (parent.width - width) / 2
+        y: (parent.height - height) / 2
+        function requestClose() {
+            if (expandedTableLoader.item && !expandedTableLoader.item.commitCell()) return;
+            close();
+        }
+        onClosed: {
+            foregroundDecorations.restorePositions();
+            presentation.forceActiveFocus();
+        }
+        contentItem: Item {
+            focus: true
+            Keys.onEscapePressed: function(event) { tableDialog.requestClose(); event.accepted = true; }
+            Loader {
+                id: expandedTableLoader
+                anchors.fill: parent
+                active: tableDialog.visible
+                sourceComponent: Component {
+                    TableGrid {
+                        id: expandedGrid
+                        objectName: "expandedTableGrid"
+                        modelData: tableDialog.tableData
+                        preview: livePreview
+                        readOnly: win.readMode
+                        expanded: true
+                        x: 0; y: 0
+                        width: expandedTableLoader.width
+                        height: expandedTableLoader.height
+                        foreground: win.textColor
+                        backgroundColor: win.darkMode ? "#252525" : "#eeeeee"
+                        borderColor: Qt.rgba(win.textColor.r, win.textColor.g, win.textColor.b, 0.2)
+                        editorFont: presentation.font
+                        onSourceRequested: tableDialog.close()
+                        onEditorChanged: function(editor) {
+                            if (editor) win.activeTablePanel = expandedGrid;
+                            else if (win.activeTablePanel === expandedGrid) win.activeTablePanel = null;
+                        }
+                    }
+                }
+            }
+        }
+        footer: DialogButtonBox {
+            Button {
+                objectName: "closeExpandedTableButton"
+                text: "Close"
+                DialogButtonBox.buttonRole: DialogButtonBox.ActionRole
+                onClicked: tableDialog.requestClose()
+            }
+        }
+    }
+    Connections { target: livePreview; function onTablePanelsChanged() { win.updateExpandedTable(); } }
+    ToolButton {
+        objectName: "pendingTableDraftsButton"
+        anchors.top: parent.top
+        anchors.right: parent.right
+        anchors.rightMargin: 64
+        z: 8
+        text: "Pending table edits"
+        visible: livePreview.tableDraftsPending
+        focusPolicy: Qt.NoFocus
+        onClicked: tableDraftMenu.popup()
+        Menu {
+            id: tableDraftMenu
+            MenuItem { text: "Copy pending cell drafts"; onTriggered: livePreview.copyTableDrafts(0) }
+            MenuItem {
+                text: "Discard pending cell drafts"
+                onTriggered: {
+                    if (win.activeTablePanel) win.activeTablePanel.discardCell();
+                    livePreview.discardTableDrafts();
+                }
+            }
+        }
+    }
     title: (backend.modified ? "* " : "") + backend.fileName + " - " + qsTr("Write")
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
     readonly property color textColor: backend.themeForeground
+    // Keep prose softer than headings without fading links, selection or UI.
+    readonly property color bodyTextColor: Qt.rgba(
+        pageColor.r + (textColor.r - pageColor.r) * 0.76,
+        pageColor.g + (textColor.g - pageColor.g) * 0.76,
+        pageColor.b + (textColor.b - pageColor.b) * 0.76, 1)
     readonly property color mutedColor: darkMode ? "#909191" : "#aeb1b5"
     readonly property color selectionFill: backend.themeSelection
     readonly property color selectionTextColor: backend.themeSelectionForeground
@@ -46,14 +163,306 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property alias readMode: livePreview.readMode
+    onReadModeChanged: {
+        if (presentation) presentation.restartCaret();
+        selectionCountDelay.restart();
+        if (positionReady && !restoringReadingPosition) positionSaveDelay.restart();
+    }
+    property bool projectionChanging: false
+    property bool restoringReadingPosition: false
+    property int scrollSourceAnchor: 0
+    property real scrollAnchorOffset: 0
+    property bool lastProjectionReadMode: false
+    property bool useRelativeScrollAnchor: false
+    property real scrollAnchorRatio: 0
+    property url positionFileUrl: ""
+    property bool positionReady: false
+    property bool documentReplacing: false
+    property var pendingReadingPosition: null
+    property int positionEpoch: 0
+
+    function rememberPosition() {
+        if (!positionReady || projectionChanging || restoringReadingPosition) return;
+        var top = presentation.positionAt(0, Math.max(0, editorFlick.contentY - presentation.y));
+        backend.rememberReadingPosition(positionFileUrl,
+            Math.max(0, Math.min(1, editorFlick.contentY / Math.max(1, editorFlick.contentHeight - editorFlick.height))),
+            readMode, editor.cursorPosition, readMode ? -1 : livePreview.sourcePosition(top),
+            editorFlick.contentY - presentation.y - presentation.positionToRectangle(top).y);
+    }
+    function restoreFilePosition() {
+        documentReplacing = false;
+        positionFileUrl = backend.fileUrl;
+        pendingReadingPosition = backend.readingPosition(positionFileUrl);
+        restoringReadingPosition = true;
+        positionReady = false;
+        editor.cursorPosition = Math.max(0, Math.min(editor.length, pendingReadingPosition.caret || 0));
+        livePreview.readMode = pendingReadingPosition.readMode === true;
+        livePreview.refresh();
+    }
+    function applyReadingPosition() {
+        if (pendingReadingPosition === null) return;
+        var ratio = pendingReadingPosition.ratio || 0;
+        var target = ratio * Math.max(0, editorFlick.contentHeight - editorFlick.height);
+        if (!readMode && pendingReadingPosition.anchor !== undefined && pendingReadingPosition.anchor >= 0) {
+            var point = presentation.positionToRectangle(livePreview.viewPosition(pendingReadingPosition.anchor));
+            target = presentation.y + point.y + (pendingReadingPosition.offset || 0);
+        }
+        editorFlick.scrollTo(editorFlick.clampContentY(target));
+        pendingReadingPosition = null;
+        positionReady = true;
+        var epoch = positionEpoch;
+        Qt.callLater(function() { if (epoch === win.positionEpoch) win.restoringReadingPosition = false; });
+    }
+    Timer {
+        id: positionSaveDelay
+        interval: 750
+        onTriggered: win.rememberPosition()
+    }
+    Timer {
+        id: selectionCountDelay
+        interval: 120
+        onTriggered: backend.countSelectedText(win.readMode ? presentation.selectedText : editor.selectedText)
+    }
+
+    LivePreview {
+        id: livePreview
+        objectName: "livePreviewController"
+        resolver: backend
+        spelling: backend.spelling
+        onCopyHtmlRequested: win.copyHtml()
+        onToggleReadModeRequested: win.toggleReadMode()
+        onFormatCodeRequested: function(fenced) { editor.wrapCode(fenced); }
+        onProjectionReady: win.applyReadingPosition()
+        onProjectionAboutToChange: {
+            win.projectionChanging = true;
+            win.useRelativeScrollAnchor = readMode || win.lastProjectionReadMode;
+            win.scrollAnchorRatio = editorFlick.contentY
+                / Math.max(1, editorFlick.contentHeight - editorFlick.height);
+            var top = Math.max(0, editorFlick.contentY - presentation.y);
+            var position = presentation.positionAt(0, top);
+            win.scrollSourceAnchor = sourcePosition(position);
+            win.scrollAnchorOffset = editorFlick.contentY
+                - presentation.y - presentation.positionToRectangle(position).y;
+        }
+        onProjectionChanged: {
+            var position = viewPosition(win.scrollSourceAnchor);
+            var targetY = win.useRelativeScrollAnchor
+                ? win.scrollAnchorRatio * Math.max(0, editorFlick.contentHeight - editorFlick.height)
+                : presentation.y + presentation.positionToRectangle(position).y + win.scrollAnchorOffset;
+            editorFlick.scrollTo(editorFlick.clampContentY(targetY));
+            win.lastProjectionReadMode = readMode;
+            win.projectionChanging = false;
+            win.applyReadingPosition();
+        }
+    }
+
+    AttachmentMenu {
+        id: attachmentMenu
+        parent: presentation
+        attachmentBackend: backend
+        editorItem: presentation
+        readOnly: win.readMode
+    }
+
+    function openAttachmentMenuAt(px, py) {
+        // Native glyph hits handle both image halves and inline images whose
+        // trailing insertion point wraps to another line. Blank space is not a hit.
+        var path = livePreview.imagePathAtPoint(px, py);
+        if (!path.length) return false;
+        attachmentMenu.openFor(path, px, py);
+        return true;
+    }
+
+    // Pointer hit-testing must not turn blank space into the nearest word.
+    // Keyboard menus intentionally use the insertion point instead.
+    function showEditorMenuAt(px, py, token) {
+        if (openAttachmentMenuAt(px, py)) return true;
+        editorContextMenu.word = token;
+        editorContextMenu.linkUrl = win.readMode ? "" : presentation.linkUrlUnder(px, py);
+        editorContextMenu.popup(px, py);
+        return true;
+    }
+    function openEditorMenuAt(px, py) {
+        return showEditorMenuAt(px, py, livePreview.spellingWordAtPoint(px, py));
+    }
+    function openEditorMenuForCaret() {
+        var box = presentation.cursorRectangle;
+        return showEditorMenuAt(box.x, box.y + box.height / 2,
+                                livePreview.spellingWordAt(presentation.cursorPosition));
+    }
+
+    Menu {
+        id: editorContextMenu
+        objectName: "editorContextMenu"
+        parent: presentation
+        property var word: ({})
+        property bool hasWord: word.word !== undefined
+        property string linkUrl: ""
+        MenuItem {
+            objectName: "openLinkAction"
+            text: "Open Link"
+            visible: editorContextMenu.linkUrl.length > 0
+            enabled: visible
+            height: visible ? implicitHeight : 0
+            onTriggered: presentation.activateLink(editorContextMenu.linkUrl)
+        }
+        MenuSeparator { visible: editorContextMenu.linkUrl.length > 0; height: visible ? implicitHeight : 0 }
+
+        Instantiator {
+            model: editorContextMenu.hasWord ? editorContextMenu.word.suggestions : []
+            delegate: MenuItem {
+                required property string modelData
+                text: modelData
+                onTriggered: backend.replaceSpelling(editorContextMenu.word, modelData)
+            }
+            onObjectAdded: (index, object) => editorContextMenu.insertItem(index, object)
+            onObjectRemoved: (index, object) => editorContextMenu.removeItem(object)
+        }
+        MenuItem {
+            visible: editorContextMenu.hasWord
+            enabled: false
+            height: visible ? implicitHeight : 0
+            text: editorContextMenu.word.pending ? "Finding suggestions…" : "Spelling suggestions"
+        }
+        MenuItem {
+            objectName: "ignoreSpellingAction"
+            visible: editorContextMenu.hasWord
+            height: visible ? implicitHeight : 0
+            text: "Ignore for this session"
+            onTriggered: backend.spelling.ignore(editorContextMenu.word)
+        }
+        MenuItem {
+            objectName: "learnSpellingAction"
+            visible: editorContextMenu.hasWord
+            height: visible ? implicitHeight : 0
+            text: "Learn word"
+            onTriggered: backend.spelling.learn(editorContextMenu.word)
+        }
+        MenuSeparator { visible: editorContextMenu.hasWord; height: visible ? implicitHeight : 0 }
+        MenuItem { text: "Undo"; enabled: !win.readMode && editor.canUndo; onTriggered: editor.undo() }
+        MenuItem { text: "Redo"; enabled: !win.readMode && editor.canRedo; onTriggered: editor.redo() }
+        MenuSeparator {}
+        MenuItem { text: "Cut"; enabled: !win.readMode && presentation.selectedText.length > 0; onTriggered: editor.cut() }
+        MenuItem { objectName: "copyAction"; text: "Copy"; enabled: win.readMode || presentation.selectedText.length > 0; onTriggered: livePreview.copySource() }
+        MenuItem { objectName: "copyHtmlAction"; text: "Copy as HTML"; onTriggered: win.copyHtml() }
+        MenuItem {
+            text: "Paste"
+            enabled: !win.readMode && (presentation.canPaste || backend.clipboardImageAvailable)
+            onTriggered: { livePreview.prepareEdit(); editor.pasteFromClipboard(); }
+        }
+        MenuItem { text: "Select All"; onTriggered: presentation.selectAll() }
+        MenuItem {
+            objectName: "revealCurrentFileAction"
+            text: Qt.platform.os === "osx" ? "Reveal in Finder"
+                : Qt.platform.os === "windows" ? "Reveal in File Explorer" : "Reveal in File Manager"
+            enabled: backend.fileUrl.toString().length > 0
+            onTriggered: backend.revealCurrentFile()
+        }
+        MenuSeparator {}
+        Menu {
+            title: "Spelling"
+            objectName: "spellingMenu"
+            MenuItem {
+                objectName: "spellingEnabledAction"
+                text: "Check spelling"
+                checkable: true
+                checked: backend.spelling.enabled
+                onTriggered: backend.spelling.enabled = !backend.spelling.enabled
+            }
+            MenuItem {
+                text: backend.spelling.languages.length ? "Choose dictionary" : "No dictionaries installed"
+                enabled: false
+            }
+            Instantiator {
+                model: backend.spelling.languages
+                delegate: MenuItem {
+                    required property var modelData
+                    text: modelData.label
+                    checkable: true
+                    checked: backend.spelling.language === modelData.id
+                    onTriggered: backend.spelling.language = modelData.id
+                }
+                onObjectAdded: (index, object) => spellingLanguageMenu.insertItem(index + 2, object)
+                onObjectRemoved: (index, object) => spellingLanguageMenu.removeItem(object)
+            }
+            id: spellingLanguageMenu
+        }
+        Connections {
+            target: backend.spelling
+            function onMenuChanged() {
+                if (!editorContextMenu.visible || !editorContextMenu.hasWord) return;
+                if (!backend.spelling.validate(editorContextMenu.word)) {
+                    editorContextMenu.word = ({});
+                    return;
+                }
+                editorContextMenu.word = backend.spelling.wordAt(editorContextMenu.word.start);
+            }
+        }
+        onClosed: presentation.forceActiveFocus()
+    }
+
+    function toggleReadMode() {
+        if (!commitTableCell()) return;
+        if (livePreview.readMode) {
+            // Restore the reading scroll first, then choose a NEW caret in
+            // the visible text. Focusing the old off-screen caret must not
+            // pull the Flickable back to where editing last stopped.
+            win.restoringReadingPosition = true;
+            livePreview.readMode = false;
+            var centerY = editorFlick.contentY + editorFlick.height / 2 - presentation.y;
+            presentation.cursorPosition = presentation.positionAt(presentation.width / 2, Math.max(0, centerY));
+            presentation.forceActiveFocus();
+            Qt.callLater(function() { win.restoringReadingPosition = false; });
+        } else {
+            livePreview.readMode = true;
+            presentation.forceActiveFocus();
+        }
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+M"
+        onActivated: win.toggleReadMode()
+    }
+
+    Connections {
+        target: backend
+        function onFileUrlChanged() {
+            livePreview.refresh();
+            if (!win.documentReplacing && win.positionReady) {
+                win.rememberPosition(); // Save As keeps this viewport, not the destination's old position.
+                win.positionFileUrl = backend.fileUrl;
+                win.rememberPosition();
+            }
+        }
+        function onDocumentAboutToReplace() {
+            if (expandedTableLoader.item) expandedTableLoader.item.discardCell();
+            foregroundDecorations.abandonEditors();
+            livePreview.resetTableSessions();
+            win.rememberPosition();
+            ++win.positionEpoch;
+            win.documentReplacing = true;
+            win.positionReady = false;
+            win.restoringReadingPosition = true;
+            positionSaveDelay.stop();
+        }
+        function onDocumentLoaded() { win.restoreFilePosition(); }
+        function onAttachmentUrlsChanged() { livePreview.refresh(); }
+        function onThemeColorsChanged() { livePreview.refresh(); }
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
     color: pageColor
 
     onClosing: function(close) {
-        if (closeConfirmed || !backend.modified)
+        if (!commitTableCell()) { close.accepted = false; return; }
+        if (closeConfirmed || !backend.modified) {
+            win.rememberPosition();
+            backend.finishClosing();
+            win.windowCloseAccepted();
             return;
+        }
 
         close.accepted = false;
         pendingAction = "close";
@@ -62,7 +471,8 @@ ApplicationWindow {
     }
 
     function requestOpen(url) {
-        if (!backend.modified) {
+        if (!commitTableCell()) return;
+        if (backend.routesFileOpen || !backend.modified) {
             backend.open(url);
             return;
         }
@@ -123,9 +533,13 @@ ApplicationWindow {
         var start = searchMatchIndex >= 0 ? searchMatches[searchMatchIndex] : -1;
         searchUpdating = true;
         backend.setSearchHighlight(searchField.text, start);
+        livePreview.setSearchHighlight(searchField.text, start);
         if (selectMatch && start >= 0) {
+            // Search is source-based. Switch back to Edit so a match inside a
+            // collapsed block is exposed before selecting it.
+            if (win.readMode) win.readMode = false;
             editor.select(start, start + searchField.text.length);
-            editorFlick.ensureCursorVisible();
+            Qt.callLater(function() { editorFlick.ensureCursorVisible(); });
         }
         searchUpdating = false;
     }
@@ -155,6 +569,7 @@ ApplicationWindow {
     // closed, and a search still waiting for a pause is dropped on closing,
     // so opening the bar searches again for what the field holds.
     function openSearch(withReplace) {
+        if (!commitTableCell()) return;
         searchOpen = true;
         if (withReplace)
             replaceOpen = true;
@@ -170,10 +585,11 @@ ApplicationWindow {
         // that holds focus leaves the input method with nothing focused for
         // a moment, and fcitx5 can then miss the next Ctrl+F.
         Qt.inputMethod.reset();
-        editor.forceActiveFocus();
+        presentation.forceActiveFocus();
         searchOpen = false;
         searchUpdating = true;
         backend.setSearchHighlight("", -1);
+        livePreview.setSearchHighlight("", -1);
         editor.deselect();
         searchUpdating = false;
         replaceOpen = false;
@@ -189,11 +605,11 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+S"
-        onActivated: backend.save()
+        onActivated: if (win.commitTableCell()) backend.save()
     }
 
     Shortcut {
-        sequence: "Ctrl+H"
+        sequence: Qt.platform.os === "osx" ? "Ctrl+Alt+F" : "Ctrl+H"
         onActivated: win.openSearch(true)
     }
 
@@ -210,6 +626,12 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+U"
+        context: Qt.WindowShortcut
+        onActivated: editor.wrapSelection("<u>")
+    }
+
+    Shortcut {
         sequence: "Ctrl+Shift+X"
         context: Qt.WindowShortcut
         onActivated: editor.wrapSelection("~~")
@@ -219,6 +641,30 @@ ApplicationWindow {
         sequence: "Ctrl+K"
         context: Qt.WindowShortcut
         onActivated: editor.insertLink()
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+K"
+        context: Qt.WindowShortcut
+        onActivated: editor.insertReference(false)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Alt+K"
+        context: Qt.WindowShortcut
+        onActivated: editor.insertReference(true)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+T"
+        context: Qt.WindowShortcut
+        onActivated: editor.wrapCode(false)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+T"
+        context: Qt.WindowShortcut
+        onActivated: editor.wrapCode(true)
     }
 
     Shortcut {
@@ -245,7 +691,7 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+O"
-        onActivated: backend.openDialog()
+        onActivated: if (win.commitTableCell()) backend.openDialog()
     }
 
     Shortcut {
@@ -255,32 +701,44 @@ ApplicationWindow {
 
     Shortcut {
         sequence: "Ctrl+Shift+S"
-        onActivated: backend.saveAsDialog()
+        onActivated: if (win.commitTableCell()) backend.saveAsDialog()
     }
 
     Shortcut {
         sequence: "Ctrl+P"
-        onActivated: backend.printDocument()
+        onActivated: if (win.commitTableCell()) backend.printDocument()
     }
 
+    function copyHtml() {
+        if (!commitTableCell()) return;
+        if (win.readMode && presentation.selectionStart !== presentation.selectionEnd) {
+            if (!livePreview.copyReadSelection(true))
+                backend.copyAsHtml(presentation.selectionStart, presentation.selectionEnd, presentation.textDocument);
+        }
+        else if (!win.readMode && editor.selectionStart !== editor.selectionEnd)
+            backend.copyAsHtml(editor.selectionStart, editor.selectionEnd);
+        else backend.copyAsHtml();
+    }
     Shortcut {
         sequence: "Ctrl+Shift+C"
-        onActivated: backend.copyAsHtml()
+        onActivated: win.copyHtml()
     }
 
     Shortcut {
-        sequences: ["Meta+F", "F11"]
+        sequences: Qt.platform.os === "osx" ? ["Ctrl+Meta+F", "F11"] : ["Meta+F", "F11"]
         onActivated: toggleFullScreen()
     }
 
     Shortcut {
         sequence: "Ctrl+Z"
+        enabled: !win.readMode && !win.activeTableCell
         context: Qt.WindowShortcut
         onActivated: editor.undo()
     }
 
     Shortcut {
         sequences: ["Ctrl+Shift+Z", "Ctrl+Y"]
+        enabled: !win.readMode && !win.activeTableCell
         context: Qt.WindowShortcut
         onActivated: editor.redo()
     }
@@ -350,7 +808,7 @@ ApplicationWindow {
         title: qsTr("Save File")
         fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
-        onAccepted: backend.saveAs(selectedFile)
+        onAccepted: if (win.commitTableCell()) backend.saveAs(selectedFile)
         onRejected: {
             win.awaitingPendingSave = false;
             win.pendingAction = "";
@@ -399,7 +857,7 @@ ApplicationWindow {
         containerHeight: win.height
 
         onKeepRequested: backend.keepExternalVersion()
-        onReloadRequested: backend.reloadFromDisk()
+        onReloadRequested: if (win.commitTableCell()) backend.reloadFromDisk()
     }
 
     ShortcutsDialog {
@@ -433,7 +891,7 @@ ApplicationWindow {
             anchors.bottomMargin: win.footerHeight
             clip: true
             contentWidth: width
-            contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
+            contentHeight: Math.max(height, presentation.y + presentation.implicitHeight + 220)
             boundsBehavior: Flickable.StopAtBounds
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
@@ -564,7 +1022,10 @@ ApplicationWindow {
             }
 
             onMovementStarted: wheelScroll.stop()
-            onContentYChanged: editor.hoveredLinkUrl = ""
+            onContentYChanged: {
+                editor.hoveredLinkUrl = "";
+                if (win.positionReady && !win.projectionChanging && !win.restoringReadingPosition) positionSaveDelay.restart();
+            }
 
             // Ctrl+wheel changes the text size, as it does in a browser. A
             // wheel notch is a whole step, but a touchpad trickles in pixels,
@@ -636,8 +1097,8 @@ ApplicationWindow {
             // bottom edge scrolls the page along with the text.
             function ensureCursorVisible() {
                 var margin = win.editorFontPixelSize * 2;
-                var cursorTop = editor.y + editor.cursorRectangle.y;
-                var cursorBottom = cursorTop + editor.cursorRectangle.height;
+                var cursorTop = presentation.y + presentation.cursorRectangle.y;
+                var cursorBottom = cursorTop + presentation.cursorRectangle.height;
                 var maxContentY = Math.max(0, contentHeight - height);
 
                 if (cursorBottom + margin > contentY + height)
@@ -649,6 +1110,7 @@ ApplicationWindow {
             TextEdit {
                 id: editor
                 objectName: "sourceEditor"
+                visible: false
                 x: Math.round((editorFlick.width - width) / 2)
                 // The resting position counts from the window's top edge, so
                 // take back the top inset the Flickable already adds.
@@ -661,7 +1123,7 @@ ApplicationWindow {
                 selectByMouse: true
                 persistentSelection: true
                 activeFocusOnPress: true
-                color: win.textColor
+                color: win.bodyTextColor
                 selectedTextColor: win.selectionTextColor
                 selectionColor: win.selectionFill
                 font.family: backend.editorFont
@@ -677,7 +1139,8 @@ ApplicationWindow {
                     width: 1
                     color: win.textColor
                 }
-                onCursorRectangleChanged: editorFlick.ensureCursorVisible()
+                // Hidden source geometry is not the visible projection.
+                onCursorRectangleChanged: {}
                 onCursorPositionChanged: backend.setCaretPosition(cursorPosition)
                 onFontChanged: backend.documentFontChanged()
 
@@ -689,6 +1152,7 @@ ApplicationWindow {
 
                 // One edit command, so a single undo takes the change back.
                 function replaceText(start, end, replacement) {
+                    if (win.readMode) return;
                     backend.replaceRange(start, end, replacement);
                 }
 
@@ -697,13 +1161,28 @@ ApplicationWindow {
                 }
 
                 function wrapSelection(marker) {
-                    forceActiveFocus();
-                    EditorMutations.toggleWrap(editor, marker,
-                                               backend.emphasisSpanAt(cursorPosition, marker));
+                    if (win.activeTableCell) return;
+                    if (win.readMode) return;
+                    presentation.forceActiveFocus();
+                    if (marker === "<u>") livePreview.prepareFormatting();
+                    var span = backend.emphasisSpanAt(cursorPosition, marker);
+                    if (marker === "<u>") EditorMutations.toggleUnderline(editor, span);
+                    else EditorMutations.toggleWrap(editor, marker, span);
+                }
+
+                function wrapCode(fenced) {
+                    if (win.activeTableCell) return;
+                    if (win.readMode) return;
+                    presentation.forceActiveFocus();
+                    livePreview.prepareFormatting();
+                    if (fenced) EditorMutations.toggleCodeBlock(editor);
+                    else EditorMutations.toggleInlineCode(editor);
                 }
 
                 function insertLink() {
-                    forceActiveFocus();
+                    if (win.activeTableCell) return;
+                    if (win.readMode) return;
+                    presentation.forceActiveFocus();
                     var start = selectionStart;
                     var end = selectionEnd;
                     var selected = rawText().slice(start, end);
@@ -721,6 +1200,14 @@ ApplicationWindow {
                     } else {
                         EditorMutations.replaceRange(editor, start, end, markdown);
                     }
+                }
+
+                function insertReference(footnote) {
+                    if (win.activeTableCell || win.readMode) return;
+                    presentation.forceActiveFocus();
+                    EditorMutations.insertReference(editor, backend.nextReferenceLabel(footnote), footnote,
+                        backend.clipboardUrl(), backend.clipboardText(), qsTr("link text"), qsTr("Footnote text"),
+                        backend.insideFence(Math.max(0, rawText().length - 1)));
                 }
 
                 function smartReturn(softBreak) {
@@ -890,9 +1377,9 @@ ApplicationWindow {
                 function movePage(direction, extendSelection) {
                     var pageStep = Math.max(win.editorFontPixelSize,
                                             editorFlick.height - win.editorFontPixelSize * 2);
-                    var rect = cursorRectangle;
+                    var rect = presentation.cursorRectangle;
                     var targetY = rect.y + rect.height / 2 + direction * pageStep;
-                    var target = positionAt(rect.x, Math.max(0, targetY));
+                    var target = livePreview.sourcePosition(presentation.positionAt(rect.x, Math.max(0, targetY)));
                     if (extendSelection)
                         moveCursorSelection(target, TextEdit.SelectCharacters);
                     else
@@ -947,8 +1434,15 @@ ApplicationWindow {
                     return true;
                 }
 
-                Keys.priority: Keys.BeforeItem
-                Keys.onPressed: function(event) {
+                function pasteFromClipboard() {
+                    var imageMarkdown = backend.pasteClipboardImage();
+                    if (imageMarkdown.length > 0)
+                        replaceSelectionWith(imageMarkdown);
+                    else if (!pasteClipboardUrlAsMarkdownLink())
+                        pasteClipboardAsPlainText();
+                }
+
+                function handleKey(event) {
                     var pasteKey = (event.key === Qt.Key_V)
                         && (event.modifiers & Qt.ControlModifier)
                         && !(event.modifiers & (Qt.AltModifier | Qt.MetaModifier | Qt.ShiftModifier));
@@ -956,8 +1450,7 @@ ApplicationWindow {
                         && (event.modifiers & Qt.ShiftModifier)
                         && !(event.modifiers & (Qt.ControlModifier | Qt.AltModifier | Qt.MetaModifier));
                     if (pasteKey || shiftInsert) {
-                        if (!pasteClipboardUrlAsMarkdownLink())
-                            pasteClipboardAsPlainText();
+                        pasteFromClipboard();
                         event.accepted = true;
                         return;
                     }
@@ -1006,17 +1499,6 @@ ApplicationWindow {
                         win.updateSearch(false);
                 }
 
-                Text {
-                    anchors.left: parent.left
-                    anchors.top: parent.top
-                    text: "# " + qsTr("Start writing")
-                    visible: editor.length === 0 && !editor.activeFocus
-                    color: win.mutedColor
-                    font.family: editor.font.family
-                    font.pixelSize: editor.font.pixelSize
-                    font.weight: editor.font.weight
-                }
-
                 property string hoveredLinkUrl: ""
                 property real linkHoverX: 0
                 property real linkHoverY: 0
@@ -1041,41 +1523,194 @@ ApplicationWindow {
                     return "";
                 }
 
+                Component.onCompleted: {
+                    backend.attachDocument(textDocument);
+                }
+            }
+
+            TextEdit {
+                id: presentation
+                objectName: "previewEditor"
+                x: editor.x
+                y: editor.y
+                width: editor.width
+                height: Math.max(editorFlick.height - y - 96, implicitHeight + 20)
+                textFormat: TextEdit.RichText
+                wrapMode: TextEdit.Wrap
+                selectByMouse: true
+                persistentSelection: true
+                readOnly: win.readMode
+                color: win.bodyTextColor
+                selectedTextColor: win.selectionTextColor
+                selectionColor: win.selectionFill
+                font: editor.font
+                renderType: editor.renderType
+                property color previewBackground: win.pageColor
+                property color previewAccent: backend.themeAccent
+                property color previewForeground: win.textColor
+                property bool previewDark: win.darkMode
+                onFontChanged: livePreview.refresh()
+                onSelectionStartChanged: selectionCountDelay.restart()
+                onSelectionEndChanged: selectionCountDelay.restart()
+                onSelectedTextChanged: selectionCountDelay.restart()
+                // The native viewport observer latches its internal caret
+                // invisible when scrolling away. A separate item is not
+                // hidden by that private control state on a distant click.
+                cursorDelegate: Item {}
+                clip: true
+                property bool caretOn: true
+                readonly property rect displayCursorRectangle: {
+                    var offsets = livePreview.blockOffsets; // Re-evaluate after native horizontal layout.
+                    return livePreview.visualCursorRectangle(cursorRectangle);
+                }
+                function restartCaret() {
+                    caretOn = true;
+                    if (activeFocus && !win.readMode && Qt.styleHints.cursorFlashTime > 0) caretBlink.restart();
+                    else caretBlink.stop();
+                }
+                onActiveFocusChanged: restartCaret()
+                onCursorRectangleChanged: {
+                    restartCaret();
+                    if (!win.projectionChanging && !win.restoringReadingPosition && !livePreview.readMode)
+                        editorFlick.ensureCursorVisible();
+                }
+                Timer {
+                    id: caretBlink
+                    interval: Math.max(1, Qt.styleHints.cursorFlashTime / 2)
+                    repeat: true
+                    running: presentation.activeFocus && !win.readMode && Qt.styleHints.cursorFlashTime > 0
+                    onTriggered: presentation.caretOn = !presentation.caretOn
+                }
+                Rectangle {
+                    objectName: "visibleEditorCaret"
+                    z: 3
+                    x: presentation.displayCursorRectangle.x
+                    y: presentation.displayCursorRectangle.y
+                    width: 1
+                    height: presentation.displayCursorRectangle.height
+                    color: win.textColor
+                    visible: presentation.activeFocus && !win.readMode && presentation.caretOn && livePreview.imeCursorVisible
+                        && presentation.selectionStart === presentation.selectionEnd
+                        && y + height > editorFlick.contentY - presentation.y
+                        && y < editorFlick.contentY - presentation.y + editorFlick.height
+                }
+                function activateLink(link) {
+                    if (link.indexOf("write-footnote:") !== 0) {
+                        Qt.openUrlExternally(link);
+                        return;
+                    }
+                    if (win.readMode) {
+                        var position = livePreview.footnoteViewPosition(link);
+                        if (position >= 0) {
+                            var box = positionToRectangle(position);
+                            editorFlick.scrollTo(editorFlick.clampContentY(y + box.y - 24));
+                        }
+                    } else {
+                        var sourcePosition = backend.footnoteSourcePosition(link);
+                        if (sourcePosition >= 0) editor.cursorPosition = sourcePosition;
+                        forceActiveFocus();
+                        Qt.callLater(function() { editorFlick.ensureCursorVisible(); });
+                    }
+                }
+                onLinkActivated: function(link) { if (win.readMode) activateLink(link); }
+                function updateViewport() {
+                    livePreview.setViewport(editorFlick.contentY - y, editorFlick.height);
+                }
+                onYChanged: updateViewport()
+                Connections {
+                    target: editorFlick
+                    function onContentYChanged() { presentation.updateViewport(); }
+                    function onHeightChanged() { presentation.updateViewport(); }
+                }
+
+                Text {
+                    // Reserve room for the independently drawn insertion caret.
+                    // This is decorative only: never pad the canonical document.
+                    x: presentation.displayCursorRectangle.x + 1 + win.scaledSize(2)
+                    y: presentation.displayCursorRectangle.y
+                    objectName: "emptyDocumentPlaceholder"
+                    text: "# " + qsTr("Start writing")
+                    visible: editor.length === 0 && !win.readMode && !presentation.inputMethodComposing
+                    color: win.mutedColor
+                    font: presentation.font
+                }
+
+                function linkUrlUnder(x, y) {
+                    if (win.readMode) return linkAt(x, y);
+                    return livePreview.linkAtPoint(x, y);
+                }
+
                 MouseArea {
                     anchors.fill: parent
-                    acceptedButtons: Qt.NoButton
+                    acceptedButtons: Qt.LeftButton | Qt.RightButton
+                    onPressed: (mouse) => {
+                        if (mouse.button === Qt.RightButton) {
+                            mouse.accepted = win.openEditorMenuAt(mouse.x, mouse.y);
+                            return;
+                        }
+                        var commandClick = !win.readMode && (mouse.modifiers & Qt.ControlModifier)
+                            && !(mouse.modifiers & (Qt.AltModifier | Qt.ShiftModifier | Qt.MetaModifier));
+                        var link = commandClick ? presentation.linkUrlUnder(mouse.x, mouse.y) : "";
+                        mouse.accepted = link.length > 0;
+                        if (mouse.accepted) presentation.activateLink(link);
+                    }
                     hoverEnabled: true
                     cursorShape: Qt.IBeamCursor
                     onPositionChanged: (mouse) => {
                         editor.linkHoverX = mouse.x;
                         editor.linkHoverY = mouse.y;
-                        editor.hoveredLinkUrl = editor.linkUrlUnder(mouse.x, mouse.y);
+                        editor.hoveredLinkUrl = presentation.linkUrlUnder(mouse.x, mouse.y);
                     }
                     onExited: editor.hoveredLinkUrl = ""
                 }
 
                 ToolTip {
-                    visible: editor.hoveredLinkUrl.length > 0
-                    x: editor.linkHoverX + 12
+                    visible: editor.hoveredLinkUrl.length > 0 && tooltipLabel.text.length > 0
+                    x: Math.max(0, Math.min(editor.linkHoverX + 12, presentation.width - width))
                     y: editor.linkHoverY + 20
                     contentItem: Label {
+                        id: tooltipLabel
                         objectName: "linkTooltipText"
-                        // A destination is document text; AutoText would render
-                        // one that looks like HTML instead of showing it.
                         textFormat: Text.PlainText
-                        text: editor.hoveredLinkUrl
+                        text: backend.linkHoverText(editor.hoveredLinkUrl)
                         font.family: backend.editorFont
                         font.pixelSize: win.scaledSize(12)
-                        elide: Text.ElideMiddle
+                        wrapMode: Text.Wrap
                     }
-                    width: Math.min(implicitWidth, win.width - 32)
+                    width: Math.min(implicitWidth, 520 * win.textScale, win.width - 32)
                 }
 
-                Component.onCompleted: {
-                    backend.attachDocument(textDocument);
-                    forceActiveFocus();
+                Keys.priority: Keys.BeforeItem
+                Keys.onPressed: function(event) {
+                    if (event.key === Qt.Key_Menu
+                            || (event.key === Qt.Key_F10 && (event.modifiers & Qt.ShiftModifier))) {
+                        if (win.openEditorMenuForCaret()) {
+                            event.accepted = true;
+                            return;
+                        }
+                    }
+                    if (!win.readMode)
+                        editor.handleKey(event);
                 }
+                Component.onCompleted: Qt.callLater(function() {
+                    livePreview.attach(editor, presentation);
+                    presentation.updateViewport();
+                    presentation.forceActiveFocus();
+                })
             }
+            EditorDecorations { preview: livePreview; presentation: win.visibleEditor; sourceEditor: editor; host: win; foreground: false }
+            EditorDecorations { id: foregroundDecorations; preview: livePreview; presentation: win.visibleEditor; sourceEditor: editor; host: win; foreground: true }
+        }
+
+        PreviewToggle {
+            objectName: "readEditToggle"
+            anchors.top: parent.top
+            anchors.right: parent.right
+            anchors.margins: win.scaledSize(12)
+            z: 5
+            readMode: win.readMode
+            iconColor: win.mutedColor
+            onClicked: win.toggleReadMode()
         }
 
         Row {
@@ -1096,7 +1731,7 @@ ApplicationWindow {
                 tooltip: qsTr("Save")
                 tooltipColor: win.panelColor
                 tooltipTextColor: win.textColor
-                onClicked: backend.save()
+                onClicked: if (win.commitTableCell()) backend.save()
             }
 
             FooterIconButton {
@@ -1108,7 +1743,7 @@ ApplicationWindow {
                 tooltip: qsTr("Open")
                 tooltipColor: win.panelColor
                 tooltipTextColor: win.textColor
-                onClicked: backend.openDialog()
+                onClicked: if (win.commitTableCell()) backend.openDialog()
             }
 
             FooterIconButton {
@@ -1159,7 +1794,7 @@ ApplicationWindow {
             mutedColor: win.mutedColor
             highlightColor: backend.themeAccent
             onFontChosen: function(family) { backend.editorFont = family; }
-            onClosed: editor.forceActiveFocus()
+            onClosed: presentation.forceActiveFocus()
         }
 
         Label {
@@ -1167,7 +1802,10 @@ ApplicationWindow {
             anchors.bottom: parent.bottom
             anchors.rightMargin: 12
             anchors.bottomMargin: 10
-            text: qsTr("%n Words", "", backend.wordCount)
+            objectName: "wordCountLabel"
+            text: (presentation.selectionStart !== presentation.selectionEnd
+                ? qsTr("%1 selected · ").arg(backend.selectionWordCount) : "")
+                + qsTr("%n Words", "", backend.wordCount)
             color: win.mutedColor
             opacity: 0.75
             font.family: "IBM Plex Mono"
@@ -1357,9 +1995,13 @@ ApplicationWindow {
         if (geometry.y >= 0) y = geometry.y;
         width = geometry.width;
         height = geometry.height;
-        if (geometry.maximized) showMaximized();
+        if (geometry.maximized && !backend.routesFileOpen) showMaximized();
+        Qt.callLater(function() { if (!win.positionReady && win.pendingReadingPosition === null) win.restoreFilePosition(); });
     }
 
-    Component.onDestruction: backend.saveWindowGeometry(x, y, width, height, visibility === Window.Maximized)
+    Component.onDestruction: {
+        win.rememberPosition();
+        backend.saveWindowGeometry(x, y, width, height, visibility === Window.Maximized);
+    }
 
 }

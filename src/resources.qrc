@@ -1,6 +1,13 @@
 <RCC>
     <qresource prefix="/">
+        <file alias="icons/omawrite.png">../assets/omawrite.png</file>
         <file alias="Main.qml">Main.qml</file>
+        <file alias="PreviewToggle.qml">PreviewToggle.qml</file>
+        <file alias="CodeBlockControls.qml">CodeBlockControls.qml</file>
+        <file alias="BlockOverflow.qml">BlockOverflow.qml</file>
+        <file alias="TableGrid.qml">TableGrid.qml</file>
+        <file alias="EditorDecorations.qml">EditorDecorations.qml</file>
+        <file alias="AttachmentMenu.qml">AttachmentMenu.qml</file>
         <file alias="ShortcutsDialog.qml">ShortcutsDialog.qml</file>
         <file alias="SearchIconButton.qml">SearchIconButton.qml</file>
         <file alias="FooterIconButton.qml">FooterIconButton.qml</file>

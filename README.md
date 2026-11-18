@@ -1,77 +1,72 @@
-# Omawrite
+# Write (Omawrite)
 
-A dead-simple Markdown writing app built with Qt Quick and C++ that automatically follows system dark/light mode.
+A native Markdown writing app built with Qt Quick and C++. Plain-text files,
+caret-aware formatting, and a focused writing surface that follows the desktop.
 
-<img width="2948" height="3227" alt="screenshot-2026-06-23_15-24-08" src="https://github.com/user-attachments/assets/4e930c0d-edda-4046-b444-a59eff523329" />
-<img width="2948" height="3227" alt="screenshot-2026-06-23_15-23-23" src="https://github.com/user-attachments/assets/8ced7c26-961b-4ded-b263-84403001a951" />
+![Native Markdown editing with code highlighting](docs/screenshots/markdown-edit.png)
 
+## Writing features
 
-## Install
+- **Edit and Read:** caret-aware Markdown markers, incremental native previews,
+  preserved selections and reading position, ordinary Markdown on disk.
+- **Tables:** editable virtualized grids, column alignment, rectangular fill,
+  horizontal scrolling, and an expanded view backed by the same table model.
+- **Code:** language-aware highlighting, continuous code panels, language labels,
+  copying, and local horizontal overflow.
+- **References and footnotes:** full/collapsed reference links, numbered footnote
+  previews in Edit and Read, hover text, internal footnote navigation, and
+  clipboard-aware insertion shortcuts.
+- **Images and diagrams:** local images, pasted clipboard screenshots, attachment
+  naming/repair/copy commands, and optional Mermaid previews through a local CLI.
+- **Desktop integration:** per-document windows, single-instance file routing,
+  recoverable drafts, external-change protection, native spelling, and Print/PDF
+  snapshots with wide-table appendices.
+- **Everyday tools:** translated UI, installed-font picker, zoom, search/replace,
+  formatting shortcuts, and rendered HTML/plain-text copying.
 
-Install via the Omarchy Package Repository via the `omawrite` package. It's installed by default in new installations of Omarchy (from Quattro forward).
+See the [screenshot gallery](docs/screenshots/README.md),
+[complete writing guide and shortcuts](docs/writing-and-shortcuts.md), and
+[enhancement review notes](docs/upstream-review.md).
 
-## Command line
+## Install and build
 
-`omawrite` opens an empty document and `omawrite FILE` opens a Markdown file.
-`omawrite --help` answers in the terminal without opening a window.
+Published Omarchy installations provide the `omawrite` package. Development
+features on this branch are not necessarily available in released packages.
 
-## Shortcuts
-
-- `Ctrl+S` saves. Unsaved documents use the XDG desktop portal file picker.
-- `Ctrl+Shift+S` saves as.
-- `Ctrl+O` opens a Markdown file through the portal picker.
-- `Ctrl+P` opens the system print dialog.
-- `Ctrl+N` opens a new Omawrite window.
-- `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
-- `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
-- `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
-- `Ctrl+H` opens find and replace.
-- `Ctrl+B`, `Ctrl+I`, and `Ctrl+Shift+X` toggle bold, italic, and strikethrough Markdown. `Ctrl+K` inserts a link.
-- `Ctrl+=` and `Ctrl+-` change the text size, `Ctrl+0` returns to the default.
-  `Ctrl+scroll` does the same.
-- `Ctrl+Shift+C` copies the rendered document as HTML, with plain text as a fallback.
-- `Ctrl+?`, `Ctrl+/`, or `F1` shows the keyboard shortcut reference.
-- In the unsaved-changes dialog, `C`, `D`, and `S` choose Cancel, Discard, and Save, with or without `Alt`. `Escape` cancels.
-
-Once a document has been saved to a file, edits are auto-saved to that file a
-moment after you stop typing, so `Ctrl+S` is rarely needed. Untitled drafts are
-never auto-saved — they wait for an explicit save so Omawrite never picks a file
-name for you. Unsaved drafts are recovered after an abnormal exit. Omawrite also
-watches open files and warns before an external change can replace local work;
-auto-save pauses until you reload, keep your version, or save. A recovered draft
-is never auto-saved over its file — save it to keep it.
-
-The font button in the footer picks the writing font from any installed text font,
-and Omawrite remembers the choice. IBM Plex Mono is the default.
-
-Text follows the desktop text size — `omarchy display text size`, or GNOME's
-`text-scaling-factor` — and re-flows without a restart. The default of 12px leaves
-Omawrite at the size it is designed around; larger and smaller sizes scale from there.
-`Ctrl+=`, `Ctrl+-`, and `Ctrl+scroll` set your own size on top of that, from 50% to
-300% in browser-sized steps. It is remembered for the next window you open.
-
-Omawrite speaks the language picked under Omarchy's Setup > Language and switches with it, without a restart. Right-to-left languages mirror the window. The translations live in `src/i18n/`, one JSON file per language keyed by the English text, and `src/i18n/en.json` lists every string to translate.
-
-## Requirements
-
-- Qt 6: `qt6-base` and `qt6-declarative` (which includes Qt Quick Controls)
-- `xdg-desktop-portal` and a portal backend
-
-The IBM Plex Mono font is bundled under the SIL Open Font License 1.1; see
-`fonts/OFL.txt`. The font is copyright IBM Corp.
-
-## Build
-
-For a local build, install the Qt requirements above, a C++17 compiler such as `gcc`, `cmake`, and `make`. `bin/build` configures and builds into `build/`, and `bin/test` builds and runs the Qt test suite through `ctest`.
+For local builds, use the [dependency and installation guide](docs/install.md).
+This branch supports Linux, macOS and Windows; its additional KDE dependencies
+and packaging changes require review before distribution.
 
 ```sh
+./bin/build
 ./bin/test
-./build/omawrite
 ```
 
-`bin/test` runs the Qt test suite with the offscreen platform, so it does not
-require an active graphical session. To open a file with the local build:
+On Linux: `./build/cmake/omawrite document.md`.
+On macOS: `open -a "$PWD/build/cmake/Write.app" document.md`.
+`omawrite --help` describes command-line options without opening a window.
 
-```sh
-./build/omawrite path/to/document.md
+Windows x64, from CMD:
+
+```bat
+setup.bat -Install -Installer
+build.bat --test --installer
 ```
+
+Installer automation is unsigned. Native installer, printer and dictionary
+validation remain separate from automated tests. Mermaid/Node are optional
+external tools; Write does not embed a browser. Quit other running Write builds
+before testing so file requests do not reach an older instance.
+
+More documentation:
+[testing](docs/testing.md) · [preview example](docs/preview-example.md) ·
+[code example](docs/code-highlighting-example.md) ·
+[spelling example](docs/spellchecking-example.md).
+
+## License and distribution
+
+The application retains its [MIT license](LICENSE) and contributor attribution.
+Dependencies/resources have additional terms, including static LGPL relinking
+obligations and mixed-license syntax resources. See [copyright and dependency
+notices](COPYRIGHT.md). Building or packaging does **not** establish
+redistribution clearance; the existing packaging guard remains enabled.

@@ -1,7 +1,72 @@
-#!/bin/bash
-set -euo pipefail
+#!/usr/bin/env sh
+set -eu
 
-# Arguments go to ctest, so `bin/test -V` shows every Qt test function as it runs.
-root="$(cd "$(dirname "$0")/.." && pwd)"
-"$root/bin/build"
-QT_QPA_PLATFORM=offscreen ctest --test-dir "$root/build" --output-on-failure --no-tests=error "$@"
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+BUILD_DIR="$ROOT/build-tests"
+
+case "${1:-}" in
+  ""|--rendered|--native-spelling) ;;
+  *) echo "Usage: bin/test [--rendered|--native-spelling]" >&2; exit 2 ;;
+esac
+
+if [ -z "${1:-}" ]; then
+  "$ROOT/bin/build"
+  CMAKE_BUILD_DIR="${WRITE_BUILD_DIR:-$ROOT/build/cmake}"
+  cmake -S "$ROOT" -B "$CMAKE_BUILD_DIR" -DBUILD_TESTING=ON
+  cmake --build "$CMAKE_BUILD_DIR" --parallel "${JOBS:-4}"
+  ctest --test-dir "$CMAKE_BUILD_DIR" --output-on-failure --no-tests=error
+  exit 0
+fi
+
+# Native rendering/spelling probes retain their dedicated qmake harnesses.
+if command -v qmake6 >/dev/null 2>&1; then
+  QMAKE=qmake6
+else
+  QMAKE=qmake
+fi
+
+if { [ -z "${OMAWRITE_SYNTAX_PREFIX:-}" ] && [ ! -f "$ROOT/.deps/install/include/KF6/KSyntaxHighlighting/KSyntaxHighlighting/Repository" ]; } ||
+   { [ -z "${OMAWRITE_SPELL_PREFIX:-}" ] && [ ! -f "$ROOT/.deps/install/include/KF6/SonnetCore/Sonnet/Speller" ]; }; then
+  "$ROOT/bin/build-dependencies"
+fi
+
+JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
+
+run_suite() (
+  project="$1"
+  target="$2"
+  directory="$3"
+  mkdir -p "$directory"
+  cd "$directory"
+  "$QMAKE" "$ROOT/$project"
+  make -j"$JOBS"
+  executable="./$target"
+  if [ -x "./$target.app/Contents/MacOS/$target" ]; then
+    executable="./$target.app/Contents/MacOS/$target"
+  fi
+  if [ "$#" -eq 4 ]; then
+    QSG_RENDER_LOOP=threaded "$executable" "$4"
+  else
+    QT_QPA_PLATFORM=offscreen "$executable"
+  fi
+)
+
+if [ "${1:-}" = --native-spelling ]; then
+  case "$(uname -s)" in
+    Darwin) ;;
+    *) echo "The optional native spelling smoke test currently supports macOS only." >&2; exit 2 ;;
+  esac
+  OMAWRITE_NATIVE_SPELLCHECK=1 run_suite tests/spellchecking/native.pro tst_native_spellchecking "$BUILD_DIR/spellchecking-native" osDictionarySmoke
+  exit 0
+fi
+
+if [ "${1:-}" = --rendered ]; then
+  case "${QT_QPA_PLATFORM:-}" in
+    offscreen|minimal) echo "Rendered tests require a native desktop platform, not $QT_QPA_PLATFORM." >&2; exit 2 ;;
+  esac
+  run_suite tests/tests.pro tst_editor "$BUILD_DIR" rendersModeSwitchesWithDocumentImages tableScreenshotRegression modeSwitchScreenshotRegression
+  run_suite tests/livepreview/livepreview.pro tst_livepreview "$BUILD_DIR/livepreview" sceneGraphModeSwitchWithImages
+  exit 0
+fi
+
+exit 2 # Every supported mode exits above.

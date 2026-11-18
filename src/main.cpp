@@ -1,103 +1,102 @@
-#include <QFont>
-#include <QFontDatabase>
 #include <QApplication>
+#include <QFontDatabase>
 #include <QIcon>
-#include <QQmlApplicationEngine>
-#include <QQmlContext>
-#include <QQmlError>
+#include <QFileInfo>
 #include <QQuickStyle>
-#include <QUrl>
-#include <QWindow>
-#include <QFile>
+#include <QTimer>
+#include <qqml.h>
+#include <memory>
+#include <vector>
 
-#include "backend.h"
 #include "cli.h"
-#include "systemtheme.h"
+#include "fileopenrequests.h"
+#include "instancebroker.h"
+#include "livepreview.h"
+#include "windowmanager.h"
 #include "translator.h"
 
-int main(int argc, char *argv[]) {
-    // Answered before the application exists, so it needs no display.
-    if (const std::optional<int> exitCode = Cli::handleArguments(argc, argv))
-        return *exitCode;
+#include "profile.h"
 
-    // Omarchy asks Qt for GTK 3 dialogs, which run inside this process, and a
-    // long-standing GTK 3 file chooser assertion aborts the whole app, unsaved
-    // text and all. The desktop portal shows the same chooser from a process
-    // of its own.
+#ifndef OMAWRITE_VERSION
+#define OMAWRITE_VERSION "0.7.4"
+#endif
+
+int main(int argc, char *argv[]) {
+    if (const auto code = Cli::handleArguments(argc, argv, QStringLiteral(OMAWRITE_VERSION)))
+        return *code;
     if (qgetenv("QT_QPA_PLATFORMTHEME") == "gtk3")
         qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
-
     QApplication app(argc, argv);
-    app.setApplicationName(QStringLiteral("omawrite"));
+    Profile::configureIdentity();
+    app.setApplicationDisplayName(QStringLiteral("Write"));
+    app.setApplicationVersion(QStringLiteral(OMAWRITE_VERSION));
     app.setDesktopFileName(QStringLiteral("omawrite"));
-    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite")));
+    app.setWindowIcon(QIcon::fromTheme(QStringLiteral("omawrite"),
+                                      QIcon(QStringLiteral(":/icons/omawrite.png"))));
+    app.setQuitOnLastWindowClosed(false);
 
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-Regular.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-Italic.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-Bold.ttf"));
-    QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-BoldItalic.ttf"));
-    app.setOrganizationName(QStringLiteral("Omacom"));
-    app.setOrganizationDomain(QStringLiteral("omacom.io"));
-
-    QQuickStyle::setStyle(QStringLiteral("Material"));
-
-    // Installed before anything is translated, and every qsTr() binding is
-    // re-evaluated when the Omarchy language changes.
     Translator translator;
     app.installTranslator(&translator);
-
-    Backend backend(&app);
-    SystemTheme systemTheme(&app);
-    backend.setDarkMode(systemTheme.darkMode());
-    QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
-                     &Backend::setDarkMode);
-
-    // Carry the text scale into the default font, so the chrome that inherits
-    // it (dialog titles, buttons) grows along with the writing area.
-    const QFont interfaceFont(QStringLiteral("IBM Plex Mono"));
-    const qreal basePointSize = interfaceFont.pointSizeF() > 0
-        ? interfaceFont.pointSizeF()
-        : app.font().pointSizeF();
-    const auto applyInterfaceFont = [&app, interfaceFont, basePointSize](qreal textScale) {
-        QFont scaled = interfaceFont;
-        scaled.setPointSizeF(basePointSize * textScale);
-        app.setFont(scaled);
+    FileOpenRequests nativeFiles(&app);
+#ifdef Q_OS_MACOS
+    installMacReopenHandler(&nativeFiles);
+#endif
+    std::unique_ptr<WindowManager> windows;
+    std::vector<std::unique_ptr<InstanceBroker>> brokers;
+    QList<QStringList> requests;
+    bool ready = false;
+    const auto connectBroker = [&](InstanceBroker *broker) {
+        QObject::connect(broker, &InstanceBroker::openRequested, &app, [&](const QStringList &files) {
+            if (ready) windows->openFiles(files); else requests.append(files);
+        }, Qt::QueuedConnection); // ACK transport acceptance before any disk/QML work.
     };
-
-    // The desktop sets the baseline; the backend folds the user's own text
-    // size into it and reports the total.
-    backend.setDesktopTextScale(systemTheme.textScale());
-    applyInterfaceFont(backend.textScale());
-    QObject::connect(&systemTheme, &SystemTheme::textScaleChanged, &backend,
-                     &Backend::setDesktopTextScale);
-    QObject::connect(&backend, &Backend::textScaleChanged, &app,
-                     [&backend, applyInterfaceFont]() {
-        applyInterfaceFont(backend.textScale());
+    const auto becomePrimary = [&](const QStringList &initialFiles) {
+        if (!Profile::activate()) { qCritical("Could not initialize Write preferences; no drafts were changed."); app.exit(1); return; }
+        nativeFiles.activate(false);
+        for (const char *weight : {"Regular", "Italic", "Bold", "BoldItalic"})
+            QFontDatabase::addApplicationFont(QStringLiteral(":/fonts/IBMPlexMono-%1.ttf").arg(QLatin1String(weight)));
+        QQuickStyle::setStyle(QStringLiteral("Material"));
+        qmlRegisterType<LivePreview>("Omawrite", 1, 0, "LivePreview");
+        windows = std::make_unique<WindowManager>();
+        QObject::connect(&translator, &Translator::changed, windows.get(), &WindowManager::retranslate);
+        QObject::connect(windows.get(), &WindowManager::noWindowsRemaining, &app, &QCoreApplication::quit);
+        QObject::connect(windows.get(), &WindowManager::errorOccurred, &app,
+                         [](const QString &message) { qCritical().noquote() << message; });
+        windows->start(initialFiles);
+        ready = true;
+        for (const auto &request : requests) windows->openFiles(request);
+        requests.clear();
+        if (windows->windows().isEmpty()) app.exit(1);
+    };
+    const auto deliver = [&](const QStringList &files) {
+        if (ready) { windows->openFiles(files); return; }
+        auto broker = std::make_unique<InstanceBroker>();
+        const auto result = broker->start(files);
+        if (result == InstanceBroker::Primary) {
+            // The initial request is handled explicitly; remote requests are
+            // connected before returning to the event loop.
+            connectBroker(broker.get());
+            brokers.push_back(std::move(broker)); // Retain ownership until all windows close.
+            becomePrimary(files);
+        } else if (result == InstanceBroker::Forwarded) {
+            // Do not drop native events delivered after the first forwarded CLI
+            // request. Every subsequent batch is forwarded and resets this wait.
+            nativeFiles.activate(true);
+        } else {
+            qCritical().noquote() << broker->errorString();
+            app.exit(1); // Fail closed: never open a competing editor on IPC failure.
+        }
+    };
+    QObject::connect(&nativeFiles, &FileOpenRequests::filesRequested, &app, deliver);
+    QObject::connect(&nativeFiles, &FileOpenRequests::forwardingIdle, &app, [&] {
+        if (!ready) app.quit();
     });
-
-    QQmlApplicationEngine engine;
-    QObject::connect(&engine, &QQmlApplicationEngine::warnings, &app,
-                     [](const QList<QQmlError> &warnings) {
-        for (const QQmlError &warning : warnings)
-            qWarning().noquote() << warning.toString();
+    QTimer::singleShot(0, &app, [&] {
+        QStringList files = app.arguments().mid(1);
+        if (!files.isEmpty() && files.first() == QStringLiteral("--")) files.removeFirst();
+        for (auto &file : files) file = QFileInfo(file).absoluteFilePath();
+        files.append(nativeFiles.takePending());
+        deliver(files);
     });
-    QObject::connect(&translator, &Translator::changed, &engine, &QQmlEngine::retranslate);
-    QObject::connect(&translator, &Translator::changed, &backend, &Backend::retranslate);
-    engine.rootContext()->setContextProperty(QStringLiteral("translator"), &translator);
-    engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
-
-    engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
-    if (engine.rootObjects().isEmpty()) {
-        qCritical() << "Could not load the Omawrite interface; resource available:"
-                    << QFile::exists(QStringLiteral(":/Main.qml"));
-        return -1;
-    }
-
-    backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
-
-    const QStringList args = app.arguments();
-    if (args.size() > 1)
-        backend.openOrStartFile(QUrl::fromLocalFile(args.at(1)));
-
     return app.exec();
 }

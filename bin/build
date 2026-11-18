@@ -1,6 +1,20 @@
-#!/bin/bash
-set -euo pipefail
-
-root="$(cd "$(dirname "$0")/.." && pwd)"
-cmake -S "$root" -B "$root/build" -DCMAKE_BUILD_TYPE=Release >/dev/null
-cmake --build "$root/build" -j"$(nproc)"
+#!/usr/bin/env sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+BUILD_DIR="${WRITE_BUILD_DIR:-$ROOT/build/cmake}"
+if ! command -v cmake >/dev/null 2>&1; then
+  echo "CMake 3.24+ is required to build Write." >&2
+  exit 1
+fi
+if { [ -z "${OMAWRITE_SYNTAX_PREFIX:-}" ] && [ ! -f "$ROOT/.deps/install/include/KF6/KSyntaxHighlighting/KSyntaxHighlighting/Repository" ]; } ||
+   { [ -z "${OMAWRITE_SPELL_PREFIX:-}" ] && [ ! -f "$ROOT/.deps/install/include/KF6/SonnetCore/Sonnet/Speller" ]; }; then
+  "$ROOT/bin/build-dependencies"
+fi
+JOBS="${JOBS:-$(getconf _NPROCESSORS_ONLN 2>/dev/null || echo 1)}"
+cmake -S "$ROOT" -B "$BUILD_DIR" -DCMAKE_BUILD_TYPE=Release -DBUILD_TESTING=OFF "$@"
+cmake --build "$BUILD_DIR" --parallel "$JOBS"
+if [ -d "$BUILD_DIR/Write.app" ]; then
+  echo "Built $BUILD_DIR/Write.app (open it with: open \"$BUILD_DIR/Write.app\")"
+else
+  echo "Built $BUILD_DIR/omawrite"
+fi

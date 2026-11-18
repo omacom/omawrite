@@ -1,0 +1,30 @@
+{
+    "area": "distant",
+    "columns": 28,
+    "complete": true,
+    "dpr": 2,
+    "font": "IBM Plex Mono,-1,20,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0",
+    "label": "baseline-88a74fc-followup",
+    "qt": "6.12.0",
+    "refresh_hz": 120,
+    "rows": 1361,
+    "scope": "12 native keys in the named area (cells also measure canonical Tab commits) to follow-up frame submission; not display latency or FPS; spelling disabled; private fixture bytes/path never included",
+    "screen": "Built-in Retina Display",
+    "source_units": 722973,
+    "tab_followup_submission_ms": [
+    ],
+    "typing_followup_submission_ms": [
+        8.105417,
+        20.5885,
+        7.176459,
+        7.419209,
+        8.021125,
+        7.387917,
+        7.368875,
+        7.447292,
+        7.472667,
+        7.56575,
+        7.439,
+        7.474375
+    ]
+}

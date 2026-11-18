@@ -11,6 +11,7 @@ permissions:
 jobs:
   test:
     name: Build and test
+    timeout-minutes: 25
     runs-on: ubuntu-latest
     # The app ships as an Arch package built against Arch's Qt, so it's tested there.
     container: archlinux:latest
@@ -26,10 +27,10 @@ jobs:
       - name: Install the package's dependencies
         # The package lives in omarchy-pkgs, so its PKGBUILD is the one list of what the app needs and CI reads it rather than keeping a copy.
         run: |
-          curl -fsSL "https://raw.githubusercontent.com/omacom/omarchy-pkgs/master/pkgbuilds/${{ github.event.repository.name }}/PKGBUILD" -o "$RUNNER_TEMP/PKGBUILD"
+          curl -fsSL "https://raw.githubusercontent.com/omacom/omarchy-pkgs/master/pkgbuilds/omawrite/PKGBUILD" -o "$RUNNER_TEMP/PKGBUILD"
           source "$RUNNER_TEMP/PKGBUILD"
           deps=("${depends[@]}" "${makedepends[@]}" "${checkdepends[@]}")
-          pacman -S --noconfirm --needed base-devel cmake dbus "${deps[@]%%[<>=]*}"
+          pacman -S --noconfirm --needed base-devel cmake ninja perl hunspell dbus "${deps[@]%%[<>=]*}"
 
       - name: Set up a user and a locale like a desktop's
         # Root can read any file, so tests about unreadable ones need an ordinary user, with a second group for tests that change a file's group; and the container generates no locale.
@@ -46,3 +47,157 @@ jobs:
 
       - name: Test
         run: su tester -c 'LANG=en_US.UTF-8 dbus-run-session -- bin/test'
+
+      - name: Preserve failed test diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: linux-test-logs
+          path: build/cmake/Testing/Temporary/
+          if-no-files-found: ignore
+
+  windows-packaging:
+    name: Windows packaging checks
+    runs-on: windows-2022
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      # Windows PowerShell 5.1, not pwsh. Compile the actual installer script
+      # for both compiler kits using real Inno and a fake GUI app payload.
+      # No installer execution; not a substitute for installation tests.
+      - name: Check PowerShell scripts, upgrade guards and packaging
+        shell: powershell
+        run: .\tests\windows-packaging.ps1
+
+  windows-editor:
+    name: Windows Qt ${{ matrix.qt }} editor regressions
+    runs-on: windows-2022
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - qt: '6.8.3'
+            scale: '1'
+          - qt: '6.12.0'
+            scale: '1.5'
+    env:
+      CMAKE_BUILD_PARALLEL_LEVEL: 2
+      QT_QUICK_BACKEND: software
+      QT_SCALE_FACTOR: ${{ matrix.scale }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ilammy/msvc-dev-cmd@v1
+      - uses: jurplel/install-qt-action@v4
+        with:
+          version: ${{ matrix.qt }}
+          # PyPI aqt 3.3 predates Qt 6.11's architecture-suffixed repositories.
+          # Pin the upstream support fix rather than following its moving master.
+          aqtsource: ${{ matrix.qt == '6.12.0' && 'git+https://github.com/miurahr/aqtinstall.git@5a49f2b391ae8ee1d3c0dd87f8b33c1d49a4deb7' || '' }}
+          arch: win64_msvc2022_64
+          cache: true
+
+      - name: Configure the native test desktop
+        shell: powershell
+        run: |
+          # At 150% scaling the runner's default desktop is smaller than the
+          # table fixture: native clicks would land below the actual window.
+          Set-DisplayResolution -Width 1920 -Height 1080 -Force
+          Add-Type -AssemblyName System.Windows.Forms
+          $bounds = [System.Windows.Forms.Screen]::PrimaryScreen.Bounds
+          Write-Host "Native test desktop: $bounds"
+          if ($bounds.Width -lt 1920 -or $bounds.Height -lt 1080) {
+            throw 'Native GUI tests require a 1920x1080 desktop.'
+          }
+      - name: Build native editor tests with the pinned dependencies
+        shell: pwsh
+        run: |
+          cmake -S dependencies -B .deps/windows-ci -G Ninja "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build .deps/windows-ci
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake -S . -B build/windows-ci -G Ninja "-DCMAKE_PREFIX_PATH=$env:QT_ROOT_DIR" "-DWRITE_DEPENDENCY_PREFIX=$PWD/.deps/windows-ci/install" -DCMAKE_BUILD_TYPE=Release
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+          cmake --build build/windows-ci --target omawrite_editor_tests
+          if ($LASTEXITCODE) { exit $LASTEXITCODE }
+
+      # Native Windows platform and real clipboard/shortcuts, not offscreen.
+      # Include the preceding clipboard fixtures to expose cross-test state.
+      - name: Test Windows clipboard, mode shortcuts and theme paths
+        shell: pwsh
+        run: |
+          $global:LASTEXITCODE = 1
+          & build/windows-ci/omawrite_editor_tests.exe `
+            tableRectangleDragTypingImeClearAndUndo `
+            codePanelHoverCopyAndReadLanguageUseQtClipboard `
+            codePanelsHaveNativePaddingInBothModesAtDifferentZooms `
+            quotePreviewPhysicalClickImeAndReadBreaks `
+            horizontalRulesRevealMarkdownOnPhysicalClick `
+            codeBlockPanelsAreContinuousDecorationsInBothThemes `
+            modeShortcutWorksThroughTheFocusedEditorInBothModes `
+            resumesEditingAtTheReadingViewport `
+            pastesScreenshotThroughVisibleEditorAndPreservesSourceInReadMode `
+            themePathsSupportUnicodeWithoutChangingHome `
+            takesTheCodePanelFromTheTheme `
+            reportsThemeChangesOnlyWhenTheyHappen `
+            loadsCurrentOmarchyTheme `
+            fallsBackForSelectionColors `
+            keepsDefaultsForColorsItCannotParse `
+            takesItsDefaultsFromTheModeTheThemeAsksFor `
+            underlineShortcutUsesHtmlAndCanonicalUndo `
+            inlineCodeMarkersFollowCaret `
+            inlineMarkersFollowSelectionOffsetsWithinTheSameBlock `
+            underlinePreviewIsCaretAwareAndLiteralInCode `
+            codeShortcutsWrapSafelyAndUseCanonicalUndo `
+            -o build/windows-ci/editor-tests.txt,txt | Out-Host
+          $testExit = $LASTEXITCODE
+          if (Test-Path build/windows-ci/editor-tests.txt) { Get-Content build/windows-ci/editor-tests.txt }
+          exit $testExit
+
+      - name: Run the complete native Windows editor suite
+        shell: pwsh
+        env:
+          QT_QUICK_BACKEND: ''
+          QSG_RHI_BACKEND: d3d11
+          QSG_RENDER_LOOP: threaded
+          # WARP provides D3D11 on hosted VMs, including the render-thread test.
+          QSG_RHI_PREFER_SOFTWARE_RENDERER: '1'
+        run: |
+          $global:LASTEXITCODE = 1
+          & build/windows-ci/omawrite_editor_tests.exe -o build/windows-ci/editor-native-all-tests.txt,txt | Out-Host
+          $testExit = $LASTEXITCODE
+          if (Test-Path build/windows-ci/editor-native-all-tests.txt) { Get-Content build/windows-ci/editor-native-all-tests.txt }
+          exit $testExit
+
+      - name: Run the complete portable editor suite on Windows
+        shell: pwsh
+        env:
+          QT_QPA_PLATFORM: offscreen
+          # Offscreen uses the generic font database, not Windows' native one.
+          QT_QPA_FONTDIR: ${{ github.workspace }}/build/windows-ci/fonts
+        run: |
+          $fonts = New-Item -ItemType Directory -Force $env:QT_QPA_FONTDIR
+          Get-ChildItem C:/Windows/Fonts -File | Where-Object { $_.Extension -in '.ttf', '.ttc', '.otf' } | Copy-Item -Destination $fonts.FullName
+          # Server images lack a CJK fallback. Keep the wide-character hit test
+          # intact using Noto CJK (SIL OFL), pinned to the Sans 2.004 release.
+          $cjk = Join-Path $fonts.FullName NotoSansCJKsc-Regular.otf
+          Invoke-WebRequest 'https://raw.githubusercontent.com/notofonts/noto-cjk/523d033d6cb47f4a80c58a35753646f5c3608a78/Sans/OTF/SimplifiedChinese/NotoSansCJKsc-Regular.otf' -OutFile $cjk
+          if ((Get-FileHash $cjk -Algorithm SHA256).Hash -ne '2c76254f6fc379fddfce0a7e84fb5385bb135d3e399294f6eeb6680d0365b74b') { throw 'Unexpected Noto CJK font checksum' }
+          $global:LASTEXITCODE = 1
+          & build/windows-ci/omawrite_editor_tests.exe -o build/windows-ci/editor-all-tests.txt,txt | Out-Host
+          $testExit = $LASTEXITCODE
+          if (Test-Path build/windows-ci/editor-all-tests.txt) { Get-Content build/windows-ci/editor-all-tests.txt }
+          exit $testExit
+
+      - name: Preserve Windows editor diagnostics
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: windows-editor-logs-qt-${{ matrix.qt }}
+          path: |
+            build/windows-ci/editor-tests.txt
+            build/windows-ci/editor-all-tests.txt
+            build/windows-ci/editor-native-all-tests.txt
+            build/windows-ci/CMakeFiles/CMakeConfigureLog.yaml
+          if-no-files-found: ignore

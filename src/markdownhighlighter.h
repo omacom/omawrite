@@ -1,6 +1,10 @@
 #pragma once
 
+#include "codehighlighter.h"
+#include "markdownreferences.h"
+
 #include <QRegularExpression>
+#include <QTextBlock>
 #include <QSyntaxHighlighter>
 #include <QTextCharFormat>
 #include <QTextCursor>
@@ -10,19 +14,29 @@ class MarkdownHighlighter : public QSyntaxHighlighter {
 
 public:
     explicit MarkdownHighlighter(QTextDocument *document);
+    void setDocument(QTextDocument *document);
 
     void setTheme(bool darkMode, const QString &background, const QString &foreground,
                   const QString &accent, const QString &codeBackground);
     void setSearch(const QString &query, int currentMatchStart);
     void setCaret(int position);
+    // Document offsets; reversed endpoints are accepted. A collapsed range
+    // clears the selection. Call alongside setCaret when the editor selects.
+    void setSelection(int start, int end);
     void refreshFont();
+    static constexpr int ListPrefixProperty = QTextFormat::UserProperty + 101;
+    static constexpr int QuotePrefixProperty = QTextFormat::UserProperty + 102;
 
     struct Span {
         int start;
         int length;
     };
 
-    enum class InlineKind { Bold, Italic, Strikethrough, Link };
+    // Cache-only UTF-16 document ranges. Repaints the symmetric difference's
+    // blocks only; does not mutate document text or its undo history.
+    void setSpellingRanges(const QList<Span> &ranges);
+
+    enum class InlineKind { Bold, Italic, Strikethrough, Underline, Link };
 
     // Carried from block to block so a fenced run of code knows it is inside
     // one. Stored on the block, which is where Backend reads it.
@@ -57,16 +71,26 @@ public:
     // as one. Folding keeps one UTF-16 unit per unit, so offsets and lengths
     // are the text's own.
     static QList<int> findMatches(const QString &text, const QString &query);
+    static bool searchTouchesPrefix(const QString &text, int prefixLength, const QString &query);
 
 protected:
     void highlightBlock(const QString &text) override;
 
 private:
     void rebuildFormats();
+    void propagateCodeState();
+    MarkdownReferences::Index m_references;
+    CodeHighlighter m_codeHighlighter;
+    QTextBlock m_pendingCodeBlock;
+    bool m_propagatingCodeState = false;
+    bool m_codePropagationScheduled = false;
     void rehighlightAll();
     void highlightMarkers(const QString &text);
+    void highlightHeadingMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
+    void highlightSpelling(const QString &text);
+    QList<Span> m_spellingRanges;
 
     bool m_darkMode = true;
     QString m_customBackground;
@@ -79,6 +103,7 @@ private:
     QTextCharFormat m_boldFormat;
     QTextCharFormat m_italicFormat;
     QTextCharFormat m_codeFormat;
+    QTextCharFormat m_blockCodeFormat;
     QTextCharFormat m_fenceFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
@@ -90,6 +115,8 @@ private:
     // The markers of whatever markup the caret is in or against are shown,
     // so they can be seen and edited.
     QTextCursor m_caret;
+    // Tracks selected source positions through edits, without changing text.
+    QTextCursor m_selection;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };

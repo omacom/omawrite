@@ -1,0 +1,17 @@
+# Qt's default plugin type follows the Qt build, not BUILD_SHARED_LIBS. Explicit
+# STATIC is required for Sonnet's static-plugin loader with our shared Qt kit.
+foreach(name nsspellchecker ispellchecker hunspell)
+    set(path "${SOURCE_DIR}/src/plugins/${name}/CMakeLists.txt")
+    file(READ "${path}" contents)
+    set(original "qt_add_plugin(sonnet_${name} CLASS_NAME")
+    set(patched "qt_add_plugin(sonnet_${name} STATIC CLASS_NAME")
+    string(FIND "${contents}" "${patched}" already)
+    if(already EQUAL -1)
+        string(FIND "${contents}" "${original}" found)
+        if(found EQUAL -1)
+            message(FATAL_ERROR "Unexpected pinned Sonnet plugin source: ${path}")
+        endif()
+        string(REPLACE "${original}" "${patched}" contents "${contents}")
+        file(WRITE "${path}" "${contents}")
+    endif()
+endforeach()

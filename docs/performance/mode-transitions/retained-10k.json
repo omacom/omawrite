@@ -1,0 +1,53 @@
+{
+    "bytes_utf8": 815767,
+    "device_pixel_ratio": 1,
+    "fixture_sha256": "1be079fbcd539277e779a1337d67712516fee60d53cc56cef909d5f366359ab1",
+    "font": "IBM Plex Mono,-1,20,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0",
+    "label": "retained-documents",
+    "lines": 10027,
+    "mode_to_followup_frame_ms": [
+        {
+            "ms": 597.86675,
+            "read": true
+        },
+        {
+            "ms": 8.934583,
+            "read": false
+        },
+        {
+            "ms": 5.01925,
+            "read": true
+        },
+        {
+            "ms": 6.556125,
+            "read": false
+        },
+        {
+            "ms": 2.989334,
+            "read": true
+        },
+        {
+            "ms": 10.504667,
+            "read": false
+        }
+    ],
+    "platform": "cocoa",
+    "qt": "6.12.0",
+    "refresh_hz": 144,
+    "scope": "Native Main.qml physical typing to marked follow-up frame submission; spelling disabled; not display latency",
+    "screen": "Q27G2G3R3B",
+    "typing_to_followup_frame_ms": [
+        10.68575,
+        12.008708,
+        7.63,
+        11.40525,
+        7.484583,
+        11.495333,
+        7.633458,
+        11.5,
+        7.50925,
+        11.606125,
+        7.816292,
+        11.210834
+    ]
+}

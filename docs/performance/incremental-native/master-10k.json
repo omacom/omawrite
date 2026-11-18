@@ -1,0 +1,27 @@
+{
+    "bytes_utf8": 815337,
+    "device_pixel_ratio": 1,
+    "fixture_sha256": "743a6f26c5d298e652fe83b36b83e502e84e3efdcfea0cc9d6e98e1a5ff66106",
+    "font": "IBM Plex Mono,-1,20,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0",
+    "label": "master-f94d69e",
+    "lines": 10011,
+    "platform": "cocoa",
+    "qt": "6.12.0",
+    "refresh_hz": 144,
+    "scope": "Native Main.qml physical typing to marked follow-up frame submission; spelling disabled; not display latency",
+    "screen": "Q27G2G3R3B",
+    "typing_to_followup_frame_ms": [
+        12241.409334,
+        12364.207833,
+        12326.862208,
+        12500.64525,
+        12340.909167,
+        12358.269292,
+        12420.239042,
+        12411.82175,
+        12372.573208,
+        12433.023375,
+        12373.584292,
+        12370.872708
+    ]
+}

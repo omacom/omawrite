@@ -23,11 +23,32 @@
 #include "backend.h"
 #include "markdownhighlighter.h"
 #include "translator.h"
+#include "livepreview.h"
 
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QRegularExpression>
 #include <QSet>
+
+// This upstream suite predates the separate presentation editor. Keep its
+// canonical-source assertions, but send keyboard input to the real UI. The
+// exact QQuickWindow overload delegates to QtTest's QWindow implementation.
+namespace QTest {
+static void keyClick(QQuickWindow *window, Qt::Key key,
+                     Qt::KeyboardModifiers modifiers = Qt::NoModifier, int delay = -1) {
+#ifdef Q_OS_MACOS
+    if (key == Qt::Key_H && modifiers == Qt::ControlModifier) {
+        key = Qt::Key_F;
+        modifiers |= Qt::AltModifier; // Cmd+Option+F, not the system Hide chord.
+    }
+#endif
+    if (window->activeFocusItem() && window->activeFocusItem()->objectName() == "sourceEditor") {
+        if (auto *view = window->property("visibleEditor").value<QQuickItem *>())
+            view->forceActiveFocus();
+    }
+    QTest::keyClick(static_cast<QWindow *>(window), key, modifiers, delay);
+}
+}
 
 // Counts QML "Binding loop detected" warnings while it is alive, forwarding
 // everything to the previous handler so test output stays intact.
@@ -248,6 +269,7 @@ private slots:
         QStandardPaths::setTestModeEnabled(true);
         QVERIFY(m_settingsDirectory.isValid());
         QQuickStyle::setStyle(QStringLiteral("Material"));
+        qmlRegisterType<LivePreview>("Omawrite", 1, 0, "LivePreview");
         QSettings::setDefaultFormat(QSettings::IniFormat);
         QSettings::setPath(QSettings::IniFormat, QSettings::UserScope,
                            m_settingsDirectory.path());
@@ -350,7 +372,7 @@ private slots:
 
     void answersHelpBeforeOpeningAWindow() {
         const QString usage = Cli::usage();
-        QVERIFY(usage.contains(QStringLiteral("omawrite [FILE]")));
+        QVERIFY(usage.contains(QStringLiteral("omawrite [FILE ...]")));
         QVERIFY(usage.contains(QStringLiteral("-h, --help")));
 
         const auto answer = [](const QStringList &arguments) {
@@ -881,7 +903,8 @@ private slots:
         // A link inserted from the find bar puts the writer back in the text.
         QTest::keyClick(window, Qt::Key_F, Qt::ControlModifier);
         QTest::keyClick(window, Qt::Key_K, Qt::ControlModifier);
-        QVERIFY(editor->property("activeFocus").toBool());
+        auto *visibleEditor = window->property("visibleEditor").value<QQuickItem *>();
+        QVERIFY(visibleEditor && visibleEditor->hasActiveFocus());
     }
 
     void keepsShortcutsBehindDialogs() {
@@ -1345,7 +1368,9 @@ private slots:
         QCOMPARE(prose.background().style(), Qt::NoBrush);
 
         const int codeStart = text.indexOf(QLatin1Char('`'));
-        for (int i = codeStart; i < codeStart + 6; ++i) {
+        for (int marker : {codeStart, codeStart + 5})
+            QCOMPARE(formatAt(marker).fontPointSize(), 1.0);
+        for (int i = codeStart + 1; i < codeStart + 5; ++i) {
             const auto code = formatAt(i);
             QCOMPARE(code.background().color(), QColor("#23372b"));
             QVERIFY(!code.fontItalic());
@@ -1380,11 +1405,12 @@ private slots:
         // marker hidden.
         const QList<QTextLayout::FormatRange> fenced =
             document.findBlockByNumber(2).layout()->formats();
-        QCOMPARE(fenced.size(), 1);
-        QCOMPARE(fenced.constFirst().length, document.findBlockByNumber(2).text().length());
-        QVERIFY(fenced.constFirst().format.background().style() != Qt::NoBrush);
+        // Syntax highlighting may split a code line into several ranges;
+        // none may acquire Markdown emphasis or hidden marker sizing.
+        QVERIFY(!fenced.isEmpty());
         for (const QTextLayout::FormatRange &range : fenced) {
             QVERIFY(!range.format.fontItalic());
+            QVERIFY(range.format.fontPointSize() != 1.0);
             QVERIFY(range.format.foreground().color() != range.format.background().color());
         }
 
@@ -1455,8 +1481,9 @@ private slots:
             }
             return hidden;
         };
-        for (int blockNumber : {0, 1, 2, 4, 5, 6})
+        for (int blockNumber : {0, 1, 2, 5, 6})
             QCOMPARE(hiddenIn(blockNumber), 0);
+        QCOMPARE(hiddenIn(4), 2); // Hide the outer ticks, not the code's literal '*'.
         QCOMPARE(hiddenIn(3), 2);
 
         // Removing a fence rehighlights the following blocks as prose.
@@ -2156,7 +2183,7 @@ private slots:
         QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
         QVERIFY(editor);
         editor->setProperty("text", QStringLiteral("# Title\n\nFirst **bold**.\n\nSecond."));
-        backend.copyAsHtml();
+        backend.copyAsHtml(-1, -1, nullptr, false); // Rendered-copy mode, rather than HTML source.
 
         const QMimeData *mimeData = QGuiApplication::clipboard()->mimeData();
         QVERIFY(mimeData);
@@ -3508,7 +3535,7 @@ private slots:
 
         // A recovery draft written later must not depend on the directory.
         QCOMPARE(backend.fileUrl().toLocalFile(),
-                 QDir(directory.path()).absoluteFilePath(QStringLiteral("relative.md")));
+                 QDir(directory.path()).canonicalPath() + QStringLiteral("/relative.md"));
     }
 
     void saysWhenARecoveredDraftKeepsAFileFromOpening() {
@@ -3589,7 +3616,17 @@ private slots:
         QVERIFY(!backend.modified());
     }
 
+    void keepsWatchingAFileReplacedFromOutside_data() {
+        QTest::addColumn<bool>("parentOnly");
+        QTest::addColumn<bool>("busyParent");
+        QTest::newRow("file-and-parent") << false << false;
+        QTest::newRow("parent-fallback") << true << false;
+        QTest::newRow("busy-parent-fallback") << true << true;
+    }
+
     void keepsWatchingAFileReplacedFromOutside() {
+        QFETCH(bool, parentOnly);
+        QFETCH(bool, busyParent);
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QString path = directory.filePath(QStringLiteral("watched.md"));
@@ -3601,13 +3638,83 @@ private slots:
         backend.open(QUrl::fromLocalFile(path));
         QSignalSpy externalSpy(&backend, &Backend::externalChangeDetected);
 
-        // Editors and sync tools often replace a file rather than write into it.
+        QVERIFY(backend.m_fileWatcher.files().contains(path));
+        QVERIFY(backend.m_fileWatcher.directories().contains(directory.path()));
+        QTimer churn;
+        int churnCount = 0;
+        const QString sibling = directory.filePath(QStringLiteral("sibling"));
+        connect(&churn, &QTimer::timeout, this, [&] {
+            if (++churnCount % 2)
+                writeFile(sibling, "unrelated");
+            else
+                QFile::remove(sibling);
+        });
+        if (busyParent)
+            churn.start(20);
+        // No yield before replacement: an immediate save must also be noticed.
         const QString replacement = directory.filePath(QStringLiteral("replacement"));
-        writeFile(replacement, "second");
-        QVERIFY(QFile::remove(path));
-        QVERIFY(QFile::rename(replacement, path));
-        QTRY_VERIFY(externalSpy.count() >= 1);
-        QTRY_VERIFY(backend.m_fileWatcher.files().contains(path));
+        for (const QByteArray &contents : {QByteArray("second"), QByteArray("third")}) {
+            externalSpy.clear();
+            if (parentOnly)
+                QVERIFY(backend.m_fileWatcher.removePath(path));
+            writeFile(replacement, contents);
+            QVERIFY(QFile::remove(path));
+            QVERIFY(QFile::rename(replacement, path));
+            QTRY_VERIFY(externalSpy.count() >= 1);
+            if (busyParent) {
+                QVERIFY(churn.isActive());
+                QVERIFY(churnCount > 0);
+            }
+            QVERIFY(!externalSpy.first().at(0).toBool());
+            QVERIFY(backend.m_autoSaveSuspended);
+            QTRY_VERIFY(backend.m_fileWatcher.files().contains(path));
+            QVERIFY(backend.m_fileWatcher.directories().contains(directory.path()));
+            backend.reloadFromDisk();
+            QCOMPARE(backend.currentDocumentText(), QString::fromUtf8(contents));
+        }
+    }
+
+    void directoryActivityDoesNotRepeatAnUnresolvedConflict() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("watched.md"));
+        const QString sibling = directory.filePath(QStringLiteral("sibling"));
+        writeFile(path, "first");
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.open(QUrl::fromLocalFile(path));
+        QSignalSpy externalSpy(&backend, &Backend::externalChangeDetected);
+        writeFile(sibling, "unrelated");
+        backend.checkWatchedFile();
+        QCOMPARE(externalSpy.count(), 0);
+
+        writeFile(path, "second");
+        QTRY_COMPARE(externalSpy.count(), 1);
+        QCOMPARE(backend.currentDocumentText(), QStringLiteral("first"));
+        QVERIFY(backend.m_autoSaveSuspended);
+        QVERIFY(!backend.m_hasKnownFileContents);
+        QVERIFY(QFile::remove(sibling));
+        backend.checkWatchedFile();
+        QTest::qWait(250);
+        QCOMPARE(externalSpy.count(), 1);
+
+        // A genuinely different conflict must still be reported.
+        writeFile(path, "third");
+        QTRY_COMPARE(externalSpy.count(), 2);
+        backend.reloadFromDisk();
+        QVERIFY(!backend.m_autoSaveSuspended);
+        writeFile(path, "second");
+        QTRY_COMPARE(externalSpy.count(), 3);
+
+        // Moving to another document drops the obsolete file and parent.
+        QTemporaryDir other;
+        QVERIFY(other.isValid());
+        const QString otherPath = other.filePath(QStringLiteral("other.md"));
+        writeFile(otherPath, "other");
+        backend.open(QUrl::fromLocalFile(otherPath));
+        QCOMPARE(backend.m_fileWatcher.files(), QStringList{otherPath});
+        QCOMPARE(backend.m_fileWatcher.directories(), QStringList{other.path()});
     }
 
     void keepsTheWritersTextWhenTheChangeDialogIsDismissed() {
@@ -4012,7 +4119,7 @@ private:
     // Writes while the backend is not watching, as when an event is missed.
     static void writeFileUnwatched(Backend &backend, const QString &path,
                                    const QByteArray &contents) {
-        backend.m_fileWatcher.removePath(path);
+        backend.unwatchFiles();
         writeFile(path, contents);
     }
 
