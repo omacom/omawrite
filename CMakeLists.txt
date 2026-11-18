@@ -12,7 +12,7 @@ endif()
 # Widgets and PrintSupport are for the system print dialog, which is why the
 # app runs a QApplication rather than a QGuiApplication.
 find_package(Qt6 REQUIRED COMPONENTS
-  Core Gui Concurrent Widgets PrintSupport Qml Quick QuickControls2 QuickDialogs2 DBus Test)
+  Core Gui Concurrent Widgets PrintSupport Qml Quick QuickControls2 QuickDialogs2 DBus Test GuiPrivate)
 
 # Everything but main.cpp, shared by the app and the tests, so each source
 # compiles once and a new file in src/ needs no line here.
@@ -31,7 +31,7 @@ target_link_libraries(omawrite PRIVATE omawrite_core)
 # The tests read the QML they drive straight from src/.
 enable_testing()
 add_executable(omawrite_tests tests/omawrite_tests.cpp)
-target_link_libraries(omawrite_tests PRIVATE omawrite_core Qt6::Test)
+target_link_libraries(omawrite_tests PRIVATE omawrite_core Qt6::Test Qt6::GuiPrivate)
 add_test(NAME omawrite_tests COMMAND omawrite_tests)
 # An empty platform theme keeps file dialogs in the offscreen window instead
 # of opening the real desktop chooser.
