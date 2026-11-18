@@ -775,6 +775,12 @@ ApplicationWindow {
                 win.completePendingAction();
         }
 
+        // Inserting the file leaves the caret at its end; start at the top.
+        function onFileOpened() {
+            editor.cursorPosition = 0;
+            editorFlick.scrollTo(0);
+        }
+
         function onSaveFailed() {
             // A failed save leaves the document as it was, so the close or
             // open it was for is off; a later save must not carry it out.

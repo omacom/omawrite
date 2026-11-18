@@ -407,6 +407,7 @@ void Backend::open(const QUrl &url) {
     m_stagedAttachments.clear();
     m_materializedAttachments.clear();
     emit attachmentUrlsChanged();
+    emit fileOpened();
     clearRecovery();
     setKnownFileContents(contents, true);
     m_autoSaveSuspended = false;
