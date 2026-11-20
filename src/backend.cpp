@@ -331,7 +331,7 @@ void Backend::open(const QUrl &url) {
     file.seek(0);
     const QByteArray contents = file.readAll();
     loadDocumentText(QString::fromUtf8(contents));
-    emit fileOpened();
+    emit fileOpened(m_keepViewOnOpen, m_restoreCaret, m_restoreScroll);
     clearRecovery();
     setKnownFileContents(contents, true);
     m_autoSaveSuspended = false;
@@ -406,8 +406,15 @@ void Backend::openOrStartFile(const QUrl &requestedUrl) {
 }
 
 void Backend::reloadFromDisk() {
-    if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+    if (!m_fileUrl.isLocalFile())
+        return;
+    // Captured before the load moves the caret. open() reports them on
+    // fileOpened so the view can be put back; every other open starts over.
+    m_keepViewOnOpen = true;
+    m_restoreCaret = m_caretPosition;
+    m_restoreScroll = m_editorScroll;
+    open(m_fileUrl);
+    m_keepViewOnOpen = false;
 }
 
 void Backend::keepExternalVersion() {
@@ -567,6 +574,10 @@ void Backend::setCaretPosition(int position) {
     m_caretPosition = position;
     if (m_highlighter)
         m_highlighter->setCaret(position);
+}
+
+void Backend::setEditorScroll(qreal y) {
+    m_editorScroll = qRound(y);
 }
 
 // The emphasis span of the marker's kind that the caret sits in or against,

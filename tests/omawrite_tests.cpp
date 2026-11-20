@@ -572,6 +572,20 @@ private slots:
         }
         QVERIFY(editor->flags().testFlag(QQuickItem::ItemObservesViewport));
 
+        // A selection that already starts at position 0 is not cleared by
+        // writing that same position back. Opening still has to drop it,
+        // and the caret has to stay at the top after the deferred placement.
+        QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 12), Q_ARG(int, 0));
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
+        QVERIFY(editor->property("selectionStart").toInt() != editor->property("selectionEnd").toInt());
+        backend.open(QUrl::fromLocalFile(path));
+        QCoreApplication::processEvents();
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
+        QCOMPARE(editor->property("selectionStart").toInt(), editor->property("selectionEnd").toInt());
+        QObject *scroll = window->findChild<QObject *>(QStringLiteral("editorScroll"));
+        QVERIFY(scroll);
+        QCOMPARE(scroll->property("contentY").toInt(), 0);
+
         // A shorter file replaces all of the longer one.
         const QString shortPath = directory.filePath(QStringLiteral("short.md"));
         QFile shortFile(shortPath);
@@ -582,6 +596,67 @@ private slots:
         QCOMPARE(editor->property("text").toString(), QStringLiteral("Short\n"));
         QCOMPARE(document->firstBlock().blockFormat().lineHeight(), qreal(140));
         QVERIFY(!document->isUndoAvailable());
+    }
+
+    void keepsThePlaceWhenTheSameFileReloads() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("notes.md"));
+        QStringList lines;
+        for (int i = 0; i < 80; ++i)
+            lines << QStringLiteral("line %1 sits in the document").arg(i, 2, 10, QChar('0'));
+        const QString body = lines.join(QLatin1Char('\n')) + QLatin1Char('\n');
+        QFile file(path);
+        QVERIFY(file.open(QIODevice::WriteOnly));
+        QCOMPARE(file.write(body.toUtf8()), qint64(body.toUtf8().size()));
+        file.close();
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        auto *scroll = window->findChild<QQuickItem *>(QStringLiteral("editorScroll"));
+        QVERIFY(editor);
+        QVERIFY(scroll);
+
+        backend.open(QUrl::fromLocalFile(path));
+        QCoreApplication::processEvents();
+        QCOMPARE(editor->property("cursorPosition").toInt(), 0);
+
+        const int caret = 40;
+        editor->setProperty("cursorPosition", caret);
+        scroll->setProperty("contentY", 180);
+        QCoreApplication::processEvents();
+        QCOMPARE(editor->property("cursorPosition").toInt(), caret);
+
+        // The file grows under the caret. Reloading is not a new open.
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Append));
+        QCOMPARE(file.write("\nextra\n"), qint64(7));
+        file.close();
+        backend.reloadFromDisk();
+        QCoreApplication::processEvents();
+        QCOMPARE(editor->property("cursorPosition").toInt(), caret);
+        QVERIFY(scroll->property("contentY").toInt() > 0);
+        QVERIFY(editor->property("text").toString().endsWith(QStringLiteral("extra\n")));
+
+        // A shorter file clamps the caret instead of leaving it past the end.
+        QVERIFY(file.open(QIODevice::WriteOnly | QIODevice::Truncate));
+        QCOMPARE(file.write("short\n"), qint64(6));
+        file.close();
+        backend.reloadFromDisk();
+        QCoreApplication::processEvents();
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("short\n"));
+        QVERIFY(editor->property("cursorPosition").toInt() <= editor->property("length").toInt());
+        QCOMPARE(editor->property("cursorPosition").toInt(), editor->property("length").toInt());
     }
 
     void searchFollowsEditsWithoutTakingTheCaret() {

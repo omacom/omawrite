@@ -96,6 +96,7 @@ public:
     Q_INVOKABLE QString documentText() const { return currentDocumentText(); }
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE void setCaretPosition(int position);
+    Q_INVOKABLE void setEditorScroll(qreal y);
     Q_INVOKABLE QString linkUrlAt(int position) const;
     Q_INVOKABLE QVariantMap emphasisSpanAt(int position, const QString &marker) const;
     Q_INVOKABLE int cursorPositionStep(int position, int direction) const;
@@ -124,7 +125,9 @@ signals:
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
-    void fileOpened();
+    // keepView is a reload of the file already open. The caret and scroll
+    // are the ones recorded before the load. A different file starts over.
+    void fileOpened(bool keepView, int caret, int scroll);
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
@@ -189,6 +192,10 @@ private:
     QPointer<QWindow> m_parentWindow;
     QPointer<MarkdownHighlighter> m_highlighter;
     int m_caretPosition = 0;
+    int m_editorScroll = 0;
+    bool m_keepViewOnOpen = false;
+    int m_restoreCaret = 0;
+    int m_restoreScroll = 0;
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
     QString m_lastKnownFileText;
