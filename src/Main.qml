@@ -317,9 +317,11 @@ ApplicationWindow {
                 win.completePendingAction();
         }
 
-        // Inserting the file leaves the caret at its end. The arguments say
-        // whether this open should keep a place; placement itself is next.
+        // Inserting the file leaves the caret at its end. Writing cursor
+        // position 0 does nothing when the caret is already there, which
+        // leaves a selection that starts at the top in place.
         function onFileOpened(keepView, caret, scroll) {
+            editor.deselect();
             editor.cursorPosition = 0;
             editorFlick.scrollTo(0);
         }
