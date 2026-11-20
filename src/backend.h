@@ -125,7 +125,9 @@ signals:
     void openDialogRequested();
     void saveDialogRequested(const QUrl &suggestedUrl);
     void saveSucceeded();
-    void fileOpened();
+    // keepView is a reload of the file already open. The caret and scroll
+    // are the ones recorded before the load. A different file starts over.
+    void fileOpened(bool keepView, int caret, int scroll);
     void externalChangeDetected(bool deleted, bool locallyModified);
 
 private:
@@ -191,6 +193,9 @@ private:
     QPointer<MarkdownHighlighter> m_highlighter;
     int m_caretPosition = 0;
     int m_editorScroll = 0;
+    bool m_keepViewOnOpen = false;
+    int m_restoreCaret = 0;
+    int m_restoreScroll = 0;
     QString m_lastDocumentText;
     QByteArray m_lastKnownFileContents;
     QString m_lastKnownFileText;
