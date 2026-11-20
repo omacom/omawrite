@@ -569,6 +569,10 @@ void Backend::setCaretPosition(int position) {
         m_highlighter->setCaret(position);
 }
 
+void Backend::setEditorScroll(qreal y) {
+    m_editorScroll = qRound(y);
+}
+
 // The emphasis span of the marker's kind that the caret sits in or against,
 // in document positions, so a toggle with nothing selected can act on it.
 QVariantMap Backend::emphasisSpanAt(int position, const QString &marker) const {

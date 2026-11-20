@@ -435,6 +435,7 @@ ApplicationWindow {
             contentWidth: width
             contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
             boundsBehavior: Flickable.StopAtBounds
+            onContentYChanged: backend.setEditorScroll(contentY)
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
                 // Wheel scrolling moves contentY directly rather than
