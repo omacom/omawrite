@@ -455,7 +455,6 @@ ApplicationWindow {
             contentWidth: width
             contentHeight: Math.max(height, editor.y + editor.implicitHeight + 220)
             boundsBehavior: Flickable.StopAtBounds
-            onContentYChanged: backend.setEditorScroll(contentY)
             ScrollBar.vertical: ScrollBar {
                 policy: ScrollBar.AsNeeded
                 // Wheel scrolling moves contentY directly rather than
@@ -585,7 +584,10 @@ ApplicationWindow {
             }
 
             onMovementStarted: wheelScroll.stop()
-            onContentYChanged: editor.hoveredLinkUrl = ""
+            onContentYChanged: {
+                editor.hoveredLinkUrl = "";
+                backend.setEditorScroll(contentY);
+            }
 
             // Ctrl+wheel changes the text size, as it does in a browser. A
             // wheel notch is a whole step, but a touchpad trickles in pixels,
