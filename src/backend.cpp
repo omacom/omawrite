@@ -406,8 +406,15 @@ void Backend::openOrStartFile(const QUrl &requestedUrl) {
 }
 
 void Backend::reloadFromDisk() {
-    if (m_fileUrl.isLocalFile())
-        open(m_fileUrl);
+    if (!m_fileUrl.isLocalFile())
+        return;
+    // Captured before the load moves the caret. open() reports them on
+    // fileOpened so the view can be put back; every other open starts over.
+    m_keepViewOnOpen = true;
+    m_restoreCaret = m_caretPosition;
+    m_restoreScroll = m_editorScroll;
+    open(m_fileUrl);
+    m_keepViewOnOpen = false;
 }
 
 void Backend::keepExternalVersion() {

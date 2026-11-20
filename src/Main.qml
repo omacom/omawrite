@@ -14,6 +14,7 @@ ApplicationWindow {
     minimumHeight: 520
     visible: true
     title: (backend.modified ? "* " : "") + backend.fileName + " - " + qsTr("Write")
+    property int openPlacement: 0
 
     readonly property bool darkMode: backend.darkMode
     readonly property color pageColor: backend.themeBackground
@@ -319,11 +320,27 @@ ApplicationWindow {
 
         // Inserting the file leaves the caret at its end. Writing cursor
         // position 0 does nothing when the caret is already there, which
-        // leaves a selection that starts at the top in place.
+        // leaves a selection that starts at the top in place. A reload
+        // keeps the place the writer had, clamped to the text now on disk.
+        // The document's cursor rectangle can land a turn later and scroll
+        // to the end, so the same placement runs again once that settles.
         function onFileOpened(keepView, caret, scroll) {
-            editor.deselect();
-            editor.cursorPosition = 0;
-            editorFlick.scrollTo(0);
+            var token = ++win.openPlacement;
+            function place() {
+                if (token !== win.openPlacement)
+                    return;
+                editor.deselect();
+                var target = keepView ? Math.max(0, Math.min(caret, editor.length)) : 0;
+                editor.cursorPosition = target;
+                if (keepView) {
+                    editorFlick.scrollTo(editorFlick.clampContentY(scroll));
+                    editorFlick.ensureCursorVisible();
+                } else {
+                    editorFlick.scrollTo(0);
+                }
+            }
+            place();
+            Qt.callLater(place);
         }
 
         function onSaveFailed() {
