@@ -2796,6 +2796,14 @@ private slots:
                  QStringLiteral("2026_Untitled.md"));
     }
 
+    void keepsDraftNamesWithinTheFileNameByteLimit() {
+        const QDateTime when(QDate(2026, 3, 7), QTime(9, 5));
+        const QString title = QString(80, QChar(0x6F22));
+        const QString name = Backend::draftFileName(title + QStringLiteral("\nbody"), when, QString());
+        QVERIFY(name.toUtf8().size() <= 255 - 4);
+        QVERIFY(name.endsWith(QStringLiteral(".md")));
+    }
+
     void holdsAutoSaveWhenTheFileChangesElsewhere() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());

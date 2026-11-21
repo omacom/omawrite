@@ -188,7 +188,7 @@ private:
     QString m_lastKnownFileText;
     bool m_hasKnownFileContents = false;
     bool m_autoSaveSuspended = false;
-    bool m_autoSaveHeld = false;
+    int m_autoSaveHolds = 0;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 

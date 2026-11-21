@@ -897,7 +897,7 @@ void Backend::scheduleAutoSave() {
     // name is not taken from a half-typed word. Crash recovery covers the rest.
     // A named file that does not exist yet waits for an explicit save (see
     // autoSave()).
-    if (m_autoSaveSuspended || m_autoSaveHeld)
+    if (m_autoSaveSuspended || m_autoSaveHolds > 0)
         return;
     if (m_fileUrl.isLocalFile() || untitledDraftReady())
         m_autoSaveTimer.start();
@@ -936,6 +936,17 @@ QString Backend::draftFileName(const QString &text, const QDateTime &when, QStri
     formatted.reserve(parts.size());
     for (const QString &part : parts)
         formatted << (part.isEmpty() ? QString() : when.toString(part));
+    // File names are limited in bytes, not characters. Shorten the title so
+    // the whole name, ".md" and a collision suffix such as "-99" still fit.
+    constexpr int maxNameBytes = 255 - 3 - 4;
+    const int budget = qMax(1, maxNameBytes - int(formatted.join(QString()).toUtf8().size()));
+    while (title.size() > 1 && title.toUtf8().size() > budget) {
+        qsizetype cut = title.size() - 1;
+        if (cut > 0 && title.at(cut).isLowSurrogate())
+            --cut;
+        title.truncate(cut);
+    }
+    title = title.trimmed();
     QString name = formatted.join(title);
     // The name must stay a single file inside the drafts folder.
     name.replace(QRegularExpression(QStringLiteral("[/\\x00-\\x1f\\x7f]")),
@@ -964,22 +975,39 @@ void Backend::autoSaveUntitledDraft() {
     const QString stem = name.left(name.size() - 3);
     const QDir dir(directory);
     QString path = dir.filePath(name);
-    for (int n = 2; QFileInfo::exists(path); ++n)
+    // Claim the name by creating it exclusively, so a second window picking
+    // the same name at the same moment cannot also see it as free and
+    // replace this draft.
+    for (int n = 2;; ++n) {
+        QFile claim(path);
+        if (claim.open(QIODevice::WriteOnly | QIODevice::NewOnly))
+            break;
+        if (!QFileInfo::exists(path)) {
+            setStatus(QStringLiteral("Could not create a draft in %1.").arg(directory));
+            return;
+        }
         path = dir.filePath(QStringLiteral("%1-%2.md").arg(stem).arg(n));
+    }
 
-    saveTo(QUrl::fromLocalFile(path));
+    const QUrl url = QUrl::fromLocalFile(path);
+    saveTo(url);
+    // A failed save must not leave the empty claim behind.
+    if (m_fileUrl != url)
+        QFile::remove(path);
 }
 
 void Backend::holdAutoSave(bool held) {
-    m_autoSaveHeld = held;
-    if (held)
+    // Holds nest: the unsaved-changes prompt and the save picker it opens
+    // each take one, so closing the prompt does not release the picker's.
+    m_autoSaveHolds = qMax(0, m_autoSaveHolds + (held ? 1 : -1));
+    if (m_autoSaveHolds > 0)
         m_autoSaveTimer.stop();
     else if (m_modified)
         scheduleAutoSave();
 }
 
 void Backend::autoSave() {
-    if (!m_modified || m_autoSaveSuspended || m_autoSaveHeld)
+    if (!m_modified || m_autoSaveSuspended || m_autoSaveHolds > 0)
         return;
     if (m_fileUrl.isEmpty()) {
         autoSaveUntitledDraft();

@@ -301,6 +301,9 @@ ApplicationWindow {
         }
 
         function onSaveDialogRequested(suggestedUrl) {
+            // No auto-save while the picker is open: it would save the draft
+            // and carry out the pending close or open before the writer chose.
+            backend.holdAutoSave(true);
             saveFileDialog.selectedFile = suggestedUrl;
             saveFileDialog.open();
         }
@@ -341,8 +344,12 @@ ApplicationWindow {
         title: "Save File"
         fileMode: Dialogs.FileDialog.SaveFile
         nameFilters: ["Markdown files (*.md *.markdown)", "All files (*)"]
-        onAccepted: backend.saveAs(selectedFile)
+        onAccepted: {
+            backend.saveAs(selectedFile);
+            backend.holdAutoSave(false);
+        }
         onRejected: {
+            backend.holdAutoSave(false);
             win.awaitingPendingSave = false;
             win.pendingAction = "";
         }
