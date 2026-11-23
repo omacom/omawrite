@@ -14,6 +14,7 @@ if(APPLE)
 endif()
 
 include(CTest)
+# Widgets and PrintSupport support the native system print dialog.
 find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Concurrent Widgets PrintSupport
   Qml Quick QuickControls2 QuickDialogs2 Network)
 set(write_qt Qt6::Core Qt6::Gui Qt6::Concurrent Qt6::Widgets Qt6::PrintSupport
@@ -119,7 +120,7 @@ add_custom_command(TARGET omawrite POST_BUILD
   COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/fonts/OFL.txt" "${write_notices}/fonts/OFL.txt")
 
 if(BUILD_TESTING)
-  find_package(Qt6 REQUIRED COMPONENTS Test)
+  find_package(Qt6 REQUIRED COMPONENTS Test GuiPrivate)
   function(write_test name source)
     add_executable(${name} ${source})
     target_link_libraries(${name} PRIVATE omawrite_core Qt6::Test)
@@ -129,6 +130,7 @@ if(BUILD_TESTING)
       ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=" TIMEOUT 180)
   endfunction()
   write_test(omawrite_upstream_tests tests/omawrite_tests.cpp)
+  target_link_libraries(omawrite_upstream_tests PRIVATE Qt6::GuiPrivate)
   write_test(omawrite_editor_tests tests/tst_editor.cpp)
   if(APPLE)
     target_sources(omawrite_editor_tests PRIVATE tests/macapplicationreopentest.mm)
