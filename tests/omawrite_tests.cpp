@@ -2418,6 +2418,44 @@ private slots:
         QCOMPARE(geometry.value(QStringLiteral("height")).toInt(), 820);
     }
 
+    void keepsWindowedGeometryWhenClosedFromFullscreen() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QSettings settings;
+        const auto cleanup = qScopeGuard([&settings] {
+            settings.remove(QStringLiteral("window/x"));
+            settings.remove(QStringLiteral("window/y"));
+            settings.remove(QStringLiteral("window/width"));
+            settings.remove(QStringLiteral("window/height"));
+            settings.remove(QStringLiteral("window/maximized"));
+        });
+
+        Backend backend;
+        backend.saveWindowGeometry(50, 60, 900, 650, false);
+
+        {
+            QQmlEngine engine;
+            engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+            QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+            QScopedPointer<QObject> object(component.create());
+            auto *window = qobject_cast<QQuickWindow *>(object.data());
+            QVERIFY(window);
+            window->setVisibility(QWindow::FullScreen);
+            window->resize(1920, 1080);
+            // Closing a window hides it before destruction; visibility is
+            // Hidden by the time Component.onDestruction runs.
+            window->hide();
+            QCOMPARE(window->visibility(), QWindow::Hidden);
+        }
+
+        const QVariantMap saved = backend.windowGeometry();
+        QCOMPARE(saved.value(QStringLiteral("width")).toInt(), 900);
+        QCOMPARE(saved.value(QStringLiteral("height")).toInt(), 650);
+        QCOMPARE(saved.value(QStringLiteral("maximized")).toBool(), false);
+    }
+
     void nestsListItemsOnTab() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

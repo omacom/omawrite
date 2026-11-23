@@ -46,6 +46,12 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property int lastWindowVisibility: Window.Windowed
+
+    onVisibilityChanged: {
+        if (visibility !== Window.Hidden && visibility !== Window.Minimized)
+            lastWindowVisibility = visibility;
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -1361,8 +1367,8 @@ ApplicationWindow {
     }
 
     Component.onDestruction: {
-        if (visibility !== Window.FullScreen)
-            backend.saveWindowGeometry(x, y, width, height, visibility === Window.Maximized);
+        if (lastWindowVisibility !== Window.FullScreen)
+            backend.saveWindowGeometry(x, y, width, height, lastWindowVisibility === Window.Maximized);
     }
 
 }
