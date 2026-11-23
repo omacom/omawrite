@@ -20,6 +20,7 @@
 #include <QScreen>
 #include <QSettings>
 #include <QStandardPaths>
+#include <QStringDecoder>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QLockFile>
@@ -82,6 +83,63 @@ QColor blend(const QColor &from, const QColor &to, qreal amount) {
     return QColor::fromRgbF(from.redF() + (to.redF() - from.redF()) * amount,
                             from.greenF() + (to.greenF() - from.greenF()) * amount,
                             from.blueF() + (to.blueF() - from.blueF()) * amount);
+}
+
+struct DecodedFile {
+    QByteArray contents;
+    QString text;
+    bool savesUnchanged = false;
+};
+
+// Strips carriage returns to match QIODevice::Text (sharing the buffer when
+// none exist), decodes UTF-8 once, and reports whether saving back as plain
+// UTF-8 would preserve every byte on disk.
+DecodedFile decodeFileContents(const QByteArray &raw) {
+    const bool hasCarriageReturn = raw.contains('\r');
+    QByteArray contents = raw;
+    if (hasCarriageReturn)
+        contents.replace("\r", "");
+    QStringDecoder decoder(QStringDecoder::Utf8, QStringConverter::Flag::Stateless);
+    QString text = decoder.decode(contents);
+    const bool hasBom = raw.startsWith("\xEF\xBB\xBF");
+    return {std::move(contents), std::move(text),
+            !hasCarriageReturn && !hasBom && !decoder.hasError()};
+}
+
+enum class WordCharKind { Other, Joiner, Word, Cjk };
+
+// Characters with Script=Common whose Unicode Script_Extensions include Han,
+// Hiragana, or Katakana (e.g. U+30FC "ー" in "コーヒー"), matching PCRE2's
+// (?=[\p{L}\p{N}])[\p{Han}\p{Hiragana}\p{Katakana}].
+bool isCjkCommonLetterOrNumber(char32_t cp) {
+    return cp == 0x3006 || (cp >= 0x3031 && cp <= 0x3035) || cp == 0x303C || cp == 0x30FC
+        || (cp >= 0x3192 && cp <= 0x3195) || (cp >= 0x3220 && cp <= 0x3229)
+        || (cp >= 0x3280 && cp <= 0x3289) || cp == 0xFF70
+        || cp == 0xFF9E || cp == 0xFF9F || (cp >= 0x1D360 && cp <= 0x1D371);
+}
+
+WordCharKind classifyWordChar(char32_t cp) {
+    if (cp < 0x80) {
+        if ((cp >= 'A' && cp <= 'Z') || (cp >= 'a' && cp <= 'z') || (cp >= '0' && cp <= '9'))
+            return WordCharKind::Word;
+        if (cp == '\'' || cp == '-')
+            return WordCharKind::Joiner;
+        return WordCharKind::Other;
+    }
+    if (!QChar::isLetterOrNumber(cp))
+        return WordCharKind::Other;
+    const QChar::Script script = QChar::script(cp);
+    if (script == QChar::Script_Han || script == QChar::Script_Hiragana
+            || script == QChar::Script_Katakana || isCjkCommonLetterOrNumber(cp))
+        return WordCharKind::Cjk;
+    return WordCharKind::Word;
+}
+
+char32_t decodeCodePoint(const QChar *data, qsizetype size, qsizetype &index) {
+    const char16_t unit = data[index++].unicode();
+    if (QChar::isHighSurrogate(unit) && index < size && data[index].isLowSurrogate())
+        return QChar::surrogateToUcs4(unit, data[index++].unicode());
+    return unit;
 }
 
 }
@@ -325,20 +383,16 @@ void Backend::open(const QUrl &url) {
     }
 
     const QByteArray raw = file.readAll();
-    // Text mode drops carriage returns, matching how the file is compared
-    // and saved later.
-    file.setTextModeEnabled(true);
-    file.seek(0);
-    const QByteArray contents = file.readAll();
-    loadDocumentText(QString::fromUtf8(contents));
+    const DecodedFile decoded = decodeFileContents(raw);
+    loadDocumentText(decoded.text);
     emit fileOpened();
     clearRecovery();
-    setKnownFileContents(contents, true);
+    setKnownFileContents(decoded.contents, decoded.text);
     m_autoSaveSuspended = false;
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
-    if (savesUnchanged(raw)) {
+    if (decoded.savesUnchanged) {
         setStatus(tr("Opened %1").arg(fileName()));
     } else {
         // Saving writes UTF-8 with plain line endings, which would change
@@ -413,15 +467,13 @@ void Backend::reloadFromDisk() {
 void Backend::keepExternalVersion() {
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
-        const QByteArray raw = file.readAll();
-        file.setTextModeEnabled(true);
-        file.seek(0);
-        setKnownFileContents(file.readAll(), true);
+        const DecodedFile decoded = decodeFileContents(file.readAll());
+        setKnownFileContents(decoded.contents, decoded.text);
         // Keeping our text over an edited file is a deliberate choice to
         // overwrite it, so auto-save may resume, unless saving would change
         // the file's encoding or line endings. A removed file stays removed
         // until the writer saves it again.
-        m_autoSaveSuspended = !savesUnchanged(raw);
+        m_autoSaveSuspended = !decoded.savesUnchanged;
     } else {
         setKnownFileContents(QByteArray(), false);
     }
@@ -712,6 +764,33 @@ void Backend::replaceRange(int start, int end, const QString &text) {
     cursor.endEditBlock();
 }
 
+// Replaces every match in one edit block, touching only the matched ranges so
+// untouched blocks keep their layout and a single undo reverts them all.
+void Backend::replaceAll(const QString &query, const QString &replacement) {
+    if (!m_document || query.isEmpty())
+        return;
+    const QList<int> matches = MarkdownHighlighter::findMatches(currentDocumentText(), query);
+    if (matches.isEmpty())
+        return;
+
+    QString normalized = replacement;
+    normalized.replace(QStringLiteral("\r\n"), QStringLiteral("\n"));
+    normalized.replace(QLatin1Char('\r'), QLatin1Char('\n'));
+
+    const int queryLength = query.length();
+    const int last = m_document->characterCount() - 1;
+    QTextCursor cursor(m_document);
+    cursor.beginEditBlock();
+    for (qsizetype i = matches.size() - 1; i >= 0; --i) {
+        const int start = qBound(0, matches.at(i), last);
+        const int end = qBound(start, start + queryLength, last);
+        cursor.setPosition(start);
+        cursor.setPosition(end, QTextCursor::KeepAnchor);
+        cursor.insertText(normalized);
+    }
+    cursor.endEditBlock();
+}
+
 // A block's state says what follows its line, so a fence line itself is only
 // code on its inner side: past an opening fence's backticks or tildes, or anywhere
 // before the end of a closing one.
@@ -976,18 +1055,18 @@ void Backend::reportExternalChange(bool deleted) {
     emit externalChangeDetected(deleted, m_modified);
 }
 
-// Saving writes UTF-8 with plain line endings; anything else on disk would be
-// rewritten by it.
-bool Backend::savesUnchanged(const QByteArray &raw) {
-    return !raw.contains('\r') && QString::fromUtf8(raw).toUtf8() == raw;
-}
-
 void Backend::setKnownFileContents(const QByteArray &contents, bool known) {
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = known;
     // Every caller reads in text mode or writes plain line endings, so there
     // are no carriage returns to strip.
     m_lastKnownFileText = known ? QString::fromUtf8(contents) : QString();
+}
+
+void Backend::setKnownFileContents(const QByteArray &contents, const QString &text) {
+    m_lastKnownFileContents = contents;
+    m_hasKnownFileContents = true;
+    m_lastKnownFileText = text;
 }
 
 void Backend::writeRecovery() {
@@ -1253,31 +1332,40 @@ QString Backend::currentDocumentText() const {
 }
 
 int Backend::countWords(const QString &text) {
-    // Only letters and numbers: PCRE2 reads \p{Han} as Script_Extensions, which
-    // puts 。 、 「 and the CJK radicals in Han and would count each as a word.
-    // One per thread, as loading a file counts here while a worker may too.
-    thread_local const QRegularExpression cjkRe(
-        QStringLiteral("(?=[\\p{L}\\p{N}])[\\p{Han}\\p{Hiragana}\\p{Katakana}]"));
-    thread_local const QRegularExpression wordRe(
-        QStringLiteral("[\\p{L}\\p{N}]+(?:['-][\\p{L}\\p{N}]+)*"));
-
-    // Count unspaced Han and kana characters individually, then replace them
-    // so they remain boundaries between surrounding space-delimited words.
+    const QChar *data = text.constData();
+    const qsizetype size = text.size();
     int count = 0;
+    bool inWord = false;
+    bool pendingJoiner = false;
 
-    QRegularExpressionMatchIterator cjkIt = cjkRe.globalMatch(text);
-    while (cjkIt.hasNext()) {
-        cjkIt.next();
-        ++count;
-    }
-
-    QString nonCjkText = text;
-    nonCjkText.replace(cjkRe, QStringLiteral(" "));
-
-    QRegularExpressionMatchIterator it = wordRe.globalMatch(nonCjkText);
-    while (it.hasNext()) {
-        it.next();
-        ++count;
+    // Count unspaced Han and kana characters individually, acting as boundaries
+    // between surrounding space-delimited words, in a single allocation-free pass.
+    for (qsizetype i = 0; i < size;) {
+        switch (classifyWordChar(decodeCodePoint(data, size, i))) {
+        case WordCharKind::Word:
+            if (!inWord)
+                ++count;
+            inWord = true;
+            pendingJoiner = false;
+            break;
+        case WordCharKind::Joiner:
+            if (inWord && !pendingJoiner) {
+                pendingJoiner = true;
+            } else {
+                inWord = false;
+                pendingJoiner = false;
+            }
+            break;
+        case WordCharKind::Cjk:
+            ++count;
+            inWord = false;
+            pendingJoiner = false;
+            break;
+        case WordCharKind::Other:
+            inWord = false;
+            pendingJoiner = false;
+            break;
+        }
     }
     return count;
 }

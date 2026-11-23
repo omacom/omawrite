@@ -6,8 +6,9 @@ function normalizePlainText(text) {
 
 function replaceRange(editor, rangeStart, rangeEnd, replacement,
                       selectionStartOffset, selectionEndOffset) {
-    var start = Math.max(0, Math.min(editor.text.length, rangeStart));
-    var end = Math.max(start, Math.min(editor.text.length, rangeEnd));
+    var docLength = editor.length;
+    var start = Math.max(0, Math.min(docLength, rangeStart));
+    var end = Math.max(start, Math.min(docLength, rangeEnd));
     var insertedText = normalizePlainText(replacement);
 
     // The editor makes the change as one edit, so a single undo takes it back.

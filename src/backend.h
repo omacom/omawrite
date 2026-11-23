@@ -102,6 +102,7 @@ public:
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE QVariantList searchMatches(const QString &query) const;
     Q_INVOKABLE void replaceRange(int start, int end, const QString &text);
+    Q_INVOKABLE void replaceAll(const QString &query, const QString &replacement);
     Q_INVOKABLE bool insideFence(int position) const;
     Q_INVOKABLE QVariantMap windowGeometry() const;
     Q_INVOKABLE void saveWindowGeometry(int x, int y, int width, int height, bool maximized);
@@ -153,8 +154,8 @@ private:
     void clearRecovery();
     bool diskMatchesKnownContents() const;
     void reportExternalChange(bool deleted);
-    static bool savesUnchanged(const QByteArray &raw);
     void setKnownFileContents(const QByteArray &contents, bool known);
+    void setKnownFileContents(const QByteArray &contents, const QString &text);
     void unwatchFiles();
     void watchCurrentFile();
     void checkWatchedFile();
