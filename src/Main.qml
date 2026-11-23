@@ -40,6 +40,7 @@ ApplicationWindow {
     property bool closeConfirmed: false
     property bool searchOpen: false
     property bool searchUpdating: false
+    property bool searchReplacing: false
     property var searchMatches: []
     property int searchMatchIndex: -1
     property url pendingOpenUrl
@@ -321,6 +322,10 @@ ApplicationWindow {
         function onFileOpened() {
             editor.cursorPosition = 0;
             editorFlick.scrollTo(0);
+            if (win.searchOpen) {
+                win.searchMatchIndex = -1;
+                win.updateSearch(false);
+            }
         }
 
         function onSaveFailed() {
@@ -1000,7 +1005,7 @@ ApplicationWindow {
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
-                    if (win.searchOpen && contentChanged)
+                    if (win.searchOpen && contentChanged && !win.searchReplacing)
                         win.updateSearch(false);
                 }
 
@@ -1286,14 +1291,19 @@ ApplicationWindow {
                         win.flushSearch();
                         if (win.searchMatchIndex < 0) return;
                         var start = win.searchMatches[win.searchMatchIndex];
-                        var replacement = replaceField.text;
-                        EditorMutations.replaceRange(editor, start,
-                                                     start + searchField.text.length,
-                                                     replacement);
+                        var inserted;
+                        win.searchReplacing = true;
+                        try {
+                            inserted = EditorMutations.replaceRange(editor, start,
+                                                                    start + searchField.text.length,
+                                                                    replaceField.text);
+                        } finally {
+                            win.searchReplacing = false;
+                        }
                         // Carry on past what was just written, so a replacement
                         // the query also matches is not found again.
                         win.searchMatches = backend.searchMatches(searchField.text);
-                        win.searchMatchIndex = win.matchAtOrAfter(start + replacement.length);
+                        win.searchMatchIndex = win.matchAtOrAfter(start + inserted.length);
                         win.showSearchMatch(true);
                     }
                 }
@@ -1317,7 +1327,12 @@ ApplicationWindow {
                             replaced += text.slice(position, matches[i]) + replaceField.text;
                             position = matches[i] + query.length;
                         }
-                        EditorMutations.replaceRange(editor, first, position, replaced);
+                        win.searchReplacing = true;
+                        try {
+                            EditorMutations.replaceRange(editor, first, position, replaced);
+                        } finally {
+                            win.searchReplacing = false;
+                        }
                         win.updateSearch(false);
                     }
                 }
