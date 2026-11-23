@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+set -eu
+ROOT="$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)"
+CMAKE="${CMAKE:-cmake}"
+if ! command -v "$CMAKE" >/dev/null 2>&1; then
+  echo "CMake 3.24+ is required for KSyntaxHighlighting (macOS: brew install cmake)." >&2
+  exit 1
+fi
+if command -v qmake6 >/dev/null 2>&1; then QMAKE=qmake6
+elif command -v qmake >/dev/null 2>&1; then QMAKE=qmake
+else echo "qmake6 or qmake from your Qt kit is required." >&2; exit 1; fi
+# CMake must not silently choose Visual Studio for a MinGW qmake kit.
+# Run from the matching kit's compiler environment; version/architecture must
+# match too. A cached generator/toolchain change requires removing .deps.
+case "$($QMAKE -query QMAKE_XSPEC)" in
+  win32-g++)
+    compiler="$(command -v g++ || true)"
+    [ -n "$compiler" ] || { echo "Use the matching Qt MinGW compiler shell (g++ missing)." >&2; exit 1; }
+    set -- "$@" -G "MinGW Makefiles" "-DCMAKE_CXX_COMPILER:FILEPATH=$compiler"
+    ;;
+  win32-msvc)
+    compiler="$(command -v cl || true)"
+    [ -n "$compiler" ] || { echo "Use the matching MSVC Developer Command Prompt (cl missing)." >&2; exit 1; }
+    set -- "$@" -G "NMake Makefiles" "-DCMAKE_CXX_COMPILER:FILEPATH=$compiler"
+    ;;
+  win32-*)
+    echo "Unsupported automatic Windows kit. Configure dependencies manually with the exact Qt toolchain; see docs/install.md." >&2
+    exit 1
+    ;;
+esac
+"$CMAKE" -S "$ROOT/dependencies" -B "$ROOT/.deps" \
+  "-DCMAKE_PREFIX_PATH=$($QMAKE -query QT_INSTALL_PREFIX)" "$@"
+"$CMAKE" --build "$ROOT/.deps" --parallel "${JOBS:-4}"

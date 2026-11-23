@@ -1,38 +1,145 @@
-cmake_minimum_required(VERSION 3.21)
-project(omawrite LANGUAGES CXX)
+cmake_minimum_required(VERSION 3.24)
+project(omawrite VERSION 0.7.4 LANGUAGES CXX)
 
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
-if(NOT CMAKE_BUILD_TYPE)
-  set(CMAKE_BUILD_TYPE Release)
+if(NOT CMAKE_BUILD_TYPE AND NOT CMAKE_CONFIGURATION_TYPES)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
+if(APPLE)
+  enable_language(OBJCXX)
+  set(CMAKE_OBJCXX_STANDARD 17)
 endif()
 
-# Widgets and PrintSupport are for the system print dialog, which is why the
-# app runs a QApplication rather than a QGuiApplication.
-find_package(Qt6 REQUIRED COMPONENTS
-  Core Gui Concurrent Widgets PrintSupport Qml Quick QuickControls2 QuickDialogs2 DBus Test GuiPrivate)
+include(CTest)
+# Widgets and PrintSupport support the native system print dialog.
+find_package(Qt6 6.7 REQUIRED COMPONENTS Core Gui Concurrent Widgets PrintSupport
+  Qml Quick QuickControls2 QuickDialogs2 Network)
+set(write_qt Qt6::Core Qt6::Gui Qt6::Concurrent Qt6::Widgets Qt6::PrintSupport
+  Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::Network)
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  find_package(Qt6 REQUIRED COMPONENTS DBus)
+  list(APPEND write_qt Qt6::DBus)
+endif()
 
-# Everything but main.cpp, shared by the app and the tests, so each source
-# compiles once and a new file in src/ needs no line here.
-file(GLOB omawrite_sources CONFIGURE_DEPENDS src/*.cpp src/*.h)
-list(REMOVE_ITEM omawrite_sources ${CMAKE_SOURCE_DIR}/src/main.cpp)
-add_library(omawrite_core STATIC ${omawrite_sources})
+# The same pinned, static KDE libraries used by the Windows/qmake build.
+set(WRITE_DEPENDENCY_PREFIX "${CMAKE_SOURCE_DIR}/.deps/install" CACHE PATH "Private KDE dependency installation")
+list(PREPEND CMAKE_PREFIX_PATH "${WRITE_DEPENDENCY_PREFIX}")
+foreach(kind SYNTAX SPELL)
+  if(DEFINED ENV{OMAWRITE_${kind}_PREFIX})
+    list(PREPEND CMAKE_PREFIX_PATH "$ENV{OMAWRITE_${kind}_PREFIX}")
+  endif()
+endforeach()
+find_package(KF6SyntaxHighlighting 6.13 REQUIRED)
+find_package(KF6Sonnet 6.13 REQUIRED)
+file(GLOB write_sources CONFIGURE_DEPENDS src/*.cpp src/*.h)
+list(REMOVE_ITEM write_sources "${CMAKE_SOURCE_DIR}/src/main.cpp")
+add_library(omawrite_core STATIC ${write_sources})
+# Q_IMPORT_PLUGIN is a static initializer, not a referenced core symbol. Keeping
+# it inside the core archive lets linkers discard it (and every dictionary).
+# Put the import object directly on each core consumer's executable link line.
+add_library(omawrite_spell_plugins OBJECT dependencies/spellplugins.cpp)
+target_link_libraries(omawrite_spell_plugins PRIVATE Qt6::Core)
+target_link_libraries(omawrite_core INTERFACE $<TARGET_OBJECTS:omawrite_spell_plugins>)
 target_include_directories(omawrite_core PUBLIC src)
-target_link_libraries(omawrite_core PUBLIC
-  Qt6::Core Qt6::Gui Qt6::Concurrent Qt6::Widgets Qt6::PrintSupport
-  Qt6::Qml Qt6::Quick Qt6::QuickControls2 Qt6::QuickDialogs2 Qt6::DBus)
-target_compile_options(omawrite_core PUBLIC -Wall -Wextra)
+target_link_libraries(omawrite_core PUBLIC ${write_qt} KF6::SyntaxHighlighting)
+target_compile_definitions(omawrite_core PUBLIC KSYNTAXHIGHLIGHTING_STATIC_DEFINE SONNETCORE_STATIC_DEFINE)
+if(MSVC)
+  target_compile_options(omawrite_core PRIVATE /W4)
+else()
+  target_compile_options(omawrite_core PRIVATE -Wall -Wextra)
+endif()
+if(APPLE)
+  target_sources(omawrite_core PRIVATE src/macapplicationreopen.mm)
+  set(write_spell_plugin sonnet_nsspellchecker)
+  set(write_spell_runtime "-framework AppKit")
+elseif(WIN32)
+  set(write_spell_plugin sonnet_ispellchecker)
+  set(write_spell_runtime ole32)
+else()
+  set(write_spell_plugin sonnet_hunspell)
+  find_package(PkgConfig REQUIRED)
+  pkg_check_modules(HUNSPELL REQUIRED IMPORTED_TARGET hunspell)
+  set(write_spell_runtime PkgConfig::HUNSPELL)
+endif()
+set(write_spell_prefix "${WRITE_DEPENDENCY_PREFIX}")
+if(DEFINED ENV{OMAWRITE_SPELL_PREFIX})
+  set(write_spell_prefix "$ENV{OMAWRITE_SPELL_PREFIX}")
+endif()
+find_library(write_spell_library NAMES ${write_spell_plugin}
+  PATHS "${write_spell_prefix}/lib/plugins/kf6/sonnet" NO_DEFAULT_PATH REQUIRED)
+# Backends precede their Core/runtime dependencies for GNU static linking too.
+add_library(write_spell_backend STATIC IMPORTED)
+set_target_properties(write_spell_backend PROPERTIES
+  IMPORTED_LOCATION "${write_spell_library}"
+  INTERFACE_LINK_LIBRARIES "KF6::SonnetCore;${write_spell_runtime}")
+target_link_libraries(omawrite_core PUBLIC write_spell_backend)
 
-add_executable(omawrite src/main.cpp src/resources.qrc)
+add_library(omawrite_resources OBJECT src/resources.qrc)
+# RCC-generated code references Qt Core data symbols. Compile it with Qt's
+# usage requirements and PIC to avoid protected-symbol copy relocations on ELF.
+target_link_libraries(omawrite_resources PRIVATE Qt6::Core)
+set_target_properties(omawrite_resources PROPERTIES POSITION_INDEPENDENT_CODE ON)
+function(write_resources target)
+  target_sources(${target} PRIVATE $<TARGET_OBJECTS:omawrite_resources>)
+endfunction()
+add_executable(omawrite WIN32 MACOSX_BUNDLE src/main.cpp)
 target_link_libraries(omawrite PRIVATE omawrite_core)
+target_compile_definitions(omawrite PRIVATE OMAWRITE_VERSION="${PROJECT_VERSION}")
+write_resources(omawrite)
+if(APPLE)
+  set(EXECUTABLE_NAME Write)
+  set(ASSETCATALOG_COMPILER_APPICON_NAME omawrite.icns)
+  set(MACOSX_DEPLOYMENT_TARGET "${CMAKE_OSX_DEPLOYMENT_TARGET}")
+  if(NOT MACOSX_DEPLOYMENT_TARGET)
+    set(MACOSX_DEPLOYMENT_TARGET "${QT_SUPPORTED_MIN_MACOS_VERSION}")
+  endif()
+  configure_file(assets/Info.plist "${CMAKE_CURRENT_BINARY_DIR}/Write-Info.plist")
+  set_target_properties(omawrite PROPERTIES OUTPUT_NAME Write
+    MACOSX_BUNDLE_INFO_PLIST "${CMAKE_CURRENT_BINARY_DIR}/Write-Info.plist"
+    MACOSX_BUNDLE_GUI_IDENTIFIER io.omacom.omawrite
+    MACOSX_BUNDLE_BUNDLE_NAME Write
+    MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+    MACOSX_BUNDLE_ICON_FILE omawrite.icns)
+  target_sources(omawrite PRIVATE assets/omawrite.icns)
+  set_source_files_properties(assets/omawrite.icns PROPERTIES MACOSX_PACKAGE_LOCATION Resources)
+  set(write_notices "$<TARGET_BUNDLE_DIR:omawrite>/Contents/Resources")
+elseif(WIN32)
+  configure_file(packaging/windows.rc.in "${CMAKE_CURRENT_BINARY_DIR}/windows.rc" @ONLY)
+  target_sources(omawrite PRIVATE "${CMAKE_CURRENT_BINARY_DIR}/windows.rc")
+  set(write_notices "$<TARGET_FILE_DIR:omawrite>")
+else()
+  set(write_notices "$<TARGET_FILE_DIR:omawrite>")
+endif()
+add_custom_command(TARGET omawrite POST_BUILD
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/LICENSE" "${CMAKE_SOURCE_DIR}/COPYRIGHT.md" "${write_notices}/"
+  COMMAND ${CMAKE_COMMAND} -E copy_directory "${CMAKE_SOURCE_DIR}/third_party" "${write_notices}/third_party"
+  COMMAND ${CMAKE_COMMAND} -E make_directory "${write_notices}/fonts"
+  COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/fonts/OFL.txt" "${write_notices}/fonts/OFL.txt")
 
-# The tests read the QML they drive straight from src/.
-enable_testing()
-add_executable(omawrite_tests tests/omawrite_tests.cpp)
-target_link_libraries(omawrite_tests PRIVATE omawrite_core Qt6::Test Qt6::GuiPrivate)
-add_test(NAME omawrite_tests COMMAND omawrite_tests)
-# An empty platform theme keeps file dialogs in the offscreen window instead
-# of opening the real desktop chooser.
-set_tests_properties(omawrite_tests PROPERTIES ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=")
+if(BUILD_TESTING)
+  find_package(Qt6 REQUIRED COMPONENTS Test GuiPrivate)
+  function(write_test name source)
+    add_executable(${name} ${source})
+    target_link_libraries(${name} PRIVATE omawrite_core Qt6::Test)
+    write_resources(${name})
+    add_test(NAME ${name} COMMAND ${name})
+    set_tests_properties(${name} PROPERTIES
+      ENVIRONMENT "QT_QPA_PLATFORM=offscreen;QT_QPA_PLATFORMTHEME=" TIMEOUT 180)
+  endfunction()
+  write_test(omawrite_upstream_tests tests/omawrite_tests.cpp)
+  target_link_libraries(omawrite_upstream_tests PRIVATE Qt6::GuiPrivate)
+  write_test(omawrite_editor_tests tests/tst_editor.cpp)
+  if(APPLE)
+    target_sources(omawrite_editor_tests PRIVATE tests/macapplicationreopentest.mm)
+  endif()
+  write_test(omawrite_shortcut_tests tests/tst_shortcutlabels.cpp)
+  foreach(suite IN ITEMS attachments codehighlighting headings instancebroker livepreview mermaid previewblocks printing spellchecking)
+    write_test(omawrite_${suite}_tests tests/${suite}/tst_${suite}.cpp)
+  endforeach()
+  write_test(omawrite_spellchecking_integration_tests tests/spellchecking/tst_integration.cpp)
+  write_test(omawrite_spellchecking_main_tests tests/spellchecking/tst_main.cpp)
+  write_test(omawrite_native_spellchecking_tests tests/spellchecking/tst_native.cpp)
+endif()

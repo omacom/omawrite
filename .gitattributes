@@ -1,0 +1,3 @@
+# cmd.exe requires native line endings for reliable CALL/GOTO label scanning.
+*.bat text eol=crlf
+*.cmd text eol=crlf

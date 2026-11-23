@@ -1,0 +1,41 @@
+{
+    "columns": 28,
+    "complete": true,
+    "dpr": 1,
+    "font": "IBM Plex Mono,-1,20,5,400,0,0,0,0,0,0,0,0,0,0,1,,0,0",
+    "label": "baseline-synthetic",
+    "qt": "6.12.0",
+    "refresh_hz": 144,
+    "rows": 1361,
+    "scope": "12 native buffered keys and canonical Tab commits to follow-up frame submission; not display latency or FPS; spelling disabled; private fixture bytes/path never included",
+    "screen": "Q27G2G3R3B",
+    "source_units": 722973,
+    "tab_followup_submission_ms": [
+        31.876458,
+        23.6065,
+        20.418417,
+        26.182958,
+        25.479125,
+        30.295875,
+        21.089875,
+        25.165667,
+        24.566208,
+        30.340792,
+        20.024833,
+        24.467
+    ],
+    "typing_followup_submission_ms": [
+        3.969666,
+        1.262541,
+        3.196584,
+        1.493083,
+        7.542666,
+        1.67925,
+        6.41175,
+        6.090417,
+        7.159459,
+        2.052125,
+        4.897958,
+        6.757791
+    ]
+}

@@ -1,0 +1,380 @@
+file	language	declared_license	author
+4dos.xml	4DOS BatchToMemory	LGPL	Stefan Huebner (st0ff@npl.de)
+abap.xml	ABAP	GPL	Marcos Antonio Alvarez Costales (busgosin@hotmail.com)
+abc.xml	ABC	LGPL	Andrea Primiani (primiani@dag.it)
+actionscript.xml	ActionScript 2.0	LGPL	Aaron Miller (armantic101@gmail.com)
+ada.xml	Ada		
+adblock.xml	Adblock Plus	MIT	Volker Krause (vkrause@kde.org)
+agda.xml	Agda	LGPL	Matthias C. M. Troffaes
+ahdl.xml	AHDL	MIT	Dominik Haumann (dhaumann@kde.org)
+ahk.xml	AutoHotKey		Sinel
+alert.xml	Alerts	MIT	Dominik Haumann (dhaumann@kde.org)
+ample.xml	AMPLE	Apache & LGPL	Christian Parg (cparg@gmx.de)
+ansforth94.xml	ANS-Forth94	LGPLv2.1+	Mark Corbin (mark@dibsco.co.uk)
+ansic89.xml	ANSI C89	MIT	Dominik Haumann (dhaumann@kde.org)
+ansys.xml	Ansys	LGPL	Giovanni Bacci (giovanni@castellodilari.it)
+antlr.xml	ANTLR	MIT	Andrzej Borucki (borucki.andrzej@gmail.com)
+apache.xml	Apache Configuration	LGPL	Jan Janssen (medhefgo@googlemail.com)
+apparmor.xml	AppArmor Security Profile	MIT	Nibaldo González (nibgonz@gmail.com)
+asciidoc.xml	AsciiDoc	MIT	Andreas Gratzer
+asm-arm.xml	ARM Assembler	MIT	Leo Marušić
+asm-avr.xml	AVR Assembler	GPLv2+	Roland Nagy
+asm-dsp56k.xml	Motorola DSP56k	LGPL	Miro Kropacek (miro.kropacek@gmail.com)
+asm-m68k.xml	Motorola 68k (VASM/Devpac)	LGPL	Miro Kropacek (miro.kropacek@gmail.com)
+asm6502.xml	Asm6502		
+asn1.xml	ASN.1	GPL	Philippe Rigault
+asp.xml	ASP	LGPL	Antonio Salazar (savedfastcool@gmail.com)
+ats.xml	ATS	LGPL	Kiwamu Okabe (kiwamu@debian.or.jp)
+awk.xml	AWK	LGPL	
+bash.xml	Bash	LGPL	Wilbert Berendsen (wilbert@kde.nl)
+bibtex.xml	BibTeX	LGPL	Jeroen Wijnhout (Jeroen.Wijnhout@kdemail.net)+Thomas Braun (thomas.braun@virtuell-zuhause.de)
+bitbake.xml	Bitbake	GPL	Ivan Koveshnikov
+bmethod.xml	B-Method	LGPL	Ivo Anjo (knuckles@gmail.com)
+boo.xml	Boo	LGPL	Marc Dassonneville
+brightscript.xml	BrightScript	MIT	Daniel Levin (dendy.ua@gmail.com)
+c.xml	C		
+cabal.xml	Cabal	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+carto-css-mml.xml	CartoCSS MML	LGPL	Dr Orlovsky MA (dr.orlovsky@gmail.com), Nibaldo González (nibgonz@gmail.com), Lukas Sommer (sommerluk@gmail.com)
+carto-css.xml	CartoCSS MSS	CC0 Public Domain Dedication, version 1.0, as published by Creative Commons	Lukas Sommer
+cashscript.xml	CashScript	MIT	James Zuccon
+ccss.xml	CleanCSS	BSD	Massimiliano Torromeo
+cg.xml	Cg	LGPL	Florian Schanda (florian.schanda@schanda.de)
+cgis.xml	CGiS		
+changelog.xml	ChangeLog	MIT	Dominik Haumann (dhaumann@kde.org)
+cil.xml	Common Intermediate Language (CIL)	MIT	Volker Krause (vkrause@kde.org)
+cisco.xml	Cisco	LGPL	Raphaël GRAPINET
+clipper.xml	Clipper	GPL	Andrey Cherepanov (sibskull@mail.ru)
+clist.xml	CLIST	MIT	
+clojure.xml	Clojure	LGPLv2+	Dominik Haumann [lisp] modified for clojure by Caspar Hasenclever
+cmake.xml	CMake	LGPLv2+	Alex Turbov (i.zaufi@gmail.com)
+cobol.xml	COBOL	MIT	Jonathan Poelen (jonathan.poelen@gmail.com);github.com/MihailJP
+coffee.xml	CoffeeScript	MIT	Max Shawabkeh (max99x@gmail.com)
+coldfusion.xml	ColdFusion		
+comments.xml	Comments	MIT	Alex Turbov (i.zaufi@gmail.com)
+commonlisp.xml	Common Lisp	MIT	Dominik Haumann (dhaumann@kde.org)
+component-pascal.xml	Component-Pascal		Werner Braun (wb@o3-software.de)
+context.xml	ConTeXt	GPL	Philipp A. (flying-sheep@web.de)
+cpp.xml	C++	LGPL	Alex Turbov (i.zaufi@gmail.com)
+crk.xml	Crack		
+crystal.xml	Crystal	LGPLv2+	Gaurav Shah (gauravshah.89@gmail.com)
+cs.xml	C#		
+css.xml	CSS	LGPL	Wilbert Berendsen (wilbert@kde.nl)
+csv-pipe.xml	CSV (pipe)	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+csv-semicolon.xml	CSV (semicolon)	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+csv-whitespace.xml	CSV (whitespace)	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+csv.xml	CSV	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+cubescript.xml	CubeScript	zlib/libpng	Kevin Meyer
+cue.xml	CUE Sheet		
+curry.xml	Curry	LGPL	Björn Peemöller (bjp@informatik.uni-kiel.de)
+d.xml	D	LGPL	Diggory Hardy (diggory.hardy@gmail.com), Aziz Köksal (aziz.koeksal@gmail.com), Jari-Matti Mäkelä (jmjm@iki.fi), Simon J Mackenzie (project.katedxml@smackoz.fastmail.fm)
+dart.xml	Dart	MIT	Waqar Ahmed (waqar.17a@gmail.com)
+debianchangelog.xml	Debian Changelog		
+debiancontrol.xml	Debian Control		
+desktop.xml	.desktop		
+diff.xml	Diff		
+djangotemplate.xml	Django HTML Template	LGPL	Matthew Marshall (matthew@matthewmarshall.org)
+dockerfile.xml	Dockerfile	MIT	James Turnbull (james@lovedthanlost.net)
+dosbat.xml	MS-DOS Batch	LGPL	Matthew Woehlke (mw_triad@users.sourceforge.net)
+dot.xml	dot		Postula Loïs (lois.postula@live.be)
+doxyfile.xml	Doxyfile	MIT	Ernst Maurer (ernst.maurer@gmail.com)
+doxygen.xml	Doxygen	MIT	Dominik Haumann (dhaumann@kde.org)
+dtd.xml	DTD	LGPL	Andriy Lesyuk (s-andy@in.if.ua)
+dts.xml	Devicetree Source (DTS)	MIT	Artur Weber
+e.xml	E Language		
+earthfile.xml	Earthfile	MIT	Alex Turbov (i.zaufi@gmail.com)
+eiffel.xml	Eiffel		Sebastian Vuorinen
+elixir-eex.xml	Elixir/EEx	MIT	Jade Pfeiffer (jade@pfeiffer.codes)
+elixir-heex.xml	Elixir/HEEx	MIT	Jade Pfeiffer (jade@pfeiffer.codes)
+elixir.xml	Elixir	LGPLv2+	Rubén Caro (ruben.caro.estevez@gmail.com), Boris Egorov (egorov@linux.com), Jade Pfeiffer (jade@pfeiffer.codes)
+elm.xml	Elm	MIT	Bonghyun Kim (bonghyun.d.kim@gmail.com)
+elvish.xml	Elvish	MIT	Lilith Houtjes (lilith@stroopwafel.dev)
+email.xml	Email	MIT	Volker Krause (vkrause@kde.org)
+erlang.xml	Erlang	LGPLv2	Bill Ross (bill@emailme.net.au)
+euphoria.xml	Euphoria	LGPLv2+	Irv Mullins (irvm@ellijay.com)
+fasm.xml	Intel x86 (FASM)	GPL	rCX (rCX12@yahoo.com)
+fastq.xml	FASTQ	GPL	Philipp A
+ferite.xml	ferite		
+fgl-4gl.xml	4GL	LGPL	Andrej Falout (andrej@falout.org)
+fgl-per.xml	4GL-PER	LGPL	Andrej Falout (andrej@falout.org)
+fish.xml	Fish	LGPL	Arnd Diestelhorst (adiestelhorst@m-xchg.de)
+flatbuffers.xml	FlatBuffers	MIT	Harald Fernengel
+fluent.xml	Fluent	MIT	Fabian Wunsch (fabian@uriah.heep.sax.de)
+fortran-fixed.xml	Fortran (Fixed Format)	MIT	Franchin Matteo (fnch@libero.it)
+fortran-free.xml	Fortran (Free Format)	MIT	Franchin Matteo (fnch@libero.it), Janus Weil
+freebasic.xml	FreeBASIC	GPL	Chris Neugebauer (chrisjrn@gmail.com)
+fsharp.xml	FSharp	LGPL	Bas Bossink (bas.bossink@gmail.com)
+fstab.xml	fstab	Public Domain	Diego Iastrubni (elcuco@kde.org)
+ftl.xml	FTL	LGPLv2+	Radomir Svancer (svancer@gmail.com), Robert Kratky (kratky@rob.cz>), Matthias Mailänder (matthias.mailaender@vogella.com)
+gap.xml	GAP	GPL	Jose Joao Morais
+gcc.xml	GCCExtensions	LGPL	Alex Turbov (i.zaufi@gmail.com)
+gcode.xml	G-Code	LGPLv2+	Fernand Veilleux (fernveilleux@gmail.com)
+gd-script.xml	Godot		Mario Aichinger
+gdb-bt.xml	GDB Backtrace	LGPL	Milian Wolff (mail@milianw.de)
+gdb.xml	GDB	LGPL	Milian Wolff (mail@milianw.de)
+gdbinit.xml	GDB Init	LGPL	Milian Wolff (mail@milianw.de)
+gdl.xml	GDL	MIT	Christoph Cullmann (cullmann@absint.com)
+gettext.xml	GNU Gettext	MIT	Dominik Haumann (dhaumann@kde.org)
+gherkin.xml	Cucumber Gherkin feature	MIT	Samu Voutilainen (kde.gherkin-syntax@smar.fi)
+git-ignore.xml	Git Ignore	LGPL	
+git-rebase.xml	Git Rebase	LGPL	Orgad Shaneh (orgads@gmail.com)
+gitolite.xml	Gitolite	GPL	Andor Dávid (david-andor@kozpontiagy.hu)
+gleam.xml	Gleam	MIT	Louis Guichard (kde@glpda.net)
+glosstex.xml	GlossTex	LGPL	Thomas Braun(braun@physik.fu-berlin.de)
+glsl.xml	GLSL	LGPL	Oliver Richers (o.richers@tu-bs.de)
+gnuassembler.xml	GNU Assembler	GPLv2+	John Zaitseff (J.Zaitseff@zap.org.au), Roland Pabel (roland@pabel.name), Miquel Sabaté (mikisabate@gmail.com) Waqar Ahmed (waqar.17a@gmail.com)
+gnuplot.xml	Gnuplot		
+go.xml	Go	GPLv2+	Miquel Sabaté (mikisabate@gmail.com)
+gpr.xml	GPRBuild	MIT	Léo Germond (germond@adacore.com)
+grammar.xml	KDev-PG[-Qt] Grammar		Milian Wolff (mail@milianw.de), Jonathan Schmidt-Dominé (devel@the-user.org)
+graphql.xml	GraphQL	MIT	Volker Krause (vkrause@kde.org)
+groovy.xml	Groovy	LGPL	Chris Reeves (chris@ev-soft.net)
+haml.xml	Haml	LGPL	Cies Breijs (cies_at_kde_nl), Jonathan Poelen (jonathan.poelen@gmail.com)
+hamlet.xml	Hamlet	LGPL	Bastian Holst (bastianholst@gmx.de)
+hare.xml	Hare	MIT	Akseli Lahtinen (akselmo@akselmo.dev)
+haskell.xml	Haskell	LGPL	Nicolas Wu (zenzike@gmail.com)
+haxe.xml	Haxe	MIT	Chad Joan
+hjson.xml	Hjson	MIT	Marco Nelles (marco@maniatek.de)
+html.xml	HTML	LGPL	Wilbert Berendsen (wilbert@kde.nl)
+hunspell-aff.xml	Hunspell Affix File	LGPLv2.1+KDE e.V.	Lukas Sommer
+hunspell-dat.xml	Hunspell Thesaurus File	LGPL version 2.1, or version 3 or later versions approved by the membership of KDE e.V.; or any other license appoved by the emembership of KDE e.V.	Lukas Sommer
+hunspell-dic.xml	Hunspell Dictionary File	LGPL version 2.1, or version 3 or later versions approved by the membership of KDE e.V.; or any other license appoved by the emembership of KDE e.V.	Lukas Sommer
+hunspell-idx.xml	Hunspell Thesaurus Index File	LGPL version 2.1, or version 3 or later versions approved by the membership of KDE e.V.; or any other license appoved by the emembership of KDE e.V.	Lukas Sommer
+idconsole.xml	Quake Script		
+idl.xml	IDL		
+idris.xml	Idris	LGPL	Alexander Shabalin
+ilerpg.xml	ILERPG	GPLv2+	Nick Roux (nick@sundown.homeip.net)
+inform.xml	Inform	GPL	Giancarlo Niccolai (giancarlo@niccolai.ws)
+ini.xml	INI Files	LGPL	Jan Janssen (medhefgo@web.de)
+innosetup.xml	InnoSetup	MIT	Michael Hansen
+intelhex.xml	Intel HEX	MIT	Miklos Marton (martonmiklosqdev@gmail.com)
+isocpp.xml	ISO C++	LGPL	Alex Turbov (i.zaufi@gmail.com)
+j.xml	J	GPL	Igor Zhuravlov (zhuravlov.ip@ya.ru), greg heil (gheil.j@gmail.com)
+jam.xml	Jam	MIT	Mildred (silkensedai@online.fr)
+java-module.xml	Java Module	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+java-properties.xml	Java Properties	MIT	Matthias Böhm (MatthiasBoehm87 _at_ gmail.com)
+java.xml	Java	LGPL	Alfredo Luiz Foltran Fialho (alfoltran@ig.com.br)
+javadoc.xml	Javadoc	LGPL	Alfredo Luiz Foltran Fialho (alfoltran@ig.com.br)
+javascript-react.xml	JavaScript React (JSX)	MIT	Nibaldo González (nibgonz@gmail.com)
+javascript.xml	JavaScript		Anders Lund (anders@alweb.dk), Joseph Wenninger (jowenn@kde.org), Whitehawk Stormchaser (zerokode@gmx.net)
+jcl.xml	JCL	MIT	
+jira.xml	Jira	FDL	
+json.xml	JSON	GPL	Sebastian Pipping (sebastian@pipping.org)
+jsonnet.xml	Jsonnet	MIT	Ribhav Kaul
+jsp.xml	JSP	LGPL	Rob Martin (rob@gamepimp.com)
+julia.xml	Julia	MIT	
+k.xml	k	LGPLv2+	James Schmitz (james.schmitz@gmail.com)
+kateconfig.xml	Kate Config	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+kbasic.xml	KBasic		
+kconfig.xml	Kconfig	GPLv3	Martin Walch (walch.martin@web.de)
+kdesrc-buildrc.xml	kdesrc-buildrc	LGPLv3	Michael Pyne <mpyne@kde.org>
+klipper-config.xml	Klipper Config	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+klipper-gcode.xml	Klipper G-Code	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+kotlin.xml	Kotlin	LGPLv2+	Sergey Mashkov (sergey.mashkov@jetbrains.com)
+latex.xml	LaTeX	LGPL	Jeroen Wijnhout (Jeroen.Wijnhout@kdemail.net)+Holger Danielsson (holger.danielsson@versanet.de)+Michel Ludwig (michel.ludwig@kdemail.net)+Thomas Braun (thomas.braun@virtuell-zuhause.de)
+ld.xml	GNU Linker Script		Lyle Putnam (lcputnam@gmail.com)
+ldif.xml	LDIF		Andreas Hochsteger (e9625392@student.tuwien.ac.at)
+less.xml	LESSCSS	LGPL	from CCS:Wilbert Berendsen (wilbert@kde.nl)
+lex.xml	Lex/Flex	LGPL	Jan Villat (jan.villat@net2000.ch)
+lilypond.xml	LilyPond	LGPL	Wilbert Berendsen (info@wilbertberendsen.nl)
+literate-curry.xml	Literate Curry	LGPL	Björn Peemöller (bjp@informatik.uni-kiel.de)
+literate-haskell.xml	Literate Haskell	LGPL	Nicolas Wu (zenzike@gmail.com)
+llvm.xml	LLVM	LLVM Release License	LLVM Team
+logcat.xml	Logcat	MIT	Nibaldo González (nibgonz@gmail.com)
+logfile-advanced.xml	Log File (advanced)	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+logfile.xml	Log File (simplified)	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+logtalk.xml	Logtalk	Apache License 2.0	Paulo Moura (pmoura@logtalk.org)
+lpc.xml	LPC	Artistic	Andreas Klauer (Andreas.Klauer@metamorpher.de)
+lsl.xml	LSL	LGPLv3	Rafał Rzepecki
+lua.xml	Lua		
+m3u.xml	M3U	LGPL	Jan Janssen (medhefgo@web.de)
+m4.xml	GNU M4	New BSD License	Jaak Ristioja
+mab.xml	MAB-DB		
+magma.xml	Magma		
+makefile.xml	Makefile		Per Wigren (wigren@home.se)
+mako.xml	Mako	LGPL	Massimiliano Torromeo (massimiliano.torromeo@gmail.com)
+mandoc.xml	Troff Mandoc	GPL	Matthew Woehlke (mw_triad@users.sourceforge.net)
+mapcss.xml	MapCSS	MIT	Volker Krause (vkrause@kde.org)
+markdown.xml	Markdown	GPL,BSD	Darrin Yeager, Claes Holmerson
+mason.xml	Mason		
+mathematica.xml	Mathematica	LGPL	Sven Brauch (svenbrauch@gmail.com)
+matlab.xml	Matlab		
+maxima.xml	Maxima	LGPLv2.1+	Alexey Beshenov <al@beshenov.ru>
+mediawiki.xml	MediaWiki	FDL	
+mel.xml	MEL	GPLv2+	Karl Erlandsen (karlerlandsen@yahoo.com)
+mergetagtext.xml	mergetag text	LGPLv2+	Diggory Hardy (diggory.hardy@gmail.com)
+meson.xml	Meson	LGPL	
+metafont.xml	Metapost/Metafont	LGPL	Yedvilun (yedvilun@gmail.com)
+metamath.xml	Metamath	MIT	Aaron Puchert
+mib.xml	MIB	MIT	Jaap Keuter (jaap.keuter@xs4all.nl)
+mips.xml	MIPS Assembler	MIT	Dominik Haumann (dhaumann@kde.org)
+modelica.xml	Modelica	LGPLv2+	Federico Zenith
+modelines.xml	Modelines	MIT	Alex Turbov (i.zaufi@gmail.com)
+modula-2-iso-only.xml	Modula-2 (ISO only)	MIT	B. Kowarsch (trijezdci@github)
+modula-2-pim-only.xml	Modula-2 (PIM only)	MIT	B. Kowarsch (trijezdci@github)
+modula-2-r10-only.xml	Modula-2 (R10 only)	MIT	B. Kowarsch (trijezdci@github)
+modula-2.xml	Modula-2	MIT	B. Kowarsch (trijezdci@github)
+modula-3.xml	Modula-3	LGPL	
+monobasic.xml	MonoBasic	GPL	Davide Bettio (davide.bettio@kdemail.net)
+mup.xml	Music Publisher	LGPL	Wilbert Berendsen (wilbert@kde.nl)
+mustache.xml	Mustache/Handlebars (HTML)	MIT	Nibaldo González (nibgonz@gmail.com), based on the HTML highlighter by Wilbert Berendsen (wilbert@kde.nl)
+nagios.xml	Nagios	GPL	Gastón Martini
+nasm.xml	Intel x86 (NASM)	GPLv2+	Nicola Gigante (nicola.gigante@gmail.com)
+nemerle.xml	Nemerle		caminoix + Kamil Skalski (Nazgul)
+nesc.xml	nesC	GPLv2	Shakthi Kannan
+nginx.xml	nginx Configuration	MIT	Jyrki Gadinger (nilsding@nilsding.org)
+nim.xml	Nim	WTFPL	github.com/juancarlospaco
+ninja.xml	Ninja	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+nix.xml	Nix	MIT	Marco Rebhan <me@dblsaiko.net>
+noweb.xml	noweb		Scott Collins (scc@scottcollins.net)
+nsis.xml	NSIS	LGPLv2+	Kevin Funk (kfunk@kde.org)
+objectivec.xml	Objective-C		
+objectivecpp.xml	Objective-C++		Gennady Telegin (gepo@lvk.cs.msu.su
+ocaml.xml	Objective Caml	LGPL	Glyn Webster (glynwebster@orcon.net.nz) and Vincent Hugot (vincent.hugot@gmail.com)
+ocamllex.xml	Objective Caml Ocamllex	LGPL	Glyn Webster (glynwebster@orcon.net.nz) and Vincent Hugot (vincent.hugot@gmail.com)
+ocamlyacc.xml	Objective Caml Ocamlyacc	LGPL	Glyn Webster (glynwebster@orcon.net.nz) and Vincent Hugot (vincent.hugot@gmail.com)
+octave.xml	Octave	GPL	Luis Silvestre and Federico Zenith
+odin.xml	Odin	MIT	Akseli Lahtinen (akselmo@akselmo.dev)
+oors.xml	OORS	MIT	Gernot Gebhard (gebhard@absint.com)
+opal.xml	OPAL		Sebastian Pipping (webmaster@hartwork.org)
+opencl.xml	OpenCL		
+openscad.xml	OpenSCAD	MIT	Julian Stirling (julian@julianstirling.co.uk)
+opsiscript.xml	opsi-script	LGPL	Stefan Staeglich (sstaeglich@kdemail.net)
+orgmode.xml	Org Mode	MIT	Gary Wang
+overpassql.xml	Overpass QL	MIT	Volker Krause (vkrause@kde.org)
+pango.xml	Pango	LGPL	Jonathan Schmidt-Domniné <devel@the-user.org>
+pascal.xml	Pascal		Unnamed people and Liu Sizhuang(oldherl@gmail.com)
+perl.xml	Perl	LGPLv2	Anders Lund (anders@alweb.dk)
+pgn.xml	PGN	GPL	Ruben Carlo Benante (dr.beco@gmail.com)
+php.xml	PHP/PHP		
+picsrc.xml	PicAsm	LGPL	Alain GIBAUD (alain.gibaud@univ-valenciennes.fr)
+pig.xml	Pig	GPL	Johannes Schwenk, johannes.schwenk@adition.com
+pike.xml	Pike		Paul Pogonyshev
+pli.xml	PL/I		Nikolay Kultashev, nkultashev@yandex.ru
+ply.xml	PLY	LGPLv2+	Volker Krause (vkrause@kde.org)
+pony.xml	Pony	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+postscript.xml	PostScript		
+povray.xml	POV-Ray	LGPL	Christoph Hormann (chris_hormann@gmx.de)
+powershell.xml	PowerShell	MIT	Motoki Kashihara (motoki8791@gmail.com); Michael Lombardi (Michael.T.Lombardi@outlook.com)
+ppd.xml	PostScript Printer Description	Public Domain	Lukas Sommer
+praat.xml	Praat	LGPLv2	Jose Joaquín Atria (jjatria@gmail.com)
+progress.xml	progress	GPL	Rares Stanciulescu (rstanciu@operamail.com)
+prolog.xml	Prolog	LGPLv2+	Torsten Eichstädt (torsten.eichstaedt@web.de)
+protobuf.xml	Protobuf	LGPL	Slawomir Mikula (slawek.mikula@gmail.com)
+pug.xml	Pug	LGPL	Guo Yunhe (guoyunhebrave@gmail.com)
+puppet.xml	Puppet	LGPLv2+	Michal Humpula (michal.humpula@seznam.cz)
+pure.xml	Pure		
+purebasic.xml	PureBasic	LGPL	Alexander Clay (Tuireann@EpicBasic.org);Sven Langenkamp (ace@kylixforum.de)
+purescript.xml	PureScript	BSD3	Gleb Popov (6yearold@gmail.com)
+python.xml	Python		Michael Bueker
+q.xml	q	LGPLv2+	James Schmitz (james.schmitz@gmail.com)
+qdocconf.xml	QDoc Configuration	MIT	Volker Krause (vkrause@kde.org)
+qface.xml	QFace	MIT	Dominik Holland (dominik.holland@qt.io)
+qmake.xml	QMake	MIT	Milian Wolff (mail@milianw.de), Kevin Funk (kevin.funk@kdab.com)
+qml.xml	QML	MIT	Milian Wolff (mail@milianw.de)
+r.xml	R Script	GPLv2	
+racket.xml	Racket	MIT	slbtty(shenlebantongying@gmail.com)
+raku.xml	Raku	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+rapidq.xml	RapidQ	LGPL	Tiberiu Dragulinescu
+rdoc.xml	R documentation	MIT	Aaron Puchert
+relaxng.xml	RELAX NG	LGPL	Thomas Schraitle (tom_schr AT web DOT de)
+relaxngcompact.xml	RelaxNG-Compact	LGPL	Rintze Zelle
+renpy.xml	RenPy	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+replicode.xml	Replicode	GPLv2+	Martin Sandsmark
+rest.xml	reStructuredText		
+retro.xml	RETRO	MIT	
+rexx.xml	REXX		
+rhtml.xml	Ruby/Rails/RHTML	LGPLv2+	Richard Dale rdale@foton.es
+rib.xml	RenderMan RIB	LGPL	David Williams <david@david-williams.info>
+rmarkdown.xml	R Markdown	GPL	Dirk Sarpe (dsarpe@posteo.de)
+robot.xml	Robot	MIT	Akseli Lahtinen (akselmo@akselmo.dev)
+roff.xml	Roff	GPL	Matthew Woehlke (mw_triad@users.sourceforge.net)
+rpmspec.xml	RPM Spec	Public Domain	
+rsiidl.xml	RSI IDL		Markus Fraenz (fraenz@linmpi.mpg.de)
+rtf.xml	Rich Text Format	LGPL version 2.1, or version 3 or later versions approved by the membership of KDE e.V.; or any other license appoved by the emembership of KDE e.V.	Lukas Sommer
+ruby.xml	Ruby	LGPLv2+	Stefan Lang (langstefan@gmx.at), Sebastian Vuorinen (sebastian.vuorinen@helsinki.fi), Robin Pedersen (robinpeder@gmail.com), Miquel Sabaté (mikisabate@gmail.com), Jonathan Poelen (jonathan.poelen@gmail.com)
+rust.xml	Rust	MIT	The Rust Project Developers
+sass.xml	SASS	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+sather.xml	Sather		
+scala.xml	Scala	LGPL	Stephane Micheloud (stephane.micheloud@epfl.ch)
+scheme.xml	Scheme	MIT	Dominik Haumann (dhaumann@kde.org)
+sci.xml	scilab		
+scss.xml	SCSS	LGPL	Wilbert Berendsen (wilbert@kde.nl)
+sed.xml	sed	GPL	Bart Sas (bart.sas@gmail.com)
+selinux-cil.xml	SELinux CIL Policy	MIT	Nibaldo González (nibgonz@gmail.com)
+selinux-fc.xml	SELinux File Contexts	MIT	Nibaldo González (nibgonz@gmail.com)
+selinux.xml	SELinux Policy	MIT	Nibaldo González (nibgonz@gmail.com)
+sgml.xml	SGML		
+sieve.xml	Sieve	MIT	Volker Krause (vkrause@kde.org)
+sisu.xml	SiSU	LGPL	Ralph Amissah (ralph.amissah@gmail.com)
+smali.xml	Smali	MIT	
+sml.xml	SML	MIT	Christoph Cullmann (cullmann@kde.org)
+snort_suricata.xml	Snort/Suricata	MIT	
+solidity.xml	Solidity	MIT	Robert Kaiser (kairo@kairo.at)
+spdx-comments.xml	SPDX-Comments	MIT	Alex Turbov (i.zaufi@gmail.com)
+spice.xml	Spice	LGPL	Steven Robson (s.a.robson@sms.ed.ac.uk) and Anders Lund
+sql-mysql.xml	SQL (MySQL)		Shane Wright (me@shanewright.co.uk)
+sql-oracle.xml	SQL (Oracle)	LGPL	Andrey Karepin (egdfree@opensuse.org)
+sql-postgresql.xml	SQL (PostgreSQL)		Shane Wright (me@shanewright.co.uk)
+sql.xml	SQL	LGPL	Yury Lebedev (yurylebedev@mail.ru)
+stan.xml	Stan	MIT	
+stata.xml	Stata	LGPL	Larry Radbill (Larry.Radbill gmail com)
+stl.xml	STL	LGPLv2+	Volker Krause (vkrause@kde.org)
+subrip-subtitles.xml	SubRip Subtitles	MIT	Nibaldo González (nibgonz@gmail.com)
+swift.xml	Swift	MIT	I. Elland (igor@elland.me)
+systemc.xml	SystemC	LGPLv2+	Joseph Wenninger (jowenn@kde.org)
+systemd-unit.xml	systemd unit	MIT	Andreas Gratzer
+systemverilog.xml	SystemVerilog	GPLv3+	Sean O'Boyle (seanoboyle@intelligentdv.com)
+tads3.xml	TADS 3		Nikos Chantziaras (realnc@gmail.com)
+taskjuggler.xml	TaskJuggler	GPLv2	Chris Schlaeger (chris@linux.com)
+tcl.xml	Tcl/Tk	BSD	
+tcsh.xml	Tcsh	LGPL	Matthew Woehlke (mw_triad@users.sourceforge.net)
+template-toolkit.xml	TT2	Artistic	Красимир Беров (k.berov@gmail.com)
+terraform.xml	Terraform	MIT	Thuck (denisdoria@gmail.com)
+texinfo.xml	Texinfo	LGPL	Daniel Franke (franke.daniel@gmail.com)
+textile.xml	Textile	LGPL	Alexander Kabakov (kabakov.as@gmail.com)
+textproto.xml	TextProto	MIT	Alexander Potashev (aspotashev@gmail.com)
+tibasic.xml	TI Basic		
+tiger.xml	Tiger	MIT	Pablo Oliveira
+tlaplus.xml	TLA+		Younes (dev@younes.io)
+todo.xml	Todo.txt	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+toml.xml	TOML	LGPLv2+	flying-sheep@web.de
+tsv.xml	TSV	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+twig.xml	Twig/Twig	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
+txt2tags.xml	txt2tags		
+typescript-react.xml	TypeScript React (TSX)	MIT	Nibaldo González (nibgonz@gmail.com)
+typescript.xml	TypeScript	MIT	Nibaldo González (nibgonz@gmail.com)
+typst.xml	Typst	MIT	Marco Rebhan <me@dblsaiko.net>
+uscript.xml	UnrealScript		
+v.xml	V	MIT	Lars Pontoppidan (dev.larpon@gmail.com)
+vala.xml	Vala	LGPLv2+	Antoni Boucher (bouanto@hotmail.com)
+valgrind-suppression.xml	Valgrind Suppression	LGPL	Milian Wolff (mail@milianw.de)
+varnish.xml	Varnish Configuration Language	WTFPL	Xavier Guerrin (xavier@tuxfamily.org)
+varnishcc.xml	Varnish module spec file	WTFPL	Xavier Guerrin (xavier@tuxfamily.org)
+varnishtest.xml	Varnish Test Case language	WTFPL	Xavier Guerrin (xavier@tuxfamily.org)
+vcard.xml	vCard, vCalendar, iCalendar	Public Domain	Lukas Sommer
+velocity.xml	Velocity		John Christopher (John@animalsinneed.net)
+vera.xml	Vera	GPLv3+	Sean O'Boyle (seanoboyle@intelligentdv.com)
+verilog.xml	Verilog		Yevgen Voronenko (ysv22@drexel.edu), Ryan Dalzell (ryan@tullyroan.com)
+vhdl.xml	VHDL		Rocky Scaletta (rocky@purdue.edu), Stefan Endrullis (stefan@endrullis.de), Florent Ouchet (outchy@users.sourceforge.net), Chris Higgs (chiggs.99@gmail.com), Jan Michel (jan@mueschelsoft.de), Luigi Calligaris (luigi.calligaris@stfc.ac.uk)
+viper.xml	Viper	MIT	nishanthkarthik
+vrml.xml	VRML	LGPLv2+	Volker Krause (vkrause@kde.org)
+vue.xml	Vue	LGPL	James Zuccon
+wavefront-obj.xml	Wavefront OBJ	LGPLv2+	Volker Krause (vkrause@kde.org)
+wayland-trace.xml	Wayland Trace	MIT	Andreas Cord-Landwehr (cordlandwehr@kde.org)
+winehq.xml	WINE Config		
+wml.xml	Wesnoth Markup Language	GPL	Zachary Palmer (zep01@bahj.com), modif. by Ignacio Riquelme Morelle (shadowm2006@gmail.com) and Jonathan Schmidt-Dominé (devel@the-user.org)
+xharbour.xml	xHarbour	GPL	Giancarlo Niccolai (giancarlo@niccolai.ws)
+xml.xml	XML	LGPL	Wilbert Berendsen (wilbert@kde.nl)
+xmldebug.xml	XML (Debug)		
+xonotic-console.xml	Xonotic Script	LGPLv2+	
+xorg.xml	x.org Configuration	LGPL	Jan Janssen (medhefgo@web.de)
+xslt.xml	xslt	LGPL	Peter Lammich (views@gmx.de)
+xul.xml	XUL	LGPL	Wilbert Berendsen (wilbert@kde.nl), Anders Lund (anders@alweb.dk), Joseph Wenninger (jowenn@kde.org), Whitehawk Stormchaser (zerokode@gmx.net), Marc Dassonneville (marc.dassonneville@gmail.com)
+yacas.xml	yacas		
+yacc.xml	Yacc/Bison	LGPL	Jan Villat (jan.villat@net2000.ch)
+yaml.xml	YAML	LGPL	Dr Orlovsky MA (dr.orlovsky@gmail.com), Nibaldo González (nibgonz@gmail.com)
+yang.xml	YANG	LGPLv2.1+	Nicolás Alvarez (based on yang.vim by Matt Parker)
+yara.xml	YARA	MIT	
+zig.xml	Zig	MIT	Waqar Ahmed (waqar.17a@gmail.com)
+zonnon.xml	Zonnon		
+zsh.xml	Zsh	MIT	Jonathan Poelen (jonathan.poelen@gmail.com)
