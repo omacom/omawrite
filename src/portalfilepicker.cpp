@@ -162,10 +162,11 @@ void PortalFilePicker::requestFile(const QString &method, const QString &title,
     // killed with the dialog up) must not wedge every later dialog behind
     // it: close the stuck one best-effort and replace it.
     if (m_pendingAction != Action::None) {
-        const bool wasSave = m_pendingAction == Action::Save;
+        const Action previous = m_pendingAction;
         closePendingRequest();
         clearPending();
-        emit cancelled(wasSave);
+        if (previous != action)
+            emit cancelled(previous == Action::Save);
     }
 
     QDBusConnection bus = m_bus;

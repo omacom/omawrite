@@ -2548,7 +2548,7 @@ private slots:
             QTRY_COMPARE(saveSpy.count(), 1);
             QCOMPARE(saveSpy.first().first().toUrl(), QUrl::fromLocalFile(chosenSave));
 
-            // Replacing a pending save closes it and emits cancelled(true).
+            // Replacing a pending save with another save closes the old one without cancelling.
             chooser.lastMethod.clear();
             request.closed = false;
             picker.saveFile(QUrl::fromLocalFile(chosenSave));
@@ -2557,6 +2557,14 @@ private slots:
                      dir.path().toUtf8() + '\0');
 
             chooser.lastMethod.clear();
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QCOMPARE(cancelSpy.count(), 2);
+            QTRY_VERIFY(request.closed);
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
+
+            // Replacing a pending save with an open closes it and emits cancelled(true).
+            chooser.lastMethod.clear();
+            request.closed = false;
             picker.openFile(dir.path());
             QCOMPARE(cancelSpy.count(), 3);
             QCOMPARE(cancelSpy.last().first().toBool(), true);
