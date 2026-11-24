@@ -12,6 +12,7 @@
 #include <QGuiApplication>
 #include <QMimeData>
 #include <QProcess>
+#include <QQmlEngine>
 #include <QPrintDialog>
 #include <QPrinter>
 #include <QQuickItem>
@@ -202,6 +203,10 @@ Backend::~Backend() = default;
 
 void Backend::setParentWindow(QWindow *window) {
     m_parentWindow = window;
+    for (Backend *document : std::as_const(m_documents)) {
+        if (document)
+            document->setParentWindow(window);
+    }
 }
 
 // The name an untitled document goes by, which a save suggests too.
@@ -211,6 +216,10 @@ QString Backend::untitledName() {
 
 void Backend::retranslate() {
     emit fileUrlChanged();
+    for (Backend *document : std::as_const(m_documents)) {
+        if (document)
+            document->retranslate();
+    }
 }
 
 QString Backend::fileName() const {
@@ -230,9 +239,17 @@ QString Backend::fileName() const {
 void Backend::setDarkMode(bool darkMode) {
     m_systemDarkMode = darkMode;
     loadOmarchyTheme();
+    for (Backend *document : std::as_const(m_documents)) {
+        if (document)
+            document->setDarkMode(darkMode);
+    }
 }
 
 void Backend::setDesktopTextScale(qreal textScale) {
+    for (Backend *document : std::as_const(m_documents)) {
+        if (document)
+            document->setDesktopTextScale(textScale);
+    }
     if (qFuzzyCompare(m_desktopTextScale, textScale))
         return;
 
@@ -466,6 +483,68 @@ void Backend::printDocument() {
         rendered.setMarkdown(currentDocumentText());
         rendered.print(&printer);
     }
+}
+
+QObject *Backend::createDocument() {
+    auto *document = new Backend(this);
+    document->m_parentWindow = m_parentWindow;
+    document->m_desktopTextScale = m_desktopTextScale;
+    document->setDarkMode(m_systemDarkMode);
+    // The window's backend parents it and releaseDocument() deletes it; the
+    // QML engine must never collect it from under a tab.
+    QQmlEngine::setObjectOwnership(document, QQmlEngine::CppOwnership);
+    m_documents.append(document);
+    return document;
+}
+
+void Backend::releaseDocument(QObject *object) {
+    auto *document = qobject_cast<Backend *>(object);
+    if (!document)
+        return;
+    if (document == this) {
+        closeDocument();
+        return;
+    }
+    if (!m_documents.contains(document))
+        return;
+    m_documents.removeAll(document);
+    document->closeDocument();
+    document->deleteLater();
+}
+
+// Leaves no draft, watcher or pending save behind once a tab is closed. The
+// writer already chose to save or discard its changes.
+void Backend::closeDocument() {
+    m_recoveryTimer.stop();
+    m_autoSaveTimer.stop();
+    m_wordCountTimer.stop();
+    m_wordCountStale = true;
+    clearRecovery();
+    unwatchFiles();
+    m_document = nullptr;
+    m_lastDocumentText.clear();
+    setKnownFileContents(QByteArray(), false);
+    m_autoSaveSuspended = false;
+    setFileUrl(QUrl());
+    setModified(false);
+    setStatus(QString());
+    setWordCount(0);
+}
+
+int Backend::orphanedDraftCount() const {
+    const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
+    int count = 0;
+    for (int slot = 0; slot < 100; ++slot) {
+        const QString base = QDir(stateDirectory).filePath(QStringLiteral("recovery-%1").arg(slot));
+        if (!QFileInfo::exists(base + QStringLiteral(".json")))
+            continue;
+        QLockFile lock(base + QStringLiteral(".lock"));
+        if (lock.tryLock()) {
+            lock.unlock();
+            ++count;
+        }
+    }
+    return count;
 }
 
 void Backend::newWindow() {

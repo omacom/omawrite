@@ -9,6 +9,7 @@
 #include <QStringList>
 #include <QTimer>
 #include <QUrl>
+#include <QList>
 #include <QVariantList>
 #include <memory>
 
@@ -91,6 +92,16 @@ public:
     Q_INVOKABLE void printDocument();
     Q_INVOKABLE void copyAsHtml();
     Q_INVOKABLE void newWindow();
+    // Tabs: the window's own backend holds the first tab's document and
+    // creates one more Backend for each further tab, which follows its
+    // light/dark setting, text scale, language and window.
+    Q_INVOKABLE QObject *createDocument();
+    // Lets go of a tab's document. Another tab's Backend is deleted; the
+    // window's own is left empty, still serving the window.
+    Q_INVOKABLE void releaseDocument(QObject *document);
+    // Unsaved drafts left by a crash that no running window has claimed,
+    // so a restarted window can reopen each in a tab of its own.
+    Q_INVOKABLE int orphanedDraftCount() const;
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE QString documentText() const { return currentDocumentText(); }
@@ -160,6 +171,7 @@ private:
     void checkWatchedFile();
     void loadOmarchyTheme();
     void watchOmarchyTheme();
+    void closeDocument();
 
     QUrl m_fileUrl;
     bool m_modified = false;
@@ -207,4 +219,5 @@ private:
     QString m_editorFont;
     QFileSystemWatcher m_themeWatcher;
     QTimer m_themeReloadTimer;
+    QList<QPointer<Backend>> m_documents;
 };
