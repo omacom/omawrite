@@ -289,6 +289,10 @@ private slots:
         QCOMPARE(Backend::countWords(QStringLiteral("か\u3099")), 1); // が, decomposed
         QCOMPARE(Backend::countWords(QStringLiteral("𠀀𠀁 foo")), 3);
         QCOMPARE(Backend::countWords(QStringLiteral("안녕하세요 세계")), 2);
+        QCOMPARE(Backend::countWords(QStringLiteral("foo--bar foo- -bar a'-b")), 6);
+        QCOMPARE(Backend::countWords(QStringLiteral("foo-中bar")), 3);
+        QCOMPARE(Backend::countWords(QStringLiteral("ｺｰﾋｰ")), 4);
+        QCOMPARE(Backend::countWords(QStringLiteral("〆〼")), 2);
         QCOMPARE(Backend::countWords(QString()), 0);
     }
 
@@ -709,6 +713,17 @@ private slots:
         editor->setProperty("text", QStringLiteral("foo a\u00a0b foo"));
         QMetaObject::invokeMethod(replaceAllButton, "clicked");
         QCOMPARE(backend.documentText(), QStringLiteral("x a\u00a0b x"));
+
+        // Replace All normalizes CRLF in the replacement, handles multiple
+        // blocks and diacritic-insensitive matches, and undoes in one step.
+        editor->setProperty("text", QStringLiteral("Țară\nmiddle\ntara"));
+        searchField->setProperty("text", QStringLiteral("tara"));
+        replaceField->setProperty("text", QStringLiteral("line1\r\nline2"));
+        QMetaObject::invokeMethod(replaceAllButton, "clicked");
+        QCOMPARE(editor->property("text").toString(),
+                 QStringLiteral("line1\nline2\nmiddle\nline1\nline2"));
+        QMetaObject::invokeMethod(editor, "undo");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("Țară\nmiddle\ntara"));
 
         // Advancing past a replacement uses its normalized length, so a match
         // immediately after a CRLF replacement is not skipped.
@@ -1658,6 +1673,25 @@ private slots:
         QVERIFY(document.firstBlock().layout()->formats().constFirst().format.fontPointSize() != 1.0);
         highlighter.setCaret(7);
         QCOMPARE(document.firstBlock().layout()->formats().constFirst().format.fontPointSize(), 1.0);
+
+        // Moving across two spans on the same line toggles each span's markers.
+        QTextDocument multi;
+        multi.setPlainText(QStringLiteral("**a** **b**"));
+        MarkdownHighlighter multiHighlighter(&multi);
+        multiHighlighter.rehighlight();
+        const auto pointSizeAt = [&multi](int index) {
+            for (const auto &range : multi.firstBlock().layout()->formats()) {
+                if (index >= range.start && index < range.start + range.length)
+                    return range.format.fontPointSize();
+            }
+            return qreal(-1);
+        };
+        multiHighlighter.setCaret(2);
+        QVERIFY(pointSizeAt(0) != 1.0);
+        QCOMPARE(pointSizeAt(6), 1.0);
+        multiHighlighter.setCaret(8);
+        QCOMPARE(pointSizeAt(0), 1.0);
+        QVERIFY(pointSizeAt(6) != 1.0);
     }
 
     void takesTheCodePanelFromTheTheme() {
@@ -3695,7 +3729,8 @@ private slots:
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
         const QList<QByteArray> originals{QByteArray("one\r\ntwo\r\n"),
-                                          QByteArray("caf\xe9\n")};
+                                          QByteArray("caf\xe9\n"),
+                                          QByteArray("\xEF\xBB\xBFhello\n")};
         for (const QByteArray &original : originals) {
             const QString path = directory.filePath(QStringLiteral("kept.md"));
             writeFile(path, original);
