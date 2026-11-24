@@ -359,14 +359,18 @@ ApplicationWindow {
             backend.saveAs(url);
         }
 
-        function onCancelled() {
-            win.awaitingPendingSave = false;
-            win.pendingAction = "";
+        function onCancelled(forSave) {
+            if (forSave) {
+                win.awaitingPendingSave = false;
+                win.pendingAction = "";
+            }
         }
 
-        function onFailed(message) {
-            win.awaitingPendingSave = false;
-            win.pendingAction = "";
+        function onFailed(message, forSave) {
+            if (forSave) {
+                win.awaitingPendingSave = false;
+                win.pendingAction = "";
+            }
             backend.setStatus(message);
         }
     }

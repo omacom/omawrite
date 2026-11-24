@@ -25,8 +25,8 @@ public:
 signals:
     void openSelected(const QUrl &url);
     void saveSelected(const QUrl &url);
-    void cancelled();
-    void failed(const QString &message);
+    void cancelled(bool forSave);
+    void failed(const QString &message, bool forSave);
 
 private slots:
     void handleResponse(uint response, const QVariantMap &results);

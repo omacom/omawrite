@@ -78,6 +78,10 @@ QString portalToken() {
     return QStringLiteral("omawrite_%1").arg(QRandomGenerator::global()->generate());
 }
 
+QString existingFolderOrHome(const QString &folder) {
+    return !folder.isEmpty() && QDir(folder).exists() ? folder : QDir::homePath();
+}
+
 // The portal takes folders as NUL-terminated byte strings.
 QByteArray portalPathBytes(const QString &path) {
     QByteArray bytes = path.toUtf8();
@@ -109,13 +113,11 @@ PortalFilePicker::~PortalFilePicker() {
 }
 
 void PortalFilePicker::openFile(const QString &folder) {
-    const QString initialFolder =
-        !folder.isEmpty() && QDir(folder).exists() ? folder : QDir::homePath();
     QVariantMap options;
     options.insert(QStringLiteral("accept_label"), tr("Open"));
     options.insert(QStringLiteral("modal"), true);
     options.insert(QStringLiteral("multiple"), false);
-    options.insert(QStringLiteral("current_folder"), portalPathBytes(initialFolder));
+    options.insert(QStringLiteral("current_folder"), portalPathBytes(existingFolderOrHome(folder)));
     options.insert(QStringLiteral("filters"), QVariant::fromValue(documentFilters()));
     options.insert(QStringLiteral("current_filter"), QVariant::fromValue(markdownFilter()));
     requestFile(QStringLiteral("OpenFile"), tr("Open File"), options, Action::Open);
@@ -126,15 +128,13 @@ void PortalFilePicker::saveFile(const QUrl &suggestedUrl) {
     const QFileInfo target(suggestedUrl.isLocalFile()
                                ? suggestedUrl.toLocalFile()
                                : QDir::home().filePath(fallbackName));
-    const QString folder = target.absolutePath();
-    const QString initialFolder =
-        !folder.isEmpty() && QDir(folder).exists() ? folder : QDir::homePath();
     const QString fileName = target.fileName().isEmpty() ? fallbackName : target.fileName();
 
     QVariantMap options;
     options.insert(QStringLiteral("accept_label"), tr("Save"));
     options.insert(QStringLiteral("modal"), true);
-    options.insert(QStringLiteral("current_folder"), portalPathBytes(initialFolder));
+    options.insert(QStringLiteral("current_folder"),
+                   portalPathBytes(existingFolderOrHome(target.absolutePath())));
     options.insert(QStringLiteral("current_name"), fileName);
     options.insert(QStringLiteral("filters"), QVariant::fromValue(documentFilters()));
     options.insert(QStringLiteral("current_filter"), QVariant::fromValue(markdownFilter()));
@@ -162,13 +162,16 @@ void PortalFilePicker::requestFile(const QString &method, const QString &title,
     // killed with the dialog up) must not wedge every later dialog behind
     // it: close the stuck one best-effort and replace it.
     if (m_pendingAction != Action::None) {
+        const bool wasSave = m_pendingAction == Action::Save;
         closePendingRequest();
         clearPending();
+        emit cancelled(wasSave);
     }
 
     QDBusConnection bus = m_bus;
     if (!bus.isConnected()) {
-        emit failed(tr("The desktop's file chooser (xdg-desktop-portal) is not available."));
+        emit failed(tr("The desktop's file chooser (xdg-desktop-portal) is not available."),
+                    action == Action::Save);
         return;
     }
 
@@ -185,7 +188,7 @@ void PortalFilePicker::requestFile(const QString &method, const QString &title,
     m_pendingAction = action;
     if (!connectToRequestPath(predictedPath)) {
         clearPending();
-        emit failed(tr("Could not listen for the file chooser's answer."));
+        emit failed(tr("Could not listen for the file chooser's answer."), action == Action::Save);
         return;
     }
 
@@ -208,13 +211,16 @@ void PortalFilePicker::requestFile(const QString &method, const QString &title,
             return;
 
         if (reply.isError()) {
+            const bool wasSave = m_pendingAction == Action::Save;
             clearPending();
             const QDBusError::ErrorType type = reply.error().type();
             if (type == QDBusError::ServiceUnknown || type == QDBusError::UnknownObject
                 || type == QDBusError::UnknownInterface)
-                emit failed(tr("The desktop's file chooser (xdg-desktop-portal) is not available."));
+                emit failed(tr("The desktop's file chooser (xdg-desktop-portal) is not available."),
+                            wasSave);
             else
-                emit failed(tr("The file chooser failed: %1").arg(reply.error().message()));
+                emit failed(tr("The file chooser failed: %1").arg(reply.error().message()),
+                            wasSave);
             return;
         }
 
@@ -227,8 +233,10 @@ void PortalFilePicker::requestFile(const QString &method, const QString &title,
                 QStringLiteral("org.freedesktop.portal.Request"), QStringLiteral("Response"),
                 this, SLOT(handleResponse(uint,QVariantMap)));
             if (!connectToRequestPath(actualPath)) {
+                const bool wasSave = m_pendingAction == Action::Save;
+                closePendingRequest();
                 clearPending();
-                emit failed(tr("Could not listen for the file chooser's answer."));
+                emit failed(tr("Could not listen for the file chooser's answer."), wasSave);
             }
         }
     });
@@ -239,7 +247,7 @@ void PortalFilePicker::handleResponse(uint response, const QVariantMap &results)
     clearPending();
     const QStringList uris = results.value(QStringLiteral("uris")).toStringList();
     if (response != 0 || uris.isEmpty()) {
-        emit cancelled();
+        emit cancelled(action == Action::Save);
         return;
     }
 

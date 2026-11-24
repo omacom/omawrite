@@ -2498,6 +2498,7 @@ private slots:
             QSignalSpy openSpy(&picker, &PortalFilePicker::openSelected);
             QSignalSpy saveSpy(&picker, &PortalFilePicker::saveSelected);
             QSignalSpy cancelSpy(&picker, &PortalFilePicker::cancelled);
+            QSignalSpy failSpy(&picker, &PortalFilePicker::failed);
 
             // Empty folder falls back to $HOME and passes modal/single/filters.
             picker.openFile(QString());
@@ -2514,7 +2515,7 @@ private slots:
             QTRY_COMPARE(openSpy.count(), 1);
             QCOMPARE(openSpy.first().first().toUrl(), QUrl::fromLocalFile(chosenOpen));
 
-            // Cancelling emits cancelled() without selecting a file.
+            // Cancelling an open emits cancelled(false) without selecting a file.
             chooser.lastMethod.clear();
             picker.openFile(dir.path());
             QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
@@ -2522,7 +2523,16 @@ private slots:
                      dir.path().toUtf8() + '\0');
             chooser.respond(1);
             QTRY_COMPARE(cancelSpy.count(), 1);
+            QCOMPARE(cancelSpy.last().first().toBool(), false);
             QCOMPARE(openSpy.count(), 1);
+
+            // An empty URI list on success also counts as cancellation.
+            chooser.lastMethod.clear();
+            picker.openFile(dir.path());
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
+            chooser.respond(0);
+            QTRY_COMPARE(cancelSpy.count(), 2);
+            QCOMPARE(cancelSpy.last().first().toBool(), false);
 
             // Save passes current_folder and current_name (with $HOME fallback for missing folders).
             chooser.lastMethod.clear();
@@ -2538,13 +2548,40 @@ private slots:
             QTRY_COMPARE(saveSpy.count(), 1);
             QCOMPARE(saveSpy.first().first().toUrl(), QUrl::fromLocalFile(chosenSave));
 
-            // Leave a save request pending so destruction must close it.
+            // Replacing a pending save closes it and emits cancelled(true).
             chooser.lastMethod.clear();
             request.closed = false;
             picker.saveFile(QUrl::fromLocalFile(chosenSave));
             QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
             QCOMPARE(chooser.lastOptions.value(QStringLiteral("current_folder")).toByteArray(),
                      dir.path().toUtf8() + '\0');
+
+            chooser.lastMethod.clear();
+            picker.openFile(dir.path());
+            QCOMPARE(cancelSpy.count(), 3);
+            QCOMPARE(cancelSpy.last().first().toBool(), true);
+            QTRY_VERIFY(request.closed);
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
+            chooser.respond(1);
+            QTRY_COMPARE(cancelSpy.count(), 4);
+            QCOMPARE(cancelSpy.last().first().toBool(), false);
+
+            // Missing portal object emits failed(..., true) for a save without cancelled().
+            serviceBus.unregisterObject(QStringLiteral("/org/freedesktop/portal/desktop"));
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QTRY_COMPARE(failSpy.count(), 1);
+            QCOMPARE(failSpy.last().at(0).toString(),
+                     QStringLiteral("The desktop's file chooser (xdg-desktop-portal) is not available."));
+            QCOMPARE(failSpy.last().at(1).toBool(), true);
+            QCOMPARE(cancelSpy.count(), 4);
+
+            // Re-register and leave a save request pending so destruction must close it.
+            QVERIFY(serviceBus.registerObject(QStringLiteral("/org/freedesktop/portal/desktop"),
+                                              &chooser, QDBusConnection::ExportAllSlots));
+            chooser.lastMethod.clear();
+            request.closed = false;
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
         }
         QTRY_VERIFY(request.closed);
     }
@@ -2578,16 +2615,26 @@ private slots:
         emit filePicker.saveSelected(QUrl::fromLocalFile(savePath));
         QCOMPARE(readFile(savePath), QByteArray("from portal"));
 
-        // Cancelling or failing clears pending close/open state and reports errors.
+        // Cancelling or failing an open leaves pending save state untouched.
         window->setProperty("pendingAction", QStringLiteral("close"));
         window->setProperty("awaitingPendingSave", true);
-        emit filePicker.cancelled();
+        emit filePicker.cancelled(false);
+        QCOMPARE(window->property("pendingAction").toString(), QStringLiteral("close"));
+        QVERIFY(window->property("awaitingPendingSave").toBool());
+
+        emit filePicker.failed(QStringLiteral("open failed"), false);
+        QCOMPARE(window->property("pendingAction").toString(), QStringLiteral("close"));
+        QVERIFY(window->property("awaitingPendingSave").toBool());
+        QCOMPARE(backend.status(), QStringLiteral("open failed"));
+
+        // Cancelling or failing a save clears pending close/open state and reports errors.
+        emit filePicker.cancelled(true);
         QCOMPARE(window->property("pendingAction").toString(), QString());
         QVERIFY(!window->property("awaitingPendingSave").toBool());
 
         window->setProperty("pendingAction", QStringLiteral("close"));
         window->setProperty("awaitingPendingSave", true);
-        emit filePicker.failed(QStringLiteral("portal unavailable"));
+        emit filePicker.failed(QStringLiteral("portal unavailable"), true);
         QCOMPARE(window->property("pendingAction").toString(), QString());
         QVERIFY(!window->property("awaitingPendingSave").toBool());
         QCOMPARE(backend.status(), QStringLiteral("portal unavailable"));
