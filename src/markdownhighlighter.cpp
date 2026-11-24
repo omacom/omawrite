@@ -82,6 +82,11 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
         rehighlightBlock(entered);
 }
 
+void MarkdownHighlighter::clearCurrentMatch() {
+    m_currentMatchStart = -1;
+    m_currentMatch = QTextCursor();
+}
+
 // QSyntaxHighlighter::rehighlight() marks the blocks dirty one at a time, and
 // a laid-out document redoes layout work for the rest of itself after each
 // one, so a full restyle grows with the square of its length: 40 s for a 2 MB
@@ -412,13 +417,19 @@ void MarkdownHighlighter::highlightSearch(const QString &text) {
     if (m_searchPattern.length == 0 || text.size() < m_searchPattern.length)
         return;
 
+    const int length = m_searchQuery.length();
     for (const int from : findMatches(text, m_searchPattern)) {
         const int documentStart = currentBlock().position() + from;
-        QTextCharFormat format = this->format(from);
-        format.setBackground(documentStart == m_currentMatchStart
-                                 ? m_currentSearchFormat.background()
-                                 : m_searchFormat.background());
-        setFormat(from, m_searchQuery.length(), format);
+        const QBrush background = documentStart == m_currentMatchStart
+            ? m_currentSearchFormat.background()
+            : m_searchFormat.background();
+        for (int i = from; i < from + length; ++i) {
+            QTextCharFormat format = this->format(i);
+            if (format == m_hiddenMarkerFormat)
+                continue;
+            format.setBackground(background);
+            setFormat(i, 1, format);
+        }
     }
 }
 

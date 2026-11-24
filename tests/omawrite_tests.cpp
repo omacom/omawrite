@@ -724,6 +724,138 @@ private slots:
                  QStringLiteral("line1\nline2\nmiddle\nline1\nline2"));
         QMetaObject::invokeMethod(editor, "undo");
         QCOMPARE(editor->property("text").toString(), QStringLiteral("Țară\nmiddle\ntara"));
+
+        // Advancing past a replacement uses its normalized length, so a match
+        // immediately after a CRLF replacement is not skipped.
+        editor->setProperty("text", QStringLiteral("foofoo"));
+        searchField->setProperty("text", QStringLiteral("foo"));
+        replaceField->setProperty("text", QStringLiteral("a\r\nb"));
+        QMetaObject::invokeMethod(replaceButton, "clicked");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("a\nbfoo"));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 0);
+        QCOMPARE(editor->property("selectedText").toString(), QStringLiteral("foo"));
+    }
+
+    void refreshesSearchMatchesWhenOpeningAFile() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString firstPath = directory.filePath(QStringLiteral("first.md"));
+        const QString secondPath = directory.filePath(QStringLiteral("second.md"));
+        const QString emptyMatchPath = directory.filePath(QStringLiteral("none.md"));
+        writeFile(firstPath, "foo bar foo");
+        writeFile(secondPath, "012345 foo end");
+        writeFile(emptyMatchPath, "nothing matches here");
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *editor = window->findChild<QObject *>(QStringLiteral("sourceEditor"));
+        QObject *searchField = window->findChild<QObject *>(QStringLiteral("searchField"));
+        QObject *replaceField = window->findChild<QObject *>(QStringLiteral("replaceField"));
+        QObject *replaceAllButton = window->findChild<QObject *>(QStringLiteral("replaceAllButton"));
+        QVERIFY(editor && searchField && replaceField && replaceAllButton);
+
+        backend.open(QUrl::fromLocalFile(firstPath));
+        QTest::keyClick(window, Qt::Key_H, Qt::ControlModifier);
+        searchField->setProperty("text", QStringLiteral("foo"));
+        QMetaObject::invokeMethod(window, "flushSearch");
+        QCOMPARE(window->property("searchMatches").toList(), QVariantList({0, 8}));
+
+        // Opening another file while Find & Replace is open must refresh the
+        // match offsets instead of acting on the previous file's positions.
+        backend.open(QUrl::fromLocalFile(secondPath));
+        QCOMPARE(window->property("searchMatches").toList(), QVariantList({7}));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 0);
+        replaceField->setProperty("text", QStringLiteral("baz"));
+        QMetaObject::invokeMethod(replaceAllButton, "clicked");
+        QCOMPARE(editor->property("text").toString(), QStringLiteral("012345 baz end"));
+
+        // A file with no matches clears the stale match list and index.
+        backend.open(QUrl::fromLocalFile(emptyMatchPath));
+        QVERIFY(window->property("searchMatches").toList().isEmpty());
+        QCOMPARE(window->property("searchMatchIndex").toInt(), -1);
+
+        // Opening a file whose match happens to sit at the previous file's
+        // current-match offset does not leave that block painted as current.
+        const QString offsetA = directory.filePath(QStringLiteral("offset-a.md"));
+        const QString offsetB = directory.filePath(QStringLiteral("offset-b.md"));
+        writeFile(offsetA, "0123456789\nfoo");
+        writeFile(offsetB, "foo\n012345\nfoo\nbar");
+        backend.open(QUrl::fromLocalFile(offsetA));
+        QCOMPARE(window->property("searchMatches").toList(), QVariantList({11}));
+        backend.open(QUrl::fromLocalFile(offsetB));
+        QCOMPARE(window->property("searchMatches").toList(), QVariantList({0, 11}));
+        QCOMPARE(window->property("searchMatchIndex").toInt(), 0);
+        auto *quickDocument = qobject_cast<QQuickTextDocument *>(
+            editor->property("textDocument").value<QObject *>());
+        QVERIFY(quickDocument);
+        QTextDocument *document = quickDocument->textDocument();
+        const auto matchBackground = [document](int blockNumber) {
+            const QTextBlock block = document->findBlockByNumber(blockNumber);
+            for (const QTextLayout::FormatRange &range : block.layout()->formats()) {
+                if (range.start == 0 && range.format.hasProperty(QTextFormat::BackgroundBrush))
+                    return range.format.background().color();
+            }
+            return QColor();
+        };
+        QVERIFY(matchBackground(0).isValid());
+        QVERIFY(matchBackground(2).isValid());
+        QVERIFY(matchBackground(0) != matchBackground(2));
+    }
+
+    void preservesFormattingUnderSearchHighlight() {
+        const auto formatsWithSearch = [](const QString &text, const QString &query) {
+            QTextDocument document;
+            document.setPlainText(text);
+            MarkdownHighlighter highlighter(&document);
+            highlighter.setTheme(true, "#101010", "#eeeeee", "#5584aa", "#23372b");
+            highlighter.setSearch(query, 0);
+            QList<QTextCharFormat> formats(text.length());
+            for (const auto &range : document.firstBlock().layout()->formats()) {
+                for (int i = range.start; i < range.start + range.length; ++i)
+                    formats[i] = range.format;
+            }
+            return formats;
+        };
+
+        // Starting a match on a hidden marker must not make the matched word
+        // inherit the 1pt hidden-marker format.
+        const auto boldFormats = formatsWithSearch(QStringLiteral("**bold**"), QStringLiteral("**bold**"));
+        QCOMPARE(boldFormats.at(0).fontPointSize(), 1.0);
+        QCOMPARE(boldFormats.at(2).fontWeight(), int(QFont::Bold));
+        QVERIFY(boldFormats.at(2).fontPointSize() != 1.0);
+        QVERIFY(boldFormats.at(2).hasProperty(QTextFormat::BackgroundBrush));
+
+        // Crossing a heading marker boundary keeps the heading bold.
+        const auto headingFormats = formatsWithSearch(QStringLiteral("# Heading"), QStringLiteral("# He"));
+        QVERIFY(headingFormats.at(0).fontWeight() != QFont::Bold);
+        QCOMPARE(headingFormats.at(2).fontWeight(), int(QFont::Bold));
+        QVERIFY(headingFormats.at(2).hasProperty(QTextFormat::BackgroundBrush));
+
+        // Crossing from plain text into italic keeps the italic style and
+        // leaves the hidden marker hidden.
+        const auto mixedFormats = formatsWithSearch(QStringLiteral("a *it*"), QStringLiteral("a *it"));
+        QCOMPARE(mixedFormats.at(2).fontPointSize(), 1.0);
+        QVERIFY(mixedFormats.at(3).fontItalic());
+        QVERIFY(mixedFormats.at(3).hasProperty(QTextFormat::BackgroundBrush));
+    }
+
+    void handlesDetachedDocumentInHighlighter() {
+        QTextDocument document;
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setDocument(nullptr);
+        highlighter.setCaret(5);
+        highlighter.setSearch(QStringLiteral("test"), 0);
     }
 
     void countsWordsAfterEditsWithoutBlocking() {
@@ -2399,12 +2531,95 @@ private slots:
         returnKey();
         QCOMPARE(text(), QStringLiteral("- item\n\n"));
 
+        // Selecting an item's text right-to-left and pressing Return removes
+        // the selection along with the now-empty marker.
+        load(QStringLiteral("- item"), 6);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 2));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+
+        // Selecting across lines from a list item acts on the selection's
+        // start rather than the caret's line: emptying it leaves the list,
+        // while keeping text continues it.
+        load(QStringLiteral("- item\nsecond"), 2);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 13));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+        load(QStringLiteral("- item\nsecond"), 4);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 13));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- it\n- "));
+
         // Inside a code fence every line is its own, blank ones included.
         load(QStringLiteral("```\ncode\n```"), 8);
         returnKey();
         QCOMPARE(text(), QStringLiteral("```\ncode\n\n```"));
         returnKey();
         QCOMPARE(text(), QStringLiteral("```\ncode\n\n\n```"));
+
+        // A four-backtick opening fence is only inside code past all four
+        // backticks, not after the third.
+        load(QStringLiteral("````md\ncode\n````"), 0);
+        QVERIFY(!backend.insideFence(3));
+        QVERIFY(backend.insideFence(4));
+        // Out-of-range positions clamp to the document bounds cleanly.
+        QVERIFY(!backend.insideFence(-5));
+        QVERIFY(!backend.insideFence(999));
+        QVERIFY(backend.emphasisSpanAt(-5, QStringLiteral("**")).isEmpty());
+        QVERIFY(backend.linkUrlAt(999).isEmpty());
+    }
+
+    void fallsBackFromNonPositiveWindowGeometry() {
+        QSettings settings;
+        settings.setValue(QStringLiteral("window/width"), 0);
+        settings.setValue(QStringLiteral("window/height"), -10);
+        const auto cleanup = qScopeGuard([&settings] {
+            settings.remove(QStringLiteral("window/width"));
+            settings.remove(QStringLiteral("window/height"));
+        });
+
+        Backend backend;
+        const QVariantMap geometry = backend.windowGeometry();
+        QCOMPARE(geometry.value(QStringLiteral("width")).toInt(), 1280);
+        QCOMPARE(geometry.value(QStringLiteral("height")).toInt(), 820);
+    }
+
+    void keepsWindowedGeometryWhenClosedFromFullscreen() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QSettings settings;
+        const auto cleanup = qScopeGuard([&settings] {
+            settings.remove(QStringLiteral("window/x"));
+            settings.remove(QStringLiteral("window/y"));
+            settings.remove(QStringLiteral("window/width"));
+            settings.remove(QStringLiteral("window/height"));
+            settings.remove(QStringLiteral("window/maximized"));
+        });
+
+        Backend backend;
+        backend.saveWindowGeometry(50, 60, 900, 650, false);
+
+        {
+            QQmlEngine engine;
+            engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+            QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+            QScopedPointer<QObject> object(component.create());
+            auto *window = qobject_cast<QQuickWindow *>(object.data());
+            QVERIFY(window);
+            window->setVisibility(QWindow::FullScreen);
+            window->resize(1920, 1080);
+            // Closing a window hides it before destruction; visibility is
+            // Hidden by the time Component.onDestruction runs.
+            window->hide();
+            QCOMPARE(window->visibility(), QWindow::Hidden);
+        }
+
+        const QVariantMap saved = backend.windowGeometry();
+        QCOMPARE(saved.value(QStringLiteral("width")).toInt(), 900);
+        QCOMPARE(saved.value(QStringLiteral("height")).toInt(), 650);
+        QCOMPARE(saved.value(QStringLiteral("maximized")).toBool(), false);
     }
 
     void nestsListItemsOnTab() {

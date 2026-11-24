@@ -14,6 +14,7 @@ public:
     void setTheme(bool darkMode, const QString &background, const QString &foreground,
                   const QString &accent, const QString &codeBackground);
     void setSearch(const QString &query, int currentMatchStart);
+    void clearCurrentMatch();
     void setCaret(int position);
     void refreshFont();
 

@@ -58,9 +58,17 @@ int main(int argc, char *argv[]) {
     const qreal basePointSize = interfaceFont.pointSizeF() > 0
         ? interfaceFont.pointSizeF()
         : app.font().pointSizeF();
-    const auto applyInterfaceFont = [&app, interfaceFont, basePointSize](qreal textScale) {
+    const int basePixelSize = interfaceFont.pixelSize() > 0
+        ? interfaceFont.pixelSize()
+        : app.font().pixelSize();
+    const auto applyInterfaceFont = [&app, interfaceFont, basePointSize, basePixelSize](qreal textScale) {
         QFont scaled = interfaceFont;
-        scaled.setPointSizeF(basePointSize * textScale);
+        if (basePointSize > 0)
+            scaled.setPointSizeF(basePointSize * textScale);
+        else if (basePixelSize > 0)
+            scaled.setPixelSize(qMax(1, qRound(basePixelSize * textScale)));
+        else
+            scaled.setPointSizeF(10.0 * textScale);
         app.setFont(scaled);
     };
 

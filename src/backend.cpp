@@ -338,6 +338,8 @@ void Backend::attachDocument(QObject *textDocument) {
         return;
     }
 
+    if (m_document)
+        disconnect(m_document, &QTextDocument::contentsChange, this, nullptr);
     if (m_highlighter)
         delete m_highlighter.data();
 
@@ -347,7 +349,7 @@ void Backend::attachDocument(QObject *textDocument) {
         editor->setFlag(QQuickItem::ItemObservesViewport);
 
     m_document = quickDocument->textDocument();
-    m_lastDocumentText = m_document->toPlainText();
+    m_lastDocumentText = currentDocumentText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setTheme(m_darkMode, m_themeBackground, m_themeForeground, m_themeAccent,
                             m_themePanelBackground);
@@ -383,6 +385,10 @@ void Backend::open(const QUrl &url) {
     }
 
     const QByteArray raw = file.readAll();
+    if (file.error() != QFileDevice::NoError) {
+        setStatus(tr("Could not open %1.").arg(targetName));
+        return;
+    }
     const DecodedFile decoded = decodeFileContents(raw);
     loadDocumentText(decoded.text);
     emit fileOpened();
@@ -627,8 +633,8 @@ QVariantMap Backend::emphasisSpanAt(int position, const QString &marker) const {
     if (!m_document)
         return {};
 
-    const QTextBlock block =
-        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    const int clamped = qBound(0, position, m_document->characterCount() - 1);
+    const QTextBlock block = m_document->findBlock(clamped);
     if (!block.isValid() || block.userState() >= MarkdownHighlighter::InsideFence
             || block.previous().userState() >= MarkdownHighlighter::InsideFence)
         return {};
@@ -637,7 +643,7 @@ QVariantMap Backend::emphasisSpanAt(int position, const QString &marker) const {
     const Kind kind = marker == QStringLiteral("**") ? Kind::Bold
         : marker == QStringLiteral("~~")              ? Kind::Strikethrough
                                                       : Kind::Italic;
-    const int offset = position - block.position();
+    const int offset = clamped - block.position();
     const QList<MarkdownHighlighter::InlineMarkup> markup =
         MarkdownHighlighter::inlineMarkup(block.text());
     for (const auto &item : markup) {
@@ -674,8 +680,8 @@ QString Backend::linkUrlAt(int position) const {
     if (!m_document)
         return {};
 
-    const QTextBlock block =
-        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    const int clamped = qBound(0, position, m_document->characterCount() - 1);
+    const QTextBlock block = m_document->findBlock(clamped);
     if (!block.isValid())
         return {};
 
@@ -684,7 +690,7 @@ QString Backend::linkUrlAt(int position) const {
             || block.previous().userState() >= MarkdownHighlighter::InsideFence)
         return {};
 
-    return MarkdownHighlighter::linkUrlAt(block.text(), position - block.position());
+    return MarkdownHighlighter::linkUrlAt(block.text(), clamped - block.position());
 }
 
 int Backend::cursorPositionStep(int position, int direction) const
@@ -797,16 +803,18 @@ void Backend::replaceAll(const QString &query, const QString &replacement) {
 bool Backend::insideFence(int position) const {
     if (!m_document)
         return false;
-    const QTextBlock block =
-        m_document->findBlock(qBound(0, position, m_document->characterCount() - 1));
+    const int clamped = qBound(0, position, m_document->characterCount() - 1);
+    const QTextBlock block = m_document->findBlock(clamped);
     if (!block.isValid())
         return false;
     const bool opensOrContinues = block.userState() >= MarkdownHighlighter::InsideFence;
     const bool afterOpening = block.previous().userState() >= MarkdownHighlighter::InsideFence;
-    const int offset = position - block.position();
+    const int offset = clamped - block.position();
     if (opensOrContinues && !afterOpening) {
-        static const QRegularExpression fenceMark(QStringLiteral("[`~]"));
-        return offset >= block.text().indexOf(fenceMark) + 3;
+        const int fence = block.userState() - MarkdownHighlighter::InsideFence;
+        const int length = fence / 2 + 3;
+        const QChar marker = fence % 2 ? QLatin1Char('~') : QLatin1Char('`');
+        return offset >= block.text().indexOf(marker) + length;
     }
     if (afterOpening && !opensOrContinues)
         return offset < block.text().length();
@@ -815,10 +823,12 @@ bool Backend::insideFence(int position) const {
 
 QVariantMap Backend::windowGeometry() const {
     QSettings settings;
+    const int width = settings.value(QStringLiteral("window/width"), 1280).toInt();
+    const int height = settings.value(QStringLiteral("window/height"), 820).toInt();
     return {{QStringLiteral("x"), settings.value(QStringLiteral("window/x"), -1)},
             {QStringLiteral("y"), settings.value(QStringLiteral("window/y"), -1)},
-            {QStringLiteral("width"), settings.value(QStringLiteral("window/width"), 1280)},
-            {QStringLiteral("height"), settings.value(QStringLiteral("window/height"), 820)},
+            {QStringLiteral("width"), width > 0 ? width : 1280},
+            {QStringLiteral("height"), height > 0 ? height : 820},
             {QStringLiteral("maximized"), settings.value(QStringLiteral("window/maximized"), false)}};
 }
 
@@ -894,6 +904,8 @@ void Backend::loadDocumentText(const QString &text) {
 
     // Inserting under the line height already set styles the text once, where
     // setPlainText and a typography pass after it would restyle it twice.
+    if (m_highlighter)
+        m_highlighter->clearCurrentMatch();
     m_loading = true;
     const bool undoEnabled = m_document->isUndoRedoEnabled();
     m_document->setUndoRedoEnabled(false);
