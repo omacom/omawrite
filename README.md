@@ -75,3 +75,5 @@ require an active graphical session. To open a file with the local build:
 ```sh
 ./build/omawrite path/to/document.md
 ```
+
+For a consistent experience across Omarchy and a Mac, there's [Write](https://github.com/mukhortov/write), an unofficial macOS port of Omawrite.
