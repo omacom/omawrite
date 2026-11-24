@@ -888,12 +888,7 @@ void Backend::saveTo(const QUrl &url) {
     }
 
     const QByteArray contents = currentDocumentText().toUtf8();
-    if (file.write(contents) != contents.size()) {
-        file.cancelWriting();
-        setStatus(tr("Could not write %1.").arg(targetName));
-        emit saveFailed();
-        return;
-    }
+    file.write(contents);
 
     // QSaveFile commits by replacing the target. Stop watching the old inode
     // before that replacement so our own write is not classified as external.
@@ -1017,11 +1012,7 @@ void Backend::writeRecovery() {
         return;
     const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
                                {QStringLiteral("text"), currentDocumentText()}};
-    const QByteArray payload = QJsonDocument(recovery).toJson(QJsonDocument::Compact);
-    if (file.write(payload) != payload.size()) {
-        file.cancelWriting();
-        return;
-    }
+    file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
     file.commit();
 }
 

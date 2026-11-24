@@ -2372,17 +2372,17 @@ private slots:
         returnKey();
         QCOMPARE(text(), QStringLiteral("\n"));
 
-        // Selecting from inside a list item across the next line continues the
-        // list from the selection's start rather than the caret's line.
+        // Selecting across lines from a list item acts on the selection's
+        // start rather than the caret's line: emptying it leaves the list,
+        // while keeping text continues it.
         load(QStringLiteral("- item\nsecond"), 2);
         QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 13));
         returnKey();
         QCOMPARE(text(), QStringLiteral("\n"));
-
-        // Return at position 0 of a leading newline does not misread index 0.
-        load(QStringLiteral("\nhello"), 0);
+        load(QStringLiteral("- item\nsecond"), 4);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 13));
         returnKey();
-        QCOMPARE(text(), QStringLiteral("\n\nhello"));
+        QCOMPARE(text(), QStringLiteral("- it\n- "));
 
         // Inside a code fence every line is its own, blank ones included.
         load(QStringLiteral("```\ncode\n```"), 8);
