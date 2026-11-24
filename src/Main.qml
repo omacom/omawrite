@@ -47,6 +47,12 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property int lastWindowVisibility: Window.Windowed
+
+    onVisibilityChanged: {
+        if (visibility !== Window.Hidden && visibility !== Window.Minimized)
+            lastWindowVisibility = visibility;
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -733,18 +739,20 @@ ApplicationWindow {
                         replaceSelectionWith("\n");
                         return;
                     }
-                    var lineStart = text.lastIndexOf("\n", cursorPosition - 1) + 1;
-                    // Raw, as its indentation is copied onto the next line.
-                    var line = rawText().slice(lineStart, cursorPosition);
-                    if (backend.insideFence(cursorPosition)) {
+                    var start = selectionStart;
+                    var end = selectionEnd;
+                    var docText = text;
+                    var lineStart = start > 0 ? docText.lastIndexOf("\n", start - 1) + 1 : 0;
+                    if (backend.insideFence(start)) {
                         replaceSelectionWith("\n");
                         return;
                     }
+                    // Raw, as its indentation is copied onto the next line.
+                    var line = rawText().slice(lineStart, start);
                     var match = line.match(/^(\s*)([-+*]|\d+[.)]|>+)\s+(.*)$/);
                     if (match) {
                         if (match[3].length === 0) {
-                            EditorMutations.replaceRange(editor, lineStart,
-                                                         cursorPosition, "\n");
+                            EditorMutations.replaceRange(editor, lineStart, end, "\n");
                         } else {
                             var marker = match[2];
                             if (/^\d/.test(marker))
@@ -759,12 +767,10 @@ ApplicationWindow {
                     // that break would only be a gap nobody asked for.
                     // The break lands on what the selection leaves behind, which
                     // is not the caret's line when it was dragged right to left.
-                    var start = selectionStart;
-                    var end = selectionEnd;
-                    var head = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
-                    var lineEnd = text.indexOf("\n", end);
-                    var rest = lineEnd < 0 ? text.slice(end)
-                                           : text.slice(end, lineEnd);
+                    var head = docText.slice(lineStart, start);
+                    var lineEnd = docText.indexOf("\n", end);
+                    var rest = lineEnd < 0 ? docText.slice(end)
+                                           : docText.slice(end, lineEnd);
                     if (/^\s*$/.test(head) && /^\s*$/.test(rest)) {
                         replaceSelectionWith("\n");
                         return;
@@ -914,9 +920,10 @@ ApplicationWindow {
                         return false;
 
                     var start = cursorPosition - 2;
-                    var lineEnd = text.indexOf("\n", cursorPosition);
-                    var line = lineEnd < 0 ? text.slice(cursorPosition)
-                                           : text.slice(cursorPosition, lineEnd);
+                    var docText = text;
+                    var lineEnd = docText.indexOf("\n", cursorPosition);
+                    var line = lineEnd < 0 ? docText.slice(cursorPosition)
+                                           : docText.slice(cursorPosition, lineEnd);
                     // Something on the caret's line and the pair above it is a
                     // paragraph break and nothing else, either the one Return
                     // wrote to end a paragraph or the one the writer is now
@@ -927,7 +934,8 @@ ApplicationWindow {
                         // already in the document. Above a blank line Return
                         // writes a single break too, and so wrote neither of
                         // these.
-                        var above = text.slice(text.lastIndexOf("\n", start - 1) + 1, start);
+                        var aboveStart = start > 0 ? docText.lastIndexOf("\n", start - 1) + 1 : 0;
+                        var above = docText.slice(aboveStart, start);
                         if (/^\s*$/.test(above))
                             return false;
                         // Past that the two Returns leave the same text and the
@@ -940,9 +948,9 @@ ApplicationWindow {
                             return false;
                         // ...and so does the next paragraph, which the pair
                         // would otherwise be pulled up against.
-                        var belowEnd = text.indexOf("\n", lineEnd + 1);
-                        var below = belowEnd < 0 ? text.slice(lineEnd + 1)
-                                                 : text.slice(lineEnd + 1, belowEnd);
+                        var belowEnd = docText.indexOf("\n", lineEnd + 1);
+                        var below = belowEnd < 0 ? docText.slice(lineEnd + 1)
+                                                 : docText.slice(lineEnd + 1, belowEnd);
                         if (!/^\s*$/.test(below))
                             return false;
                     }
@@ -1373,6 +1381,9 @@ ApplicationWindow {
         if (geometry.maximized) showMaximized();
     }
 
-    Component.onDestruction: backend.saveWindowGeometry(x, y, width, height, visibility === Window.Maximized)
+    Component.onDestruction: {
+        if (lastWindowVisibility !== Window.FullScreen)
+            backend.saveWindowGeometry(x, y, width, height, lastWindowVisibility === Window.Maximized);
+    }
 
 }

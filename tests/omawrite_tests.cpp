@@ -2497,12 +2497,95 @@ private slots:
         returnKey();
         QCOMPARE(text(), QStringLiteral("- item\n\n"));
 
+        // Selecting an item's text right-to-left and pressing Return removes
+        // the selection along with the now-empty marker.
+        load(QStringLiteral("- item"), 6);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 2));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+
+        // Selecting across lines from a list item acts on the selection's
+        // start rather than the caret's line: emptying it leaves the list,
+        // while keeping text continues it.
+        load(QStringLiteral("- item\nsecond"), 2);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 13));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("\n"));
+        load(QStringLiteral("- item\nsecond"), 4);
+        QMetaObject::invokeMethod(editor, "moveCursorSelection", Q_ARG(int, 13));
+        returnKey();
+        QCOMPARE(text(), QStringLiteral("- it\n- "));
+
         // Inside a code fence every line is its own, blank ones included.
         load(QStringLiteral("```\ncode\n```"), 8);
         returnKey();
         QCOMPARE(text(), QStringLiteral("```\ncode\n\n```"));
         returnKey();
         QCOMPARE(text(), QStringLiteral("```\ncode\n\n\n```"));
+
+        // A four-backtick opening fence is only inside code past all four
+        // backticks, not after the third.
+        load(QStringLiteral("````md\ncode\n````"), 0);
+        QVERIFY(!backend.insideFence(3));
+        QVERIFY(backend.insideFence(4));
+        // Out-of-range positions clamp to the document bounds cleanly.
+        QVERIFY(!backend.insideFence(-5));
+        QVERIFY(!backend.insideFence(999));
+        QVERIFY(backend.emphasisSpanAt(-5, QStringLiteral("**")).isEmpty());
+        QVERIFY(backend.linkUrlAt(999).isEmpty());
+    }
+
+    void fallsBackFromNonPositiveWindowGeometry() {
+        QSettings settings;
+        settings.setValue(QStringLiteral("window/width"), 0);
+        settings.setValue(QStringLiteral("window/height"), -10);
+        const auto cleanup = qScopeGuard([&settings] {
+            settings.remove(QStringLiteral("window/width"));
+            settings.remove(QStringLiteral("window/height"));
+        });
+
+        Backend backend;
+        const QVariantMap geometry = backend.windowGeometry();
+        QCOMPARE(geometry.value(QStringLiteral("width")).toInt(), 1280);
+        QCOMPARE(geometry.value(QStringLiteral("height")).toInt(), 820);
+    }
+
+    void keepsWindowedGeometryWhenClosedFromFullscreen() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        QSettings settings;
+        const auto cleanup = qScopeGuard([&settings] {
+            settings.remove(QStringLiteral("window/x"));
+            settings.remove(QStringLiteral("window/y"));
+            settings.remove(QStringLiteral("window/width"));
+            settings.remove(QStringLiteral("window/height"));
+            settings.remove(QStringLiteral("window/maximized"));
+        });
+
+        Backend backend;
+        backend.saveWindowGeometry(50, 60, 900, 650, false);
+
+        {
+            QQmlEngine engine;
+            engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+            QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+            QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+            QScopedPointer<QObject> object(component.create());
+            auto *window = qobject_cast<QQuickWindow *>(object.data());
+            QVERIFY(window);
+            window->setVisibility(QWindow::FullScreen);
+            window->resize(1920, 1080);
+            // Closing a window hides it before destruction; visibility is
+            // Hidden by the time Component.onDestruction runs.
+            window->hide();
+            QCOMPARE(window->visibility(), QWindow::Hidden);
+        }
+
+        const QVariantMap saved = backend.windowGeometry();
+        QCOMPARE(saved.value(QStringLiteral("width")).toInt(), 900);
+        QCOMPARE(saved.value(QStringLiteral("height")).toInt(), 650);
+        QCOMPARE(saved.value(QStringLiteral("maximized")).toBool(), false);
     }
 
     void nestsListItemsOnTab() {
