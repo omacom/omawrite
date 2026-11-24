@@ -523,10 +523,11 @@ Item {
 
                 // A selection that ends at the start of a line leaves it be.
                 // lastIndexOf would read -1 as 0, a newline right there.
-                var start = selectionStart > 0 ? text.lastIndexOf("\n", selectionStart - 1) + 1 : 0;
-                var end = text.indexOf("\n", Math.max(start, selectionEnd - 1));
+                var docText = text;
+                var start = selectionStart > 0 ? docText.lastIndexOf("\n", selectionStart - 1) + 1 : 0;
+                var end = docText.indexOf("\n", Math.max(start, selectionEnd - 1));
                 if (end < 0)
-                    end = text.length;
+                    end = docText.length;
                 // A line separator breaks a line on screen as a newline does,
                 // and each line keeps the one it had.
                 var parts = rawText().slice(start, end).split(/(\n|\u2028)/);
@@ -1049,25 +1050,8 @@ Item {
                 onClicked: {
                     tab.flushSearch();
                     var query = searchField.text;
-                    var matches = tab.searchMatches;
-                    if (query.length === 0 || matches.length === 0) return;
-                    // One replacement over the span of every match, so a
-                    // single undo takes them all back.
-                    var first = matches[0];
-                    var text = editor.rawText();
-                    var replaced = "";
-                    var position = first;
-                    for (var i = 0; i < matches.length; ++i) {
-                        replaced += text.slice(position, matches[i]) + replaceField.text;
-                        position = matches[i] + query.length;
-                    }
-                    tab.searchReplacing = true;
-                    try {
-                        EditorMutations.replaceRange(editor, first, position, replaced);
-                    } finally {
-                        tab.searchReplacing = false;
-                    }
-                    tab.updateSearch(false);
+                    if (query.length === 0 || tab.searchMatches.length === 0) return;
+                    backend.replaceAll(query, replaceField.text);
                 }
             }
 
