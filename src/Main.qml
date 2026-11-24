@@ -306,6 +306,13 @@ ApplicationWindow {
             : Window.FullScreen;
     }
 
+    property int lastWindowVisibility: Window.Windowed
+
+    onVisibilityChanged: {
+        if (visibility !== Window.Hidden && visibility !== Window.Minimized)
+            lastWindowVisibility = visibility;
+    }
+
     Shortcut {
         sequence: "Ctrl+S"
         onActivated: win.currentDocument.save()
@@ -695,6 +702,10 @@ ApplicationWindow {
         newTab(true, backend);
     }
 
-    Component.onDestruction: backend.saveWindowGeometry(x, y, width, height, visibility === Window.Maximized)
+    Component.onDestruction: {
+        if (lastWindowVisibility !== Window.FullScreen)
+            backend.saveWindowGeometry(x, y, width, height, lastWindowVisibility === Window.Maximized);
+    }
 
 }
+
