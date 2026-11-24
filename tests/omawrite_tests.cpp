@@ -24,12 +24,79 @@
 
 #include "backend.h"
 #include "markdownhighlighter.h"
+#include "portalfilepicker.h"
 #include "translator.h"
 
+#include <QDBusConnection>
+#include <QDBusMessage>
+#include <QDBusObjectPath>
 #include <QJsonDocument>
 #include <QJsonObject>
+#include <QProcess>
 #include <QRegularExpression>
 #include <QSet>
+
+class FakePortalRequest : public QObject {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.freedesktop.portal.Request")
+
+public:
+    bool closed = false;
+
+public slots:
+    void Close() { closed = true; }
+};
+
+class FakePortalChooser : public QObject {
+    Q_OBJECT
+    Q_CLASSINFO("D-Bus Interface", "org.freedesktop.portal.FileChooser")
+
+public:
+    FakePortalChooser(QDBusConnection bus, QString clientService, FakePortalRequest *request)
+        : m_bus(std::move(bus)), m_clientService(std::move(clientService)), m_request(request) {}
+
+    QString lastMethod;
+    QString lastTitle;
+    QVariantMap lastOptions;
+    QString lastRequestPath;
+
+    void respond(uint code, const QVariantMap &results = {}) {
+        QDBusMessage signal = QDBusMessage::createSignal(
+            lastRequestPath, QStringLiteral("org.freedesktop.portal.Request"),
+            QStringLiteral("Response"));
+        signal << code << results;
+        m_bus.send(signal);
+    }
+
+public slots:
+    QDBusObjectPath OpenFile(const QString &, const QString &title, const QVariantMap &options) {
+        return handleCall(QStringLiteral("OpenFile"), title, options);
+    }
+
+    QDBusObjectPath SaveFile(const QString &, const QString &title, const QVariantMap &options) {
+        return handleCall(QStringLiteral("SaveFile"), title, options);
+    }
+
+private:
+    QDBusObjectPath handleCall(const QString &method, const QString &title,
+                               const QVariantMap &options) {
+        lastMethod = method;
+        lastTitle = title;
+        lastOptions = options;
+        if (!lastRequestPath.isEmpty())
+            m_bus.unregisterObject(lastRequestPath);
+        QString sender = m_clientService.mid(1);
+        sender.replace(QLatin1Char('.'), QLatin1Char('_'));
+        lastRequestPath = QStringLiteral("/org/freedesktop/portal/desktop/request/%1/%2")
+                              .arg(sender, options.value(QStringLiteral("handle_token")).toString());
+        m_bus.registerObject(lastRequestPath, m_request, QDBusConnection::ExportAllSlots);
+        return QDBusObjectPath(lastRequestPath);
+    }
+
+    QDBusConnection m_bus;
+    QString m_clientService;
+    FakePortalRequest *m_request;
+};
 
 // Wraps the active platform theme and swaps the keys for the next and
 // previous character, as a theme like KDE Plasma's or qt6ct may change them.
@@ -2390,6 +2457,195 @@ private slots:
         QSignalSpy openDialogSpy(&backend, &Backend::openDialogRequested);
         QVERIFY(QMetaObject::invokeMethod(openButton, "clicked"));
         QCOMPARE(openDialogSpy.count(), 1);
+    }
+
+    void portalFilePickerOpensSavesAndClosesOnDestroy() {
+        if (QStandardPaths::findExecutable(QStringLiteral("dbus-daemon")).isEmpty())
+            QSKIP("needs dbus-daemon for a private bus");
+
+        QProcess daemon;
+        daemon.start(QStringLiteral("dbus-daemon"),
+                     {QStringLiteral("--session"), QStringLiteral("--print-address"),
+                      QStringLiteral("--nofork")});
+        QVERIFY(daemon.waitForReadyRead(5000));
+        const QString address = QString::fromUtf8(daemon.readLine()).trimmed();
+        QDBusConnection serviceBus =
+            QDBusConnection::connectToBus(address, QStringLiteral("omawrite-portal-service"));
+        QDBusConnection clientBus =
+            QDBusConnection::connectToBus(address, QStringLiteral("omawrite-portal-client"));
+        const auto cleanup = qScopeGuard([&] {
+            QDBusConnection::disconnectFromBus(QStringLiteral("omawrite-portal-client"));
+            QDBusConnection::disconnectFromBus(QStringLiteral("omawrite-portal-service"));
+            daemon.kill();
+            daemon.waitForFinished();
+        });
+        QVERIFY(serviceBus.isConnected() && clientBus.isConnected());
+        QVERIFY(serviceBus.registerService(QStringLiteral("org.freedesktop.portal.Desktop")));
+
+        FakePortalRequest request;
+        FakePortalChooser chooser(serviceBus, clientBus.baseService(), &request);
+        QVERIFY(serviceBus.registerObject(QStringLiteral("/org/freedesktop/portal/desktop"),
+                                          &chooser, QDBusConnection::ExportAllSlots));
+
+        const QByteArray expectedHome = QDir::homePath().toUtf8() + '\0';
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString chosenOpen = dir.filePath(QStringLiteral("opened.md"));
+        const QString chosenSave = dir.filePath(QStringLiteral("saved.md"));
+
+        {
+            PortalFilePicker picker(nullptr, clientBus);
+            QSignalSpy openSpy(&picker, &PortalFilePicker::openSelected);
+            QSignalSpy saveSpy(&picker, &PortalFilePicker::saveSelected);
+            QSignalSpy cancelSpy(&picker, &PortalFilePicker::cancelled);
+            QSignalSpy failSpy(&picker, &PortalFilePicker::failed);
+
+            // Empty folder falls back to $HOME and passes modal/single/filters.
+            picker.openFile(QString());
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
+            QCOMPARE(chooser.lastTitle, QStringLiteral("Open File"));
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("current_folder")).toByteArray(),
+                     expectedHome);
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("modal")).toBool(), true);
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("multiple")).toBool(), false);
+            QVERIFY(chooser.lastOptions.contains(QStringLiteral("filters")));
+            QVERIFY(chooser.lastOptions.contains(QStringLiteral("current_filter")));
+            chooser.respond(0, {{QStringLiteral("uris"),
+                                 QStringList{QUrl::fromLocalFile(chosenOpen).toString()}}});
+            QTRY_COMPARE(openSpy.count(), 1);
+            QCOMPARE(openSpy.first().first().toUrl(), QUrl::fromLocalFile(chosenOpen));
+
+            // Cancelling an open emits cancelled(false) without selecting a file.
+            chooser.lastMethod.clear();
+            picker.openFile(dir.path());
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("current_folder")).toByteArray(),
+                     dir.path().toUtf8() + '\0');
+            chooser.respond(1);
+            QTRY_COMPARE(cancelSpy.count(), 1);
+            QCOMPARE(cancelSpy.last().first().toBool(), false);
+            QCOMPARE(openSpy.count(), 1);
+
+            // An empty URI list on success also counts as cancellation.
+            chooser.lastMethod.clear();
+            picker.openFile(dir.path());
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
+            chooser.respond(0);
+            QTRY_COMPARE(cancelSpy.count(), 2);
+            QCOMPARE(cancelSpy.last().first().toBool(), false);
+
+            // Save passes current_folder and current_name (with $HOME fallback for missing folders).
+            chooser.lastMethod.clear();
+            picker.saveFile(QUrl::fromLocalFile(dir.filePath(QStringLiteral("missing/draft.md"))));
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
+            QCOMPARE(chooser.lastTitle, QStringLiteral("Save File"));
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("current_folder")).toByteArray(),
+                     expectedHome);
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("current_name")).toString(),
+                     QStringLiteral("draft.md"));
+            chooser.respond(0, {{QStringLiteral("uris"),
+                                 QStringList{QUrl::fromLocalFile(chosenSave).toString()}}});
+            QTRY_COMPARE(saveSpy.count(), 1);
+            QCOMPARE(saveSpy.first().first().toUrl(), QUrl::fromLocalFile(chosenSave));
+
+            // Replacing a pending save with another save closes the old one without cancelling.
+            chooser.lastMethod.clear();
+            request.closed = false;
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
+            QCOMPARE(chooser.lastOptions.value(QStringLiteral("current_folder")).toByteArray(),
+                     dir.path().toUtf8() + '\0');
+
+            chooser.lastMethod.clear();
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QCOMPARE(cancelSpy.count(), 2);
+            QTRY_VERIFY(request.closed);
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
+
+            // Replacing a pending save with an open closes it and emits cancelled(true).
+            chooser.lastMethod.clear();
+            request.closed = false;
+            picker.openFile(dir.path());
+            QCOMPARE(cancelSpy.count(), 3);
+            QCOMPARE(cancelSpy.last().first().toBool(), true);
+            QTRY_VERIFY(request.closed);
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("OpenFile"));
+            chooser.respond(1);
+            QTRY_COMPARE(cancelSpy.count(), 4);
+            QCOMPARE(cancelSpy.last().first().toBool(), false);
+
+            // Missing portal object emits failed(..., true) for a save without cancelled().
+            serviceBus.unregisterObject(QStringLiteral("/org/freedesktop/portal/desktop"));
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QTRY_COMPARE(failSpy.count(), 1);
+            QCOMPARE(failSpy.last().at(0).toString(),
+                     QStringLiteral("The desktop's file chooser (xdg-desktop-portal) is not available."));
+            QCOMPARE(failSpy.last().at(1).toBool(), true);
+            QCOMPARE(cancelSpy.count(), 4);
+
+            // Re-register and leave a save request pending so destruction must close it.
+            QVERIFY(serviceBus.registerObject(QStringLiteral("/org/freedesktop/portal/desktop"),
+                                              &chooser, QDBusConnection::ExportAllSlots));
+            chooser.lastMethod.clear();
+            request.closed = false;
+            picker.saveFile(QUrl::fromLocalFile(chosenSave));
+            QTRY_COMPARE(chooser.lastMethod, QStringLiteral("SaveFile"));
+        }
+        QTRY_VERIFY(request.closed);
+    }
+
+    void wiresPortalFilePickerSignalsInMainWindow() {
+        QTemporaryDir dir;
+        QVERIFY(dir.isValid());
+        const QString openPath = dir.filePath(QStringLiteral("note.md"));
+        const QString savePath = dir.filePath(QStringLiteral("out.md"));
+        writeFile(openPath, "from portal");
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        PortalFilePicker filePicker(nullptr, QDBusConnection(QStringLiteral("disconnected-test")));
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("filePicker"), &filePicker);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        // Selecting a file to open loads it and sets suggestedOpenDirectory.
+        emit filePicker.openSelected(QUrl::fromLocalFile(openPath));
+        QCOMPARE(backend.documentText(), QStringLiteral("from portal"));
+        QCOMPARE(backend.suggestedOpenDirectory(), dir.path());
+
+        // Selecting a file to save writes it.
+        emit filePicker.saveSelected(QUrl::fromLocalFile(savePath));
+        QCOMPARE(readFile(savePath), QByteArray("from portal"));
+
+        // Cancelling or failing an open leaves pending save state untouched.
+        window->setProperty("pendingAction", QStringLiteral("close"));
+        window->setProperty("awaitingPendingSave", true);
+        emit filePicker.cancelled(false);
+        QCOMPARE(window->property("pendingAction").toString(), QStringLiteral("close"));
+        QVERIFY(window->property("awaitingPendingSave").toBool());
+
+        emit filePicker.failed(QStringLiteral("open failed"), false);
+        QCOMPARE(window->property("pendingAction").toString(), QStringLiteral("close"));
+        QVERIFY(window->property("awaitingPendingSave").toBool());
+        QCOMPARE(backend.status(), QStringLiteral("open failed"));
+
+        // Cancelling or failing a save clears pending close/open state and reports errors.
+        emit filePicker.cancelled(true);
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QVERIFY(!window->property("awaitingPendingSave").toBool());
+
+        window->setProperty("pendingAction", QStringLiteral("close"));
+        window->setProperty("awaitingPendingSave", true);
+        emit filePicker.failed(QStringLiteral("portal unavailable"), true);
+        QCOMPARE(window->property("pendingAction").toString(), QString());
+        QVERIFY(!window->property("awaitingPendingSave").toBool());
+        QCOMPARE(backend.status(), QStringLiteral("portal unavailable"));
     }
 
     void copiesRenderedHtml() {

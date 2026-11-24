@@ -12,6 +12,7 @@
 
 #include "backend.h"
 #include "cli.h"
+#include "portalfilepicker.h"
 #include "systemtheme.h"
 #include "translator.h"
 
@@ -19,13 +20,6 @@ int main(int argc, char *argv[]) {
     // Answered before the application exists, so it needs no display.
     if (const std::optional<int> exitCode = Cli::handleArguments(argc, argv))
         return *exitCode;
-
-    // Omarchy asks Qt for GTK 3 dialogs, which run inside this process, and a
-    // long-standing GTK 3 file chooser assertion aborts the whole app, unsaved
-    // text and all. The desktop portal shows the same chooser from a process
-    // of its own.
-    if (qgetenv("QT_QPA_PLATFORMTHEME") == "gtk3")
-        qputenv("QT_QPA_PLATFORMTHEME", "xdgdesktopportal");
 
     QApplication app(argc, argv);
     app.setApplicationName(QStringLiteral("omawrite"));
@@ -47,6 +41,7 @@ int main(int argc, char *argv[]) {
     app.installTranslator(&translator);
 
     Backend backend(&app);
+    PortalFilePicker filePicker(&app);
     SystemTheme systemTheme(&app);
     backend.setDarkMode(systemTheme.darkMode());
     QObject::connect(&systemTheme, &SystemTheme::darkModeChanged, &backend,
@@ -93,6 +88,7 @@ int main(int argc, char *argv[]) {
     QObject::connect(&translator, &Translator::changed, &backend, &Backend::retranslate);
     engine.rootContext()->setContextProperty(QStringLiteral("translator"), &translator);
     engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+    engine.rootContext()->setContextProperty(QStringLiteral("filePicker"), &filePicker);
 
     engine.load(QUrl(QStringLiteral("qrc:/Main.qml")));
     if (engine.rootObjects().isEmpty()) {

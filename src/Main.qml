@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
-import QtQuick.Dialogs as Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 import "EditorMutations.js" as EditorMutations
@@ -307,12 +306,13 @@ ApplicationWindow {
         target: backend
 
         function onOpenDialogRequested() {
-            openFileDialog.open();
+            if (typeof filePicker !== "undefined" && filePicker)
+                filePicker.openFile(backend.suggestedOpenDirectory());
         }
 
         function onSaveDialogRequested(suggestedUrl) {
-            saveFileDialog.selectedFile = suggestedUrl;
-            saveFileDialog.open();
+            if (typeof filePicker !== "undefined" && filePicker)
+                filePicker.saveFile(suggestedUrl);
         }
 
         function onSaveSucceeded() {
@@ -348,23 +348,30 @@ ApplicationWindow {
         }
     }
 
-    Dialogs.FileDialog {
-        id: openFileDialog
-        title: qsTr("Open File")
-        fileMode: Dialogs.FileDialog.OpenFile
-        nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
-        onAccepted: win.requestOpen(selectedFile)
-    }
+    Connections {
+        target: typeof filePicker !== "undefined" ? filePicker : null
 
-    Dialogs.FileDialog {
-        id: saveFileDialog
-        title: qsTr("Save File")
-        fileMode: Dialogs.FileDialog.SaveFile
-        nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
-        onAccepted: backend.saveAs(selectedFile)
-        onRejected: {
-            win.awaitingPendingSave = false;
-            win.pendingAction = "";
+        function onOpenSelected(url) {
+            win.requestOpen(url);
+        }
+
+        function onSaveSelected(url) {
+            backend.saveAs(url);
+        }
+
+        function onCancelled(forSave) {
+            if (forSave) {
+                win.awaitingPendingSave = false;
+                win.pendingAction = "";
+            }
+        }
+
+        function onFailed(message, forSave) {
+            if (forSave) {
+                win.awaitingPendingSave = false;
+                win.pendingAction = "";
+            }
+            backend.setStatus(message);
         }
     }
 
