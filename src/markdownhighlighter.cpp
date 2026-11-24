@@ -11,6 +11,15 @@
 #include <utility>
 #include <vector>
 
+namespace {
+
+bool hasInlineDelimiters(const QString &text) {
+    return text.contains(QLatin1Char('*')) || text.contains(QLatin1Char('_'))
+        || text.contains(QLatin1Char('[')) || text.contains(QLatin1Char('~'));
+}
+
+} // namespace
+
 MarkdownHighlighter::MarkdownHighlighter(QTextDocument *document)
     : QSyntaxHighlighter(document) {
     rebuildFormats();
@@ -115,30 +124,39 @@ void MarkdownHighlighter::setCaret(int position) {
     }
     m_caret.setPosition(clamped);
 
-    const auto mayHaveMarkers = [](const QTextBlock &block) {
-        if (!block.isValid() || block.userState() >= InsideFence
+    const auto touchesMarkup = [](const QTextBlock &block, int offset) {
+        if (!block.isValid() || offset < 0 || block.userState() >= InsideFence
                 || block.previous().userState() >= InsideFence)
             return false;
         const QString text = block.text();
-        return text.contains(QLatin1Char('*')) || text.contains(QLatin1Char('_'))
-            || text.contains(QLatin1Char('[')) || text.contains(QLatin1Char('~'));
+        if (!hasInlineDelimiters(text))
+            return false;
+        const QList<InlineMarkup> markup = inlineMarkup(text);
+        return std::any_of(markup.cbegin(), markup.cend(), [offset](const InlineMarkup &item) {
+            return offset >= item.markers[0].start
+                && offset <= item.markers[1].start + item.markers[1].length;
+        });
     };
 
     // Only the lines the caret left and entered can show different markers,
-    // and only when inline markup is present and its revealed set changed.
+    // and only when the caret enters, leaves, or crosses an inline markup span.
     const QTextBlock entered = m_caret.block();
+    const int newOffset = m_caret.positionInBlock();
     if (left != entered) {
-        if (mayHaveMarkers(left))
+        if (touchesMarkup(left, oldOffset))
             rehighlightBlock(left);
-        if (mayHaveMarkers(entered))
+        if (touchesMarkup(entered, newOffset))
             rehighlightBlock(entered);
         return;
     }
 
-    if (!mayHaveMarkers(entered))
+    if (!entered.isValid() || entered.userState() >= InsideFence
+            || entered.previous().userState() >= InsideFence)
         return;
-    const int newOffset = m_caret.positionInBlock();
-    const QList<InlineMarkup> markup = inlineMarkup(entered.text());
+    const QString text = entered.text();
+    if (!hasInlineDelimiters(text))
+        return;
+    const QList<InlineMarkup> markup = inlineMarkup(text);
     const bool visibilityChanged = std::any_of(markup.cbegin(), markup.cend(), [&](const InlineMarkup &item) {
         const int start = item.markers[0].start;
         const int end = item.markers[1].start + item.markers[1].length;
@@ -239,11 +257,8 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
 
     if (!text.isEmpty()) {
         highlightMarkers(text);
-        if (text.contains(QLatin1Char('`')) || text.contains(QLatin1Char('*'))
-            || text.contains(QLatin1Char('_')) || text.contains(QLatin1Char('['))
-            || text.contains(QLatin1Char('~'))) {
+        if (text.contains(QLatin1Char('`')) || hasInlineDelimiters(text))
             highlightInline(text);
-        }
     }
     highlightSearch(text);
 }
@@ -548,10 +563,8 @@ QList<MarkdownHighlighter::Span> MarkdownHighlighter::codeSpans(const QString &t
 }
 
 QList<MarkdownHighlighter::InlineMarkup> MarkdownHighlighter::inlineMarkup(const QString &text) {
-    if (!text.contains(QLatin1Char('*')) && !text.contains(QLatin1Char('_'))
-            && !text.contains(QLatin1Char('[')) && !text.contains(QLatin1Char('~'))) {
+    if (!hasInlineDelimiters(text))
         return {};
-    }
     return inlineMarkup(text, codeSpans(text));
 }
 

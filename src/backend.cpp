@@ -452,7 +452,7 @@ void Backend::openOrStartFile(const QUrl &requestedUrl) {
     clearRecovery();
     // Nothing has been read, so no text counts as saved, and auto-save holds
     // off until an explicit save creates the file (see autoSave()).
-    setKnownFileContents(QByteArray(), false);
+    clearKnownFileContents();
     setFileUrl(url);
     watchCurrentFile();
     setModified(false);
@@ -475,7 +475,7 @@ void Backend::keepExternalVersion() {
         // until the writer saves it again.
         m_autoSaveSuspended = !decoded.savesUnchanged;
     } else {
-        setKnownFileContents(QByteArray(), false);
+        clearKnownFileContents();
     }
     setModified(true);
     scheduleRecovery();
@@ -956,7 +956,8 @@ void Backend::saveTo(const QUrl &url) {
         return;
     }
 
-    const QByteArray contents = currentDocumentText().toUtf8();
+    const QString text = currentDocumentText();
+    const QByteArray contents = text.toUtf8();
     file.write(contents);
 
     // QSaveFile commits by replacing the target. Stop watching the old inode
@@ -972,7 +973,7 @@ void Backend::saveTo(const QUrl &url) {
         return;
     }
 
-    setKnownFileContents(contents, true);
+    setKnownFileContents(contents, text);
     m_autoSaveSuspended = false;
     m_autoSaveTimer.stop();
     setFileUrl(url);
@@ -1050,23 +1051,21 @@ void Backend::reportExternalChange(bool deleted) {
     // Whatever is on disk now, it is not what we last read, so the baseline is
     // unknown until the writer picks a version. A deletion counts: the old
     // text is not saved anywhere either.
-    setKnownFileContents(QByteArray(), false);
+    clearKnownFileContents();
     suspendAutoSave();
     emit externalChangeDetected(deleted, m_modified);
-}
-
-void Backend::setKnownFileContents(const QByteArray &contents, bool known) {
-    m_lastKnownFileContents = contents;
-    m_hasKnownFileContents = known;
-    // Every caller reads in text mode or writes plain line endings, so there
-    // are no carriage returns to strip.
-    m_lastKnownFileText = known ? QString::fromUtf8(contents) : QString();
 }
 
 void Backend::setKnownFileContents(const QByteArray &contents, const QString &text) {
     m_lastKnownFileContents = contents;
     m_hasKnownFileContents = true;
     m_lastKnownFileText = text;
+}
+
+void Backend::clearKnownFileContents() {
+    m_lastKnownFileContents.clear();
+    m_hasKnownFileContents = false;
+    m_lastKnownFileText.clear();
 }
 
 void Backend::writeRecovery() {
@@ -1100,9 +1099,10 @@ void Backend::restoreRecovery() {
     const QUrl recoveredUrl(recovery.value(QStringLiteral("fileUrl")).toString());
     QFile diskFile(recoveredUrl.toLocalFile());
     if (recoveredUrl.isLocalFile() && diskFile.open(QIODevice::ReadOnly | QIODevice::Text)) {
-        setKnownFileContents(diskFile.readAll(), true);
+        const QByteArray contents = diskFile.readAll();
+        setKnownFileContents(contents, QString::fromUtf8(contents));
     } else {
-        setKnownFileContents(QByteArray(), false);
+        clearKnownFileContents();
     }
     setFileUrl(recoveredUrl);
     // The file may have moved on since this draft was written, and the draft

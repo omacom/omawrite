@@ -154,8 +154,8 @@ private:
     void clearRecovery();
     bool diskMatchesKnownContents() const;
     void reportExternalChange(bool deleted);
-    void setKnownFileContents(const QByteArray &contents, bool known);
     void setKnownFileContents(const QByteArray &contents, const QString &text);
+    void clearKnownFileContents();
     void unwatchFiles();
     void watchCurrentFile();
     void checkWatchedFile();
