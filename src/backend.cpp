@@ -371,6 +371,20 @@ void Backend::openDialog() {
     emit openDialogRequested();
 }
 
+QString Backend::suggestedOpenDirectory() const {
+    if (m_fileUrl.isLocalFile()) {
+        const QString folder = QFileInfo(m_fileUrl.toLocalFile()).absolutePath();
+        if (QDir(folder).exists())
+            return folder;
+    }
+
+    const QString savedDirectory = QSettings().value(lastSaveDirectorySetting).toString();
+    if (!savedDirectory.isEmpty() && QDir(savedDirectory).exists())
+        return savedDirectory;
+
+    return QDir::homePath();
+}
+
 void Backend::open(const QUrl &url) {
     if (!url.isLocalFile()) {
         setStatus(tr("Only local files can be opened."));
