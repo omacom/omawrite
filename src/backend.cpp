@@ -815,6 +815,8 @@ void Backend::loadDocumentText(const QString &text) {
 
     // Inserting under the line height already set styles the text once, where
     // setPlainText and a typography pass after it would restyle it twice.
+    if (m_highlighter)
+        m_highlighter->clearCurrentMatch();
     m_loading = true;
     const bool undoEnabled = m_document->isUndoRedoEnabled();
     m_document->setUndoRedoEnabled(false);

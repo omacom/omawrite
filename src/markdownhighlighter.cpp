@@ -53,7 +53,7 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
     m_searchQuery = query;
     m_currentMatchStart = currentMatchStart;
     m_currentMatch = QTextCursor();
-    if (currentMatchStart >= 0) {
+    if (currentMatchStart >= 0 && document()) {
         m_currentMatch = QTextCursor(document());
         m_currentMatch.setPosition(qBound(0, currentMatchStart, document()->characterCount() - 1));
     }
@@ -69,6 +69,11 @@ void MarkdownHighlighter::setSearch(const QString &query, int currentMatchStart)
         rehighlightBlock(left);
     if (entered.isValid() && entered != left)
         rehighlightBlock(entered);
+}
+
+void MarkdownHighlighter::clearCurrentMatch() {
+    m_currentMatchStart = -1;
+    m_currentMatch = QTextCursor();
 }
 
 // QSyntaxHighlighter::rehighlight() marks the blocks dirty one at a time, and
@@ -95,6 +100,9 @@ void MarkdownHighlighter::rehighlightAll() {
 }
 
 void MarkdownHighlighter::setCaret(int position) {
+    if (!document())
+        return;
+
     const QTextBlock left = m_caret.isNull() ? QTextBlock() : m_caret.block();
     if (m_caret.isNull()) {
         m_caret = QTextCursor(document());
@@ -344,13 +352,19 @@ void MarkdownHighlighter::highlightSearch(const QString &text) {
     if (m_searchQuery.isEmpty())
         return;
 
+    const int length = m_searchQuery.length();
     for (const int from : findMatches(text, m_searchQuery)) {
         const int documentStart = currentBlock().position() + from;
-        QTextCharFormat format = this->format(from);
-        format.setBackground(documentStart == m_currentMatchStart
-                                 ? m_currentSearchFormat.background()
-                                 : m_searchFormat.background());
-        setFormat(from, m_searchQuery.length(), format);
+        const QBrush background = documentStart == m_currentMatchStart
+            ? m_currentSearchFormat.background()
+            : m_searchFormat.background();
+        for (int i = from; i < from + length; ++i) {
+            QTextCharFormat format = this->format(i);
+            if (format == m_hiddenMarkerFormat)
+                continue;
+            format.setBackground(background);
+            setFormat(i, 1, format);
+        }
     }
 }
 
