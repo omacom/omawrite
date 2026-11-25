@@ -104,6 +104,9 @@ public:
     // Unsaved drafts left by a crash that no running window has claimed,
     // so a restarted window can reopen each in a tab of its own.
     Q_INVOKABLE int orphanedDraftCount() const;
+    // Whether two URLs name the same file, through symlinks and "..", so a
+    // file is never open in two tabs at once.
+    Q_INVOKABLE static bool sameFile(const QUrl &first, const QUrl &second);
     Q_INVOKABLE QString clipboardUrl() const;
     Q_INVOKABLE QString clipboardText() const;
     Q_INVOKABLE QString documentText() const { return currentDocumentText(); }

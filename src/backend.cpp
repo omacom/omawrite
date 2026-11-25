@@ -603,6 +603,17 @@ void Backend::closeDocument() {
     setWordCount(0);
 }
 
+bool Backend::sameFile(const QUrl &first, const QUrl &second) {
+    if (!first.isLocalFile() || !second.isLocalFile())
+        return !first.isEmpty() && first == second;
+    const auto resolved = [](const QUrl &url) {
+        const QFileInfo info(url.toLocalFile());
+        const QString canonical = info.canonicalFilePath();
+        return canonical.isEmpty() ? QDir::cleanPath(info.absoluteFilePath()) : canonical;
+    };
+    return resolved(first) == resolved(second);
+}
+
 int Backend::orphanedDraftCount() const {
     const QString stateDirectory = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);
     int count = 0;

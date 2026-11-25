@@ -4668,6 +4668,20 @@ private slots:
                                           Q_ARG(QVariant, QUrl::fromLocalFile(onePath))));
         QCOMPARE(tabCount(window.data()), 2);
         QCOMPARE(currentTab(window.data()), first);
+
+        // So is one named through a symlink or "..".
+        const QString linkPath = directory.filePath(QStringLiteral("link.md"));
+        QVERIFY(QFile::link(onePath, linkPath));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "selectTabAt", Q_ARG(QVariant, 1)));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(linkPath))));
+        QCOMPARE(tabCount(window.data()), 2);
+        QCOMPARE(currentTab(window.data()), first);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "selectTabAt", Q_ARG(QVariant, 1)));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+            Q_ARG(QVariant, QUrl::fromLocalFile(directory.path() + QStringLiteral("/sub/../one.md")))));
+        QCOMPARE(tabCount(window.data()), 2);
+        QCOMPARE(currentTab(window.data()), first);
     }
 
     void closingTheWindowAsksAboutEveryTab() {
@@ -4688,6 +4702,8 @@ private slots:
 
         QObject *first = currentTab(window);
         tabEditor(first)->setProperty("text", QStringLiteral("first"));
+        // The first tab's crash draft is written.
+        QTRY_VERIFY(QFileInfo::exists(backend.m_recoveryPath));
         QVERIFY(QMetaObject::invokeMethod(window, "newTab", Q_ARG(QVariant, true),
                                           Q_ARG(QVariant, QVariant())));
         QObject *second = currentTab(window);
@@ -4708,13 +4724,22 @@ private slots:
         QTRY_VERIFY(dialog->property("opened").toBool());
         QCOMPARE(currentTab(window), second);
         QVERIFY(window->isVisible());
+        // The discarded changes wait for the window to close, kept from the
+        // file meanwhile, and their draft is still there.
+        QVERIFY(backend.m_autoSaveHeld);
+        QVERIFY(QFileInfo::exists(backend.m_recoveryPath));
 
-        // Cancelling keeps the window and every tab.
+        // Cancelling keeps the window and every tab, and the first tab's
+        // changes keep their crash draft and auto-save as before.
         QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
         QTRY_VERIFY(!dialog->property("opened").toBool());
         QVERIFY(window->isVisible());
         QCOMPARE(tabCount(window), 3);
         QVERIFY(!first->property("closeResolved").toBool());
+        QVERIFY(backend.modified());
+        QVERIFY(QFileInfo::exists(backend.m_recoveryPath));
+        QVERIFY(!backend.m_autoSaveHeld);
+        QVERIFY(!backend.m_autoSaveSuspended);
 
         qobject_cast<Backend *>(second->property("backend").value<QObject *>())->discardRecovery();
         backend.discardRecovery();

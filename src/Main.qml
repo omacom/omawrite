@@ -75,8 +75,10 @@ ApplicationWindow {
         if (closeConfirmed)
             return;
         var tab = nextUnresolvedTab();
-        if (!tab)
+        if (!tab) {
+            discardResolvedDrafts();
             return;
+        }
 
         close.accepted = false;
         selectTab(tab);
@@ -84,6 +86,16 @@ ApplicationWindow {
         pendingAction = "close";
         if (!unsavedChangesDialog.opened)
             unsavedChangesDialog.open();
+    }
+
+    // The window is closing for good, so the drafts of tabs whose changes the
+    // writer discarded on the way can go. Until then a Cancel keeps them, and
+    // with them the crash recovery of those changes.
+    function discardResolvedDrafts() {
+        for (var i = 0; i < tabs.length; ++i) {
+            if (tabs[i].closeResolved && tabs[i].backend.modified)
+                tabs[i].backend.discardRecovery();
+        }
     }
 
     function nextUnresolvedTab() {
@@ -123,9 +135,8 @@ ApplicationWindow {
     }
 
     function tabForUrl(url) {
-        var wanted = url.toString();
         for (var i = 0; i < tabs.length; ++i) {
-            if (tabs[i].backend.fileUrl.toString() === wanted)
+            if (backend.sameFile(tabs[i].backend.fileUrl, url))
                 return tabs[i];
         }
         return null;
@@ -151,8 +162,21 @@ ApplicationWindow {
         awaitingPendingSave = false;
         pendingAction = "";
         pendingTab = null;
-        for (var i = 0; i < tabs.length; ++i)
-            tabs[i].closeResolved = false;
+        for (var i = 0; i < tabs.length; ++i) {
+            if (tabs[i].closeResolved) {
+                tabs[i].closeResolved = false;
+                tabs[i].backend.holdAutoSave(false);
+            }
+        }
+    }
+
+    // Whether a tab's changes were discarded on the way to closing the window.
+    function closeResolvedDocument(document) {
+        for (var i = 0; i < tabs.length; ++i) {
+            if (tabs[i].backend === document)
+                return tabs[i].closeResolved;
+        }
+        return false;
     }
 
     function pendingSaveSucceeded(tab) {
@@ -507,14 +531,24 @@ ApplicationWindow {
             heldDocument.holdAutoSave(true);
         }
         onClosed: {
-            if (heldDocument)
+            if (heldDocument && !win.closeResolvedDocument(heldDocument))
                 heldDocument.holdAutoSave(false);
             heldDocument = null;
         }
 
         onDiscardRequested: {
-            win.promptDocument.discardRecovery();
+            var document = win.promptDocument;
+            if (win.pendingAction !== "close") {
+                document.discardRecovery();
+                win.completePendingAction();
+                return;
+            }
+            // On the way to closing the window, the draft waits for it to
+            // close, as a Cancel further on keeps every tab and its crash
+            // recovery. Auto-save stays held meanwhile, so discarded changes
+            // never reach the file.
             win.completePendingAction();
+            document.holdAutoSave(true);
         }
 
         onSaveRequested: {
