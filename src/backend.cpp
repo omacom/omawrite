@@ -1161,13 +1161,21 @@ void Backend::autoSaveWritten(AutoSaveLanding landing) {
     // Nothing watched the file between the write landing and now, so a change
     // from outside in that time raised no event. Look before calling the text
     // saved, or closing could drop the only copy of it without a word.
+    const bool textAsWritten = m_textRevision == m_autoSaveRevision
+        || m_lastDocumentText == text;
     if (landing != AutoSaveLanding::Superseded && !diskMatchesKnownContents()) {
+        // Text undone meanwhile to what the file held before the write is
+        // in no file now, so it is unsaved like any other.
+        if (!textAsWritten && !m_modified) {
+            setModified(true);
+            setStatus(QString());
+        }
         if (m_modified)
             scheduleRecovery();
         reportExternalChange(m_fileMissing);
         return;
     }
-    if (m_textRevision == m_autoSaveRevision || m_lastDocumentText == text) {
+    if (textAsWritten) {
         m_autoSaveTimer.stop();
         setModified(false);
         setStatus(tr("Saved %1").arg(fileName()));

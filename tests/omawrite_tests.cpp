@@ -4156,6 +4156,39 @@ private slots:
         backend.discardRecovery();
     }
 
+    void keepsTextUndoneDuringAnAutoSaveWhenTheFileChangesAsItLands() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("undone-landing.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("before"));
+        QVERIFY(backend.editorTextChanged());
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+
+        editor->setProperty("text", QStringLiteral("before, and after"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        // Undone to the last save while the file is replaced, so the editor
+        // counts as clean, and then another program replaces the file.
+        editor->setProperty("text", QStringLiteral("before"));
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(!backend.modified());
+        backend.m_autoSaveWatcher.waitForFinished();
+        writeFile(path, "theirs");
+
+        // The editor's text is in no file now: unsaved, and said to be.
+        QTRY_COMPARE(externalChangeSpy.count(), 1);
+        QCOMPARE(externalChangeSpy.first().at(1).toBool(), true);
+        QVERIFY(backend.modified());
+        QTRY_VERIFY(QFileInfo::exists(backend.m_recoveryPath));
+        QCOMPARE(readFile(path), QByteArray("theirs"));
+        backend.discardRecovery();
+    }
+
     void noticesAFileRemovedAsAnAutoSaveLands() {
         QTemporaryDir directory;
         QVERIFY(directory.isValid());
