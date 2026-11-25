@@ -38,6 +38,7 @@
 #include <algorithm>
 #include <cmath>
 #include <iterator>
+#include <utility>
 
 #include "markdownhighlighter.h"
 
@@ -230,6 +231,10 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_autoSaveTimer.setSingleShot(true);
     m_autoSaveTimer.setInterval(500);
     connect(&m_autoSaveTimer, &QTimer::timeout, this, &Backend::autoSave);
+    connect(&m_autoSaveWatcher, &QFutureWatcher<int>::finished, this,
+            [this] { autoSaveWritten(AutoSaveLanding::Announced); });
+    connect(&m_recoveryWatcher, &QFutureWatcher<void>::finished, this,
+            &Backend::recoveryWritten);
     // Tools that replace a file by removing it and writing it again leave it
     // briefly missing, so let the burst settle before deciding what happened.
     m_fileCheckTimer.setSingleShot(true);
@@ -256,7 +261,16 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             qOverload<>(&QTimer::start));
 }
 
-Backend::~Backend() = default;
+Backend::~Backend() {
+    // Let the writes under way land, so the next start finds what this one
+    // left. The document is gone by now, so no newer draft can follow.
+    finishPendingAutoSave();
+    m_recoveryAgain = false;
+    if (m_recoveryWriting) {
+        m_recoveryWatcher.waitForFinished();
+        recoveryWritten();
+    }
+}
 
 void Backend::setParentWindow(QWindow *window) {
     m_parentWindow = window;
@@ -386,6 +400,7 @@ QString Backend::suggestedOpenDirectory() const {
 }
 
 void Backend::open(const QUrl &url) {
+    awaitAutoSave(AutoSaveLanding::Superseded);
     if (!url.isLocalFile()) {
         setStatus(tr("Only local files can be opened."));
         return;
@@ -441,6 +456,7 @@ void Backend::saveAs(const QUrl &url) {
 }
 
 void Backend::discardRecovery() {
+    awaitAutoSave(AutoSaveLanding::Superseded);
     clearRecovery();
     // Discarded changes must never reach the file, even if the open or close
     // that follows fails and leaves them in the editor. Opening a file or an
@@ -452,6 +468,7 @@ void Backend::discardRecovery() {
 // starts a blank document that the first save writes to that path. Opening
 // from the file picker or reloading still requires the file to be there.
 void Backend::openOrStartFile(const QUrl &requestedUrl) {
+    awaitAutoSave(AutoSaveLanding::Superseded);
     // A relative path names a file in the directory Omawrite was started
     // from; a recovery draft must not resolve it against another one later.
     const QFileInfo info(requestedUrl.toLocalFile());
@@ -485,6 +502,7 @@ void Backend::reloadFromDisk() {
 }
 
 void Backend::keepExternalVersion() {
+    awaitAutoSave(AutoSaveLanding::Superseded);
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
         const DecodedFile decoded = decodeFileContents(file.readAll());
@@ -606,6 +624,7 @@ bool Backend::editorTextChanged() {
     if (text == m_lastDocumentText)
         return false;
     m_lastDocumentText = text;
+    ++m_textRevision;
 
     reapplyTypographyToChange();
 
@@ -932,6 +951,7 @@ void Backend::loadDocumentText(const QString &text) {
     cursor.endEditBlock();
     m_document->setUndoRedoEnabled(undoEnabled);
     m_lastDocumentText = text;
+    ++m_textRevision;
     m_loading = false;
 
     m_wordCountTimer.stop();
@@ -964,7 +984,35 @@ void Backend::setStatus(const QString &status) {
     emit statusChanged();
 }
 
+namespace {
+
+enum WriteOutcome { Written, CouldNotOpen, CouldNotWrite };
+
+// What saveTo() does to the disk, for an auto-save's worker thread: replace
+// the file through a temporary one, leaving the original untouched on failure.
+int writeFile(const QString &path, const QByteArray &contents) {
+    QSaveFile file(path);
+    file.setDirectWriteFallback(true);
+    if (!file.open(QIODevice::WriteOnly | QIODevice::Text))
+        return CouldNotOpen;
+    file.write(contents);
+    return file.commit() ? Written : CouldNotWrite;
+}
+
+// Setting a value flushes the settings file to disk, which is too slow to
+// repeat on every save for a folder that seldom changes.
+void rememberSaveDirectory(const QUrl &url) {
+    const QString directory = QFileInfo(url.toLocalFile()).absolutePath();
+    QSettings settings;
+    if (settings.value(lastSaveDirectorySetting).toString() != directory)
+        settings.setValue(lastSaveDirectorySetting, directory);
+}
+
+} // namespace
+
 void Backend::saveTo(const QUrl &url) {
+    // An auto-save still being written must not land on top of this save.
+    awaitAutoSave(AutoSaveLanding::Superseded);
     if (!url.isLocalFile()) {
         setStatus(tr("Only local files can be saved."));
         emit saveFailed();
@@ -1004,8 +1052,7 @@ void Backend::saveTo(const QUrl &url) {
     m_autoSaveTimer.stop();
     setFileUrl(url);
     watchCurrentFile();
-    QSettings().setValue(lastSaveDirectorySetting,
-                         QFileInfo(url.toLocalFile()).absolutePath());
+    rememberSaveDirectory(url);
     setModified(false);
     setStatus(tr("Saved %1").arg(fileName()));
     clearRecovery();
@@ -1026,6 +1073,9 @@ void Backend::scheduleAutoSave() {
 }
 
 void Backend::holdAutoSave(bool held) {
+    // A write that began before the hold is already replacing the file.
+    if (held)
+        finishPendingAutoSave();
     m_autoSaveHeld = held;
     if (held)
         m_autoSaveTimer.stop();
@@ -1034,6 +1084,10 @@ void Backend::holdAutoSave(bool held) {
 }
 
 void Backend::autoSave() {
+    // One write at a time. The one under way schedules another when it lands
+    // if the text has moved on by then.
+    if (m_autoSaveWriting)
+        return;
     if (!m_modified || !m_fileUrl.isLocalFile() || m_autoSaveSuspended || m_autoSaveHeld)
         return;
 
@@ -1054,7 +1108,91 @@ void Backend::autoSave() {
         return;
     }
 
-    saveTo(m_fileUrl);
+    m_autoSaveText = currentDocumentText();
+    m_autoSaveContents = m_autoSaveText.toUtf8();
+    m_autoSaveRevision = m_textRevision;
+    m_autoSaveWriting = true;
+    // The write stands in for the recovery draft, which is scheduled again
+    // should it fail.
+    m_recoveryTimer.stop();
+    // The write replaces the file. Stop watching the old inode before that so
+    // our own write is not classified as external.
+    unwatchFiles();
+    m_autoSaveWatcher.setFuture(
+        QtConcurrent::run(writeFile, m_fileUrl.toLocalFile(), m_autoSaveContents));
+}
+
+void Backend::finishPendingAutoSave() {
+    awaitAutoSave(AutoSaveLanding::Awaited);
+}
+
+void Backend::awaitAutoSave(AutoSaveLanding landing) {
+    if (!m_autoSaveWriting)
+        return;
+    m_autoSaveWatcher.waitForFinished();
+    autoSaveWritten(landing);
+}
+
+void Backend::autoSaveWritten(AutoSaveLanding landing) {
+    // Whoever waited for the write is in the middle of something of its own,
+    // which the save signals are not about.
+    const bool announce = landing == AutoSaveLanding::Announced;
+    // A write already taken in by awaitAutoSave() reports in again here.
+    if (!m_autoSaveWriting || !m_autoSaveWatcher.future().isFinished())
+        return;
+    m_autoSaveWriting = false;
+    const int outcome = m_autoSaveWatcher.result();
+    const QByteArray contents = std::exchange(m_autoSaveContents, {});
+    const QString text = std::exchange(m_autoSaveText, {});
+
+    watchCurrentFile();
+    if (outcome != Written) {
+        setStatus((outcome == CouldNotOpen ? tr("Could not save %1.")
+                                           : tr("Could not write %1.")).arg(fileName()));
+        if (m_modified)
+            scheduleRecovery();
+        if (announce)
+            emit saveFailed();
+        return;
+    }
+
+    setKnownFileContents(contents, text);
+    rememberSaveDirectory(m_fileUrl);
+    // Nothing watched the file between the write landing and now, so a change
+    // from outside in that time raised no event. Look before calling the text
+    // saved, or closing could drop the only copy of it without a word.
+    const bool textAsWritten = m_textRevision == m_autoSaveRevision
+        || m_lastDocumentText == text;
+    if (landing != AutoSaveLanding::Superseded && !diskMatchesKnownContents()) {
+        // Text undone meanwhile to what the file held before the write is
+        // in no file now, so it is unsaved like any other.
+        if (!textAsWritten && !m_modified) {
+            setModified(true);
+            setStatus(QString());
+        }
+        if (m_modified)
+            scheduleRecovery();
+        reportExternalChange(m_fileMissing);
+        return;
+    }
+    if (textAsWritten) {
+        m_autoSaveTimer.stop();
+        setModified(false);
+        setStatus(tr("Saved %1").arg(fileName()));
+        clearRecovery();
+    } else {
+        // The writer went on typing while the file was being written. Text
+        // that went back to what the file held before is unsaved again.
+        if (!m_modified) {
+            setModified(true);
+            setStatus(QString());
+            scheduleRecovery();
+        }
+        if (!m_autoSaveTimer.isActive())
+            scheduleAutoSave();
+    }
+    if (announce)
+        emit saveSucceeded();
 }
 
 void Backend::suspendAutoSave() {
@@ -1100,14 +1238,38 @@ void Backend::writeRecovery() {
     const QString path = m_recoveryPath;
     if (path.isEmpty())
         return;
-    QDir().mkpath(QFileInfo(path).absolutePath());
-    QSaveFile file(path);
-    if (!file.open(QIODevice::WriteOnly))
+    if (m_recoveryWriting) {
+        m_recoveryAgain = true;
         return;
-    const QJsonObject recovery{{QStringLiteral("fileUrl"), m_fileUrl.toString()},
-                               {QStringLiteral("text"), currentDocumentText()}};
-    file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
-    file.commit();
+    }
+    m_recoveryWriting = true;
+    m_recoveryStale = false;
+    const QString fileUrl = m_fileUrl.toString();
+    const QString text = currentDocumentText();
+    m_recoveryWatcher.setFuture(QtConcurrent::run([path, fileUrl, text] {
+        QDir().mkpath(QFileInfo(path).absolutePath());
+        QSaveFile file(path);
+        if (!file.open(QIODevice::WriteOnly))
+            return;
+        const QJsonObject recovery{{QStringLiteral("fileUrl"), fileUrl},
+                                   {QStringLiteral("text"), text}};
+        file.write(QJsonDocument(recovery).toJson(QJsonDocument::Compact));
+        file.commit();
+    }));
+}
+
+void Backend::recoveryWritten() {
+    if (!m_recoveryWriting || !m_recoveryWatcher.future().isFinished())
+        return;
+    m_recoveryWriting = false;
+    if (m_recoveryStale) {
+        m_recoveryStale = false;
+        QFile::remove(m_recoveryPath);
+    }
+    if (m_recoveryAgain) {
+        m_recoveryAgain = false;
+        writeRecovery();
+    }
 }
 
 void Backend::restoreRecovery() {
@@ -1141,6 +1303,9 @@ void Backend::restoreRecovery() {
 
 void Backend::clearRecovery() {
     m_recoveryTimer.stop();
+    m_recoveryAgain = false;
+    // A draft still being written would outlive this; drop it when it lands.
+    m_recoveryStale = m_recoveryWriting;
     QFile::remove(m_recoveryPath);
 }
 
@@ -1166,6 +1331,9 @@ void Backend::watchCurrentFile() {
 }
 
 void Backend::checkWatchedFile() {
+    // Our own write is replacing the file; it watches the file again itself.
+    if (m_autoSaveWriting)
+        return;
     // Atomic saves replace the watched inode, which drops it from the
     // watcher, so re-arm it either way. Our own save is not an outside edit.
     const bool wasMissing = m_fileMissing;

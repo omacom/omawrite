@@ -3904,7 +3904,7 @@ private slots:
         // Keeping our version is a choice to overwrite, so auto-save resumes.
         backend.keepExternalVersion();
         QTRY_COMPARE(readFile(path), QByteArray("mine, still typing"));
-        QVERIFY(!backend.modified());
+        QTRY_VERIFY(!backend.modified());
     }
 
     void checksTheFileBeforeEachAutoSave() {
@@ -4035,6 +4035,197 @@ private slots:
         // Cancel lets auto-save carry on.
         backend.holdAutoSave(false);
         QTRY_COMPARE(readFile(path), QByteArray("undecided"));
+    }
+
+    // An auto-save writes on a worker thread, so typing goes on meanwhile.
+    void keepsTextTypedWhileAnAutoSaveIsWritten() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("typing.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("first"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        QVERIFY(backend.m_autoSaveWriting);
+        editor->setProperty("text", QStringLiteral("first, and more"));
+        QVERIFY(backend.editorTextChanged());
+
+        // The write that lands holds the older text, so the document is still
+        // unsaved, and the next auto-save brings the file up to date.
+        QTRY_VERIFY(!backend.m_autoSaveWriting);
+        QVERIFY(backend.modified());
+        QTRY_COMPARE(readFile(path), QByteArray("first, and more"));
+        QTRY_VERIFY(!backend.modified());
+    }
+
+    void countsTextUndoneWhileAnAutoSaveIsWrittenAsUnsaved() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("undone.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("before"));
+        QVERIFY(backend.editorTextChanged());
+        backend.saveAs(QUrl::fromLocalFile(path));
+
+        editor->setProperty("text", QStringLiteral("before, and after"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        QVERIFY(backend.m_autoSaveWriting);
+        // Back to the text of the last save, while the file is being replaced.
+        editor->setProperty("text", QStringLiteral("before"));
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(!backend.modified());
+
+        QTRY_VERIFY(!backend.m_autoSaveWriting);
+        QVERIFY(backend.modified());
+        QTRY_COMPARE(readFile(path), QByteArray("before"));
+        QTRY_VERIFY(!backend.modified());
+    }
+
+    void savesOverAnAutoSaveStillBeingWritten() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("overtaken.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+
+        editor->setProperty("text", QStringLiteral("older"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        QVERIFY(backend.m_autoSaveWriting);
+        editor->setProperty("text", QStringLiteral("newer"));
+        QVERIFY(backend.editorTextChanged());
+
+        // The explicit save waits for the older write and is the only one to
+        // announce itself, so a pending close or open follows the newer text.
+        backend.save();
+        QVERIFY(!backend.m_autoSaveWriting);
+        QCOMPARE(savedSpy.count(), 1);
+        QCOMPARE(readFile(path), QByteArray("newer"));
+        QVERIFY(!backend.modified());
+        QTest::qWait(700);
+        QCOMPARE(savedSpy.count(), 1);
+        QCOMPARE(readFile(path), QByteArray("newer"));
+    }
+
+    void noticesAnOutsideChangeMadeAsAnAutoSaveLands() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("landing.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+        QSignalSpy savedSpy(&backend, &Backend::saveSucceeded);
+
+        editor->setProperty("text", QStringLiteral("mine"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        // The write is on disk, but the backend has not taken it in yet and is
+        // not watching the file, when another program replaces it.
+        backend.m_autoSaveWatcher.waitForFinished();
+        QCOMPARE(readFile(path), QByteArray("mine"));
+        QVERIFY(backend.m_fileWatcher.files().isEmpty());
+        writeFile(path, "theirs");
+
+        QTRY_COMPARE(externalChangeSpy.count(), 1);
+        QCOMPARE(externalChangeSpy.first().at(0).toBool(), false);
+        QCOMPARE(externalChangeSpy.first().at(1).toBool(), true);
+        QVERIFY(backend.modified());
+        QCOMPARE(savedSpy.count(), 0);
+
+        // Our text stays unsaved, with a draft behind it, and off their file.
+        QTRY_VERIFY(QFileInfo::exists(backend.m_recoveryPath));
+        QTest::qWait(700);
+        QCOMPARE(readFile(path), QByteArray("theirs"));
+        QCOMPARE(externalChangeSpy.count(), 1);
+        backend.discardRecovery();
+    }
+
+    void keepsTextUndoneDuringAnAutoSaveWhenTheFileChangesAsItLands() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("undone-landing.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("before"));
+        QVERIFY(backend.editorTextChanged());
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+
+        editor->setProperty("text", QStringLiteral("before, and after"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        // Undone to the last save while the file is replaced, so the editor
+        // counts as clean, and then another program replaces the file.
+        editor->setProperty("text", QStringLiteral("before"));
+        QVERIFY(backend.editorTextChanged());
+        QVERIFY(!backend.modified());
+        backend.m_autoSaveWatcher.waitForFinished();
+        writeFile(path, "theirs");
+
+        // The editor's text is in no file now: unsaved, and said to be.
+        QTRY_COMPARE(externalChangeSpy.count(), 1);
+        QCOMPARE(externalChangeSpy.first().at(1).toBool(), true);
+        QVERIFY(backend.modified());
+        QTRY_VERIFY(QFileInfo::exists(backend.m_recoveryPath));
+        QCOMPARE(readFile(path), QByteArray("theirs"));
+        backend.discardRecovery();
+    }
+
+    void noticesAFileRemovedAsAnAutoSaveLands() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString path = directory.filePath(QStringLiteral("removed.md"));
+
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        backend.saveAs(QUrl::fromLocalFile(path));
+        QSignalSpy externalChangeSpy(&backend, &Backend::externalChangeDetected);
+
+        editor->setProperty("text", QStringLiteral("mine"));
+        QVERIFY(backend.editorTextChanged());
+        backend.autoSave();
+        backend.m_autoSaveWatcher.waitForFinished();
+        QVERIFY(QFile::remove(path));
+
+        // Waiting for the write, as closing the window does, finds it gone.
+        backend.finishPendingAutoSave();
+        QCOMPARE(externalChangeSpy.count(), 1);
+        QCOMPARE(externalChangeSpy.first().at(0).toBool(), true);
+        QVERIFY(backend.modified());
+        backend.discardRecovery();
+    }
+
+    void dropsARecoveryDraftClearedWhileItIsWritten() {
+        Backend backend;
+        QScopedPointer<QObject> editor(makeEditor(backend));
+        QVERIFY(editor);
+        editor->setProperty("text", QStringLiteral("thrown away"));
+        QVERIFY(backend.editorTextChanged());
+
+        backend.writeRecovery();
+        QVERIFY(backend.m_recoveryWriting);
+        backend.discardRecovery();
+        QTRY_VERIFY(!backend.m_recoveryWriting);
+        QVERIFY(!QFileInfo::exists(backend.m_recoveryPath));
     }
 
     void startsANamedFileThatIsNotThereYet() {
