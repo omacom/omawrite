@@ -90,6 +90,9 @@ public:
     Q_INVOKABLE void decreaseTextSize();
     Q_INVOKABLE void resetTextSize();
     Q_INVOKABLE void holdAutoSave(bool held);
+    // Waits for an auto-save still being written, so that whatever comes next
+    // (a close, an open, an explicit save) sees how it ended.
+    Q_INVOKABLE void finishPendingAutoSave();
     Q_INVOKABLE void printDocument();
     Q_INVOKABLE void copyAsHtml();
     Q_INVOKABLE void newWindow();
@@ -148,8 +151,10 @@ private:
     void reapplyTypographyToChange();
     void scheduleRecovery();
     void writeRecovery();
+    void recoveryWritten();
     void scheduleAutoSave();
     void autoSave();
+    void autoSaveWritten(bool announce);
     void suspendAutoSave();
     void restoreRecovery();
     void clearRecovery();
@@ -197,6 +202,22 @@ private:
     bool m_hasKnownFileContents = false;
     bool m_autoSaveSuspended = false;
     bool m_autoSaveHeld = false;
+    // Flushing even a small file to disk can take long enough to stall typing,
+    // so an auto-save writes on a worker thread. These hold what the write
+    // under way was given, and the text revision it was taken at.
+    QFutureWatcher<int> m_autoSaveWatcher;
+    bool m_autoSaveWriting = false;
+    QByteArray m_autoSaveContents;
+    QString m_autoSaveText;
+    quint64 m_autoSaveRevision = 0;
+    // Counts the changes to the document's text.
+    quint64 m_textRevision = 0;
+    // Recovery drafts are written the same way. One cleared while it was being
+    // written is removed when the write lands; one asked for meanwhile follows it.
+    QFutureWatcher<void> m_recoveryWatcher;
+    bool m_recoveryWriting = false;
+    bool m_recoveryStale = false;
+    bool m_recoveryAgain = false;
     QString m_recoveryPath;
     std::unique_ptr<QLockFile> m_recoveryLock;
 

@@ -58,6 +58,8 @@ ApplicationWindow {
     color: pageColor
 
     onClosing: function(close) {
+        // An auto-save being written counts as saved once it has landed.
+        backend.finishPendingAutoSave();
         if (closeConfirmed || !backend.modified)
             return;
 
@@ -68,6 +70,7 @@ ApplicationWindow {
     }
 
     function requestOpen(url) {
+        backend.finishPendingAutoSave();
         if (!backend.modified) {
             backend.open(url);
             return;
