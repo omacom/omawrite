@@ -154,7 +154,12 @@ private:
     void recoveryWritten();
     void scheduleAutoSave();
     void autoSave();
-    void autoSaveWritten(bool announce);
+    // How a finished auto-save is taken in: on its own; by a caller that waited
+    // for it; or by one that is about to replace what it wrote, and so has no
+    // use for a look at the file.
+    enum class AutoSaveLanding { Announced, Awaited, Superseded };
+    void awaitAutoSave(AutoSaveLanding landing);
+    void autoSaveWritten(AutoSaveLanding landing);
     void suspendAutoSave();
     void restoreRecovery();
     void clearRecovery();

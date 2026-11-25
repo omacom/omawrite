@@ -232,7 +232,7 @@ Backend::Backend(QObject *parent) : QObject(parent) {
     m_autoSaveTimer.setInterval(500);
     connect(&m_autoSaveTimer, &QTimer::timeout, this, &Backend::autoSave);
     connect(&m_autoSaveWatcher, &QFutureWatcher<int>::finished, this,
-            [this] { autoSaveWritten(true); });
+            [this] { autoSaveWritten(AutoSaveLanding::Announced); });
     connect(&m_recoveryWatcher, &QFutureWatcher<void>::finished, this,
             &Backend::recoveryWritten);
     // Tools that replace a file by removing it and writing it again leave it
@@ -400,7 +400,7 @@ QString Backend::suggestedOpenDirectory() const {
 }
 
 void Backend::open(const QUrl &url) {
-    finishPendingAutoSave();
+    awaitAutoSave(AutoSaveLanding::Superseded);
     if (!url.isLocalFile()) {
         setStatus(tr("Only local files can be opened."));
         return;
@@ -456,7 +456,7 @@ void Backend::saveAs(const QUrl &url) {
 }
 
 void Backend::discardRecovery() {
-    finishPendingAutoSave();
+    awaitAutoSave(AutoSaveLanding::Superseded);
     clearRecovery();
     // Discarded changes must never reach the file, even if the open or close
     // that follows fails and leaves them in the editor. Opening a file or an
@@ -468,7 +468,7 @@ void Backend::discardRecovery() {
 // starts a blank document that the first save writes to that path. Opening
 // from the file picker or reloading still requires the file to be there.
 void Backend::openOrStartFile(const QUrl &requestedUrl) {
-    finishPendingAutoSave();
+    awaitAutoSave(AutoSaveLanding::Superseded);
     // A relative path names a file in the directory Omawrite was started
     // from; a recovery draft must not resolve it against another one later.
     const QFileInfo info(requestedUrl.toLocalFile());
@@ -502,7 +502,7 @@ void Backend::reloadFromDisk() {
 }
 
 void Backend::keepExternalVersion() {
-    finishPendingAutoSave();
+    awaitAutoSave(AutoSaveLanding::Superseded);
     QFile file(m_fileUrl.toLocalFile());
     if (file.open(QIODevice::ReadOnly)) {
         const DecodedFile decoded = decodeFileContents(file.readAll());
@@ -1012,7 +1012,7 @@ void rememberSaveDirectory(const QUrl &url) {
 
 void Backend::saveTo(const QUrl &url) {
     // An auto-save still being written must not land on top of this save.
-    finishPendingAutoSave();
+    awaitAutoSave(AutoSaveLanding::Superseded);
     if (!url.isLocalFile()) {
         setStatus(tr("Only local files can be saved."));
         emit saveFailed();
@@ -1123,16 +1123,21 @@ void Backend::autoSave() {
 }
 
 void Backend::finishPendingAutoSave() {
+    awaitAutoSave(AutoSaveLanding::Awaited);
+}
+
+void Backend::awaitAutoSave(AutoSaveLanding landing) {
     if (!m_autoSaveWriting)
         return;
     m_autoSaveWatcher.waitForFinished();
-    // Whoever waited is in the middle of something of its own, which the
-    // save signals are not about.
-    autoSaveWritten(false);
+    autoSaveWritten(landing);
 }
 
-void Backend::autoSaveWritten(bool announce) {
-    // A write already settled by finishPendingAutoSave() reports in again here.
+void Backend::autoSaveWritten(AutoSaveLanding landing) {
+    // Whoever waited for the write is in the middle of something of its own,
+    // which the save signals are not about.
+    const bool announce = landing == AutoSaveLanding::Announced;
+    // A write already taken in by awaitAutoSave() reports in again here.
     if (!m_autoSaveWriting || !m_autoSaveWatcher.future().isFinished())
         return;
     m_autoSaveWriting = false;
@@ -1153,6 +1158,15 @@ void Backend::autoSaveWritten(bool announce) {
 
     setKnownFileContents(contents, text);
     rememberSaveDirectory(m_fileUrl);
+    // Nothing watched the file between the write landing and now, so a change
+    // from outside in that time raised no event. Look before calling the text
+    // saved, or closing could drop the only copy of it without a word.
+    if (landing != AutoSaveLanding::Superseded && !diskMatchesKnownContents()) {
+        if (m_modified)
+            scheduleRecovery();
+        reportExternalChange(m_fileMissing);
+        return;
+    }
     if (m_textRevision == m_autoSaveRevision || m_lastDocumentText == text) {
         m_autoSaveTimer.stop();
         setModified(false);
