@@ -1,7 +1,6 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Controls.Material
-import QtQuick.Dialogs as Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 
@@ -176,13 +175,15 @@ ApplicationWindow {
     }
 
     function showOpenDialog() {
-        openFileDialog.open();
+        if (typeof filePicker !== "undefined" && filePicker)
+            filePicker.openFile(currentDocument.suggestedOpenDirectory());
     }
 
     function showSaveDialog(tab, suggestedUrl) {
+        if (typeof filePicker === "undefined" || !filePicker)
+            return;
         saveTarget = tab;
-        saveFileDialog.selectedFile = suggestedUrl;
-        saveFileDialog.open();
+        filePicker.saveFile(suggestedUrl);
     }
 
     function showExternalChange(tab, deleted, locallyModified) {
@@ -454,27 +455,34 @@ ApplicationWindow {
         }
     }
 
-    Dialogs.FileDialog {
-        id: openFileDialog
-        title: qsTr("Open File")
-        fileMode: Dialogs.FileDialog.OpenFile
-        nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
-        onAccepted: win.openInTab(selectedFile)
-    }
+    // The desktop portal's picker is the app's, so the window says which tab
+    // a save is for.
+    Connections {
+        target: typeof filePicker !== "undefined" ? filePicker : null
 
-    Dialogs.FileDialog {
-        id: saveFileDialog
-        title: qsTr("Save File")
-        fileMode: Dialogs.FileDialog.SaveFile
-        nameFilters: [qsTr("Markdown files") + " (*.md *.markdown)", qsTr("All files") + " (*)"]
-        onAccepted: {
+        function onOpenSelected(url) {
+            win.openInTab(url);
+        }
+
+        function onSaveSelected(url) {
             var target = win.saveTarget || win.currentTab;
             win.saveTarget = null;
-            target.backend.saveAs(selectedFile);
+            target.backend.saveAs(url);
         }
-        onRejected: {
-            win.saveTarget = null;
-            win.cancelPendingAction();
+
+        function onCancelled(forSave) {
+            if (forSave) {
+                win.saveTarget = null;
+                win.cancelPendingAction();
+            }
+        }
+
+        function onFailed(message, forSave) {
+            if (forSave) {
+                win.saveTarget = null;
+                win.cancelPendingAction();
+            }
+            win.currentDocument.setStatus(message);
         }
     }
 

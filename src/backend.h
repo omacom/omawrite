@@ -77,11 +77,13 @@ public:
 
     Q_INVOKABLE void attachDocument(QObject *textDocument);
     Q_INVOKABLE void openDialog();
+    Q_INVOKABLE QString suggestedOpenDirectory() const;
     Q_INVOKABLE void open(const QUrl &url);
     void openOrStartFile(const QUrl &url);
     Q_INVOKABLE void save();
     Q_INVOKABLE void saveAsDialog();
     Q_INVOKABLE void saveAs(const QUrl &url);
+    Q_INVOKABLE void setStatus(const QString &status);
     Q_INVOKABLE void discardRecovery();
     Q_INVOKABLE void reloadFromDisk();
     Q_INVOKABLE void keepExternalVersion();
@@ -147,7 +149,6 @@ private:
     void setTextZoom(qreal zoom);
     void setFileUrl(const QUrl &url);
     void setModified(bool modified);
-    void setStatus(const QString &status);
     void saveTo(const QUrl &url);
     QUrl suggestedSaveUrl() const;
     QString currentDocumentText() const;
