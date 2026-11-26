@@ -4541,7 +4541,267 @@ private slots:
         QTRY_VERIFY(keep->property("activeFocus").toBool());
     }
 
+    void tabsKeepTheirOwnDocuments() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *strip = window->findChild<QObject *>(QStringLiteral("tabStrip"));
+        QVERIFY(strip);
+
+        // A single document shows no tab strip.
+        QCOMPARE(tabCount(window.data()), 1);
+        QVERIFY(!strip->property("visible").toBool());
+        QObject *first = currentTab(window.data());
+        tabEditor(first)->setProperty("text", QStringLiteral("first"));
+        QVERIFY(backend.modified());
+
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+        QCOMPARE(tabCount(window.data()), 2);
+        QVERIFY(strip->property("visible").toBool());
+        QObject *second = currentTab(window.data());
+        QVERIFY(second != first);
+        auto *secondDocument = qobject_cast<Backend *>(
+            second->property("backend").value<QObject *>());
+        QVERIFY(secondDocument && secondDocument != &backend);
+        QVERIFY(!secondDocument->modified());
+
+        tabEditor(second)->setProperty("text", QStringLiteral("second"));
+        QVERIFY(secondDocument->modified());
+        QCOMPARE(secondDocument->documentText(), QStringLiteral("second"));
+        QCOMPARE(backend.documentText(), QStringLiteral("first"));
+        QCOMPARE(window->property("title").toString(),
+                 QStringLiteral("* Untitled.md - Write"));
+
+        // Cycling goes round, and each tab's editor keeps its own text.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "cycleTab", Q_ARG(QVariant, 1)));
+        QCOMPARE(currentTab(window.data()), first);
+        QCOMPARE(tabEditor(first)->property("text").toString(), QStringLiteral("first"));
+        backend.discardRecovery();
+        secondDocument->discardRecovery();
+    }
+
+    void closesATabAskingAboutItsChanges() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+        QObject *first = currentTab(window.data());
+
+        // An untouched tab closes without a word.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+        QCOMPARE(tabCount(window.data()), 2);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeTab",
+                                          Q_ARG(QVariant, QVariant::fromValue(currentTab(window.data())))));
+        QCOMPARE(tabCount(window.data()), 1);
+        QCOMPARE(currentTab(window.data()), first);
+
+        // A tab with changes asks first, and Discard closes it.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+        QObject *second = currentTab(window.data());
+        QPointer<QObject> secondDocument = second->property("backend").value<QObject *>();
+        tabEditor(second)->setProperty("text", QStringLiteral("draft"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeTab",
+                                          Q_ARG(QVariant, QVariant::fromValue(second))));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(window->property("pendingAction").toString(), QStringLiteral("closeTab"));
+        QCOMPARE(tabCount(window.data()), 2);
+        // As the Discard button does.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "discardRequested"));
+        QCOMPARE(tabCount(window.data()), 1);
+        QCOMPARE(currentTab(window.data()), first);
+        // The closed tab's document goes with it.
+        QTRY_VERIFY(secondDocument.isNull());
+    }
+
+    void opensFilesFromThePickerInTabs() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString onePath = directory.filePath(QStringLiteral("one.md"));
+        const QString twoPath = directory.filePath(QStringLiteral("two.md"));
+        writeFile(onePath, "one");
+        writeFile(twoPath, "two");
+
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+        QObject *first = currentTab(window.data());
+
+        // A blank first tab takes the file over.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(onePath))));
+        QCOMPARE(tabCount(window.data()), 1);
+        QCOMPARE(tabEditor(first)->property("text").toString(), QStringLiteral("one"));
+
+        // The next one gets a tab of its own.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(twoPath))));
+        QCOMPARE(tabCount(window.data()), 2);
+        QObject *second = currentTab(window.data());
+        QVERIFY(second != first);
+        QCOMPARE(tabEditor(second)->property("text").toString(), QStringLiteral("two"));
+
+        // A file that is open already is switched to, not opened twice.
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(onePath))));
+        QCOMPARE(tabCount(window.data()), 2);
+        QCOMPARE(currentTab(window.data()), first);
+
+        // So is one named through a symlink or "..".
+        const QString linkPath = directory.filePath(QStringLiteral("link.md"));
+        QVERIFY(QFile::link(onePath, linkPath));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "selectTabAt", Q_ARG(QVariant, 1)));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+                                          Q_ARG(QVariant, QUrl::fromLocalFile(linkPath))));
+        QCOMPARE(tabCount(window.data()), 2);
+        QCOMPARE(currentTab(window.data()), first);
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "selectTabAt", Q_ARG(QVariant, 1)));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "openInTab",
+            Q_ARG(QVariant, QUrl::fromLocalFile(directory.path() + QStringLiteral("/sub/../one.md")))));
+        QCOMPARE(tabCount(window.data()), 2);
+        QCOMPARE(currentTab(window.data()), first);
+    }
+
+    void dropsASaveWhoseTabClosed() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString openPath = directory.filePath(QStringLiteral("open.md"));
+        const QString savePath = directory.filePath(QStringLiteral("chosen.md"));
+        writeFile(openPath, "open");
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        PortalFilePicker filePicker(nullptr, QDBusConnection(QStringLiteral("disconnected-test")));
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("filePicker"), &filePicker);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        tabEditor(currentTab(window.data()))->setProperty("text", QStringLiteral("front text"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+        QObject *asked = currentTab(window.data());
+        QMetaObject::invokeMethod(asked->property("backend").value<QObject *>(), "open",
+                                  Q_ARG(QUrl, QUrl::fromLocalFile(openPath)));
+
+        // Save As is opened for the second tab, which then closes while the
+        // chooser is still up.
+        window->setProperty("saveTarget", QVariant::fromValue(asked));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeTab",
+                                          Q_ARG(QVariant, QVariant::fromValue(asked))));
+        QCOMPARE(tabCount(window.data()), 1);
+
+        // Choosing a file then saves nothing, least of all the tab in front.
+        emit filePicker.saveSelected(QUrl::fromLocalFile(savePath));
+        QVERIFY(!QFileInfo::exists(savePath));
+        QVERIFY(backend.modified());
+        QCOMPARE(backend.status(), QStringLiteral("Not saved: its tab was closed."));
+
+        // A later save goes where it is asked to again.
+        emit filePicker.saveSelected(QUrl::fromLocalFile(savePath));
+        QCOMPARE(readFile(savePath), QByteArray("front text"));
+    }
+
+    void closingTheWindowAsksAboutEveryTab() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> object(component.create());
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        QObject *dialog = window->findChild<QObject *>(QStringLiteral("unsavedChangesDialog"));
+        QVERIFY(dialog);
+
+        QObject *first = currentTab(window);
+        tabEditor(first)->setProperty("text", QStringLiteral("first"));
+        // The first tab's crash draft is written.
+        QTRY_VERIFY(QFileInfo::exists(backend.m_recoveryPath));
+        QVERIFY(QMetaObject::invokeMethod(window, "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+        QObject *second = currentTab(window);
+        tabEditor(second)->setProperty("text", QStringLiteral("second"));
+        QVERIFY(QMetaObject::invokeMethod(window, "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+
+        // The first tab with changes is asked about and shown.
+        QVERIFY(!window->close());
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(currentTab(window), first);
+        QVERIFY(window->isVisible());
+
+        // Discarding it moves on to the next tab with changes.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "close"));
+        QVERIFY(QMetaObject::invokeMethod(dialog, "discardRequested"));
+        QTRY_COMPARE(window->property("pendingAction").toString(), QStringLiteral("close"));
+        QTRY_VERIFY(dialog->property("opened").toBool());
+        QCOMPARE(currentTab(window), second);
+        QVERIFY(window->isVisible());
+        // The discarded changes wait for the window to close, kept from the
+        // file meanwhile, and their draft is still there.
+        QVERIFY(backend.m_autoSaveHeld);
+        QVERIFY(QFileInfo::exists(backend.m_recoveryPath));
+
+        // Cancelling keeps the window and every tab, and the first tab's
+        // changes keep their crash draft and auto-save as before.
+        QVERIFY(QMetaObject::invokeMethod(dialog, "reject"));
+        QTRY_VERIFY(!dialog->property("opened").toBool());
+        QVERIFY(window->isVisible());
+        QCOMPARE(tabCount(window), 3);
+        QVERIFY(!first->property("closeResolved").toBool());
+        QVERIFY(backend.modified());
+        QVERIFY(QFileInfo::exists(backend.m_recoveryPath));
+        QVERIFY(!backend.m_autoSaveHeld);
+        QVERIFY(!backend.m_autoSaveSuspended);
+
+        qobject_cast<Backend *>(second->property("backend").value<QObject *>())->discardRecovery();
+        backend.discardRecovery();
+    }
+
 private:
+    static int tabCount(QObject *window) {
+        return window->property("tabs").toList().size();
+    }
+
+    static QObject *currentTab(QObject *window) {
+        return window->property("currentTab").value<QObject *>();
+    }
+
+    static QObject *tabEditor(QObject *tab) {
+        return tab->property("editor").value<QObject *>();
+    }
+
     // The character formats the highlighter gives a single line of text.
     static QList<QTextCharFormat> highlightedFormats(const QString &text, int caret = -1) {
         QTextDocument document;

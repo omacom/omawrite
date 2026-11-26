@@ -98,6 +98,8 @@ int main(int argc, char *argv[]) {
     }
 
     backend.setParentWindow(qobject_cast<QWindow *>(engine.rootObjects().constFirst()));
+    // Unsaved drafts that more tabs left behind come back as tabs of their own.
+    QMetaObject::invokeMethod(engine.rootObjects().constFirst(), "openRecoveredDrafts");
 
     const QStringList args = app.arguments();
     if (args.size() > 1)

@@ -22,6 +22,10 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+O` opens a Markdown file through the portal picker.
 - `Ctrl+P` opens the system print dialog.
 - `Ctrl+N` opens a new Omawrite window.
+- `Ctrl+T` opens a new tab and `Ctrl+W` closes the current one, asking first
+  about unsaved changes. Closing the last tab closes the window.
+- `Ctrl+Tab` / `Ctrl+PgDown` and `Ctrl+Shift+Tab` / `Ctrl+PgUp` move between
+  tabs, `Alt+1` to `Alt+8` pick one by place, and `Alt+9` picks the last.
 - `Ctrl+Z`, `Ctrl+Shift+Z`, and `Ctrl+Y` handle undo and redo.
 - `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
@@ -40,6 +44,13 @@ name for you. Unsaved drafts are recovered after an abnormal exit. Omawrite also
 watches open files and warns before an external change can replace local work;
 auto-save pauses until you reload, keep your version, or save. A recovered draft
 is never auto-saved over its file — save it to keep it.
+
+A window holds one or more tabs, each with its own document. The tab strip only
+appears once there is a second tab, so a single document looks as it always has.
+A file opened with `Ctrl+O` gets a tab of its own, unless the current tab is
+still blank or the file is already open in another tab, which is then shown.
+Closing the window asks about each tab with unsaved changes in turn, and drafts
+from several tabs that a crash left behind come back in tabs of their own.
 
 The font button in the footer picks the writing font from any installed text font,
 and Omawrite remembers the choice. IBM Plex Mono is the default.
