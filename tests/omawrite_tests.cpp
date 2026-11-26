@@ -4684,6 +4684,50 @@ private slots:
         QCOMPARE(currentTab(window.data()), first);
     }
 
+    void dropsASaveWhoseTabClosed() {
+        QTemporaryDir directory;
+        QVERIFY(directory.isValid());
+        const QString openPath = directory.filePath(QStringLiteral("open.md"));
+        const QString savePath = directory.filePath(QStringLiteral("chosen.md"));
+        writeFile(openPath, "open");
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        QVERIFY(!mainQmlPath.isEmpty());
+
+        Backend backend;
+        PortalFilePicker filePicker(nullptr, QDBusConnection(QStringLiteral("disconnected-test")));
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        engine.rootContext()->setContextProperty(QStringLiteral("filePicker"), &filePicker);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> window(component.create());
+        QVERIFY2(window, qPrintable(component.errorString()));
+
+        tabEditor(currentTab(window.data()))->setProperty("text", QStringLiteral("front text"));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "newTab", Q_ARG(QVariant, true),
+                                          Q_ARG(QVariant, QVariant())));
+        QObject *asked = currentTab(window.data());
+        QMetaObject::invokeMethod(asked->property("backend").value<QObject *>(), "open",
+                                  Q_ARG(QUrl, QUrl::fromLocalFile(openPath)));
+
+        // Save As is opened for the second tab, which then closes while the
+        // chooser is still up.
+        window->setProperty("saveTarget", QVariant::fromValue(asked));
+        QVERIFY(QMetaObject::invokeMethod(window.data(), "closeTab",
+                                          Q_ARG(QVariant, QVariant::fromValue(asked))));
+        QCOMPARE(tabCount(window.data()), 1);
+
+        // Choosing a file then saves nothing, least of all the tab in front.
+        emit filePicker.saveSelected(QUrl::fromLocalFile(savePath));
+        QVERIFY(!QFileInfo::exists(savePath));
+        QVERIFY(backend.modified());
+        QCOMPARE(backend.status(), QStringLiteral("Not saved: its tab was closed."));
+
+        // A later save goes where it is asked to again.
+        emit filePicker.saveSelected(QUrl::fromLocalFile(savePath));
+        QCOMPARE(readFile(savePath), QByteArray("front text"));
+    }
+
     void closingTheWindowAsksAboutEveryTab() {
         const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
         QVERIFY(!mainQmlPath.isEmpty());

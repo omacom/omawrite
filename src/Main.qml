@@ -47,6 +47,8 @@ ApplicationWindow {
     // The tab an unsaved-changes prompt or a save dialog is about.
     property var pendingTab: null
     property var saveTarget: null
+    // Set when the tab a Save As was opened for closes before it is answered.
+    property bool saveTargetClosed: false
     readonly property var promptDocument: pendingTab ? pendingTab.backend : currentDocument
     // Files changed on disk under tabs other than the one being asked about.
     property var externalChanges: []
@@ -207,6 +209,7 @@ ApplicationWindow {
         if (typeof filePicker === "undefined" || !filePicker)
             return;
         saveTarget = tab;
+        saveTargetClosed = false;
         filePicker.saveFile(suggestedUrl);
     }
 
@@ -297,6 +300,11 @@ ApplicationWindow {
         tabs = remaining;
         if (currentTab === tab)
             selectTab(remaining[Math.min(index, remaining.length - 1)]);
+        // A Save As still open for this tab must not save another one.
+        if (saveTarget === tab) {
+            saveTarget = null;
+            saveTargetClosed = true;
+        }
         var document = tab.backend;
         tab.destroy();
         backend.releaseDocument(document);
@@ -489,6 +497,14 @@ ApplicationWindow {
         }
 
         function onSaveSelected(url) {
+            // The tab the chooser was opened for has closed since; saving the
+            // one in front instead could write its text over the chosen file.
+            if (win.saveTargetClosed) {
+                win.saveTargetClosed = false;
+                win.cancelPendingAction();
+                win.currentDocument.setStatus(qsTr("Not saved: its tab was closed."));
+                return;
+            }
             var target = win.saveTarget || win.currentTab;
             win.saveTarget = null;
             target.backend.saveAs(url);
@@ -497,6 +513,7 @@ ApplicationWindow {
         function onCancelled(forSave) {
             if (forSave) {
                 win.saveTarget = null;
+                win.saveTargetClosed = false;
                 win.cancelPendingAction();
             }
         }
@@ -504,6 +521,7 @@ ApplicationWindow {
         function onFailed(message, forSave) {
             if (forSave) {
                 win.saveTarget = null;
+                win.saveTargetClosed = false;
                 win.cancelPendingAction();
             }
             win.currentDocument.setStatus(message);
