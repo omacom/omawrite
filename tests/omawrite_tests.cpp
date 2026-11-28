@@ -4541,6 +4541,271 @@ private slots:
         QTRY_VERIFY(keep->property("activeFocus").toBool());
     }
 
+    void highlightsWordEchoesAcrossNearbyProseAndIgnoresCode() {
+        QTextDocument document;
+        document.setPlainText(QStringLiteral(
+            "# Architektur\n"
+            "\n"
+            "Die Architektur bleibt klar und nicht schwer.\n"
+            "\n"
+            "Eine Entscheidung bleibt nicht lange offen.\n"
+            "Diese Entscheidung hat auch `Entscheidung` und [Text](https://entscheidung.test/entscheidung).\n"
+            "\n"
+            "> Entscheidung im Zitat bleibt aussen vor.\n"
+            "\n"
+            "```md\n"
+            "Entscheidung im Codeblock.\n"
+            "```\n"));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setTheme(true, "#101010", "#eeeeee", "#5584aa", "#23372b", "#e2c27a", "#d0786a");
+        highlighter.setProseXRay(true);
+
+        const auto formatsForBlock = [](const QTextBlock &block) {
+            QList<QTextCharFormat> formats(block.text().length());
+            for (const auto &range : block.layout()->formats()) {
+                for (int i = range.start; i < range.start + range.length; ++i)
+                    formats[i] = range.format;
+            }
+            return formats;
+        };
+
+        // Block 0: "# Architektur" (heading excluded, acts as section boundary).
+        // Block 2: "Die Architektur ..." must NOT echo the heading above it.
+        const QTextBlock para1 = document.findBlockByNumber(2);
+        const auto para1Formats = formatsForBlock(para1);
+        const int archPos = para1.text().indexOf(QStringLiteral("Architektur"));
+        QVERIFY(para1Formats.at(archPos).underlineStyle() != QTextCharFormat::DashUnderline);
+        // Stopword "nicht" repeated across para1 and para2 stays quiet in ambient mode.
+        const int nichtPos = para1.text().indexOf(QStringLiteral("nicht"));
+        QVERIFY(para1Formats.at(nichtPos).underlineStyle() != QTextCharFormat::DashUnderline);
+
+        // Block 4 & 5: "Entscheidung" repeats across adjacent prose blocks -> both underlined.
+        const QTextBlock para2 = document.findBlockByNumber(4);
+        const QTextBlock para3 = document.findBlockByNumber(5);
+        const auto para2Formats = formatsForBlock(para2);
+        const auto para3Formats = formatsForBlock(para3);
+        const int e1 = para2.text().indexOf(QStringLiteral("Entscheidung"));
+        const int e2 = para3.text().indexOf(QStringLiteral("Entscheidung"));
+        QCOMPARE(para2Formats.at(e1).underlineStyle(), QTextCharFormat::DashUnderline);
+        QCOMPARE(para3Formats.at(e2).underlineStyle(), QTextCharFormat::DashUnderline);
+
+        // Inline code `Entscheidung` in block 5 must NOT get echo underline.
+        const int inlineCodePos = para3.text().indexOf(QStringLiteral("`Entscheidung`")) + 2;
+        QVERIFY(para3Formats.at(inlineCodePos).underlineStyle() != QTextCharFormat::DashUnderline);
+
+        // Block 7: Blockquote "> Entscheidung ..." must NOT be underlined.
+        const QTextBlock quoteBlock = document.findBlockByNumber(7);
+        const auto quoteFormats = formatsForBlock(quoteBlock);
+        const int qPos = quoteBlock.text().indexOf(QStringLiteral("Entscheidung"));
+        QVERIFY(quoteFormats.at(qPos).underlineStyle() != QTextCharFormat::DashUnderline);
+
+        // Block 10: Fenced code "Entscheidung ..." must NOT be underlined.
+        const QTextBlock fenceBlock = document.findBlockByNumber(10);
+        const auto fenceFormats = formatsForBlock(fenceBlock);
+        QVERIFY(fenceFormats.at(0).underlineStyle() != QTextCharFormat::DashUnderline);
+    }
+
+    void focusesEchoTwinsAroundTheCaret() {
+        QTextDocument document;
+        document.setPlainText(QStringLiteral(
+            "Das ist auch ein Test mit einmalig gutem Klang und auch einem Echo."));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setTheme(true, "#101010", "#eeeeee", "#5584aa", "#23372b");
+        highlighter.setProseXRay(true);
+
+        const auto formatsOfFirstBlock = [&]() {
+            QList<QTextCharFormat> formats(document.firstBlock().text().length());
+            for (const auto &range : document.firstBlock().layout()->formats()) {
+                for (int i = range.start; i < range.start + range.length; ++i)
+                    formats[i] = range.format;
+            }
+            return formats;
+        };
+
+        const QString text = document.firstBlock().text();
+        const int firstAuch = text.indexOf(QStringLiteral("auch"));
+        const int secondAuch = text.lastIndexOf(QStringLiteral("auch"));
+        const int uniqueWord = text.indexOf(QStringLiteral("einmalig"));
+
+        // Caret on stopword "auch" (4 letters, 2 occurrences) highlights both twins.
+        highlighter.setCaret(firstAuch + 1);
+        auto formats = formatsOfFirstBlock();
+        QCOMPARE(formats.at(firstAuch).underlineStyle(), QTextCharFormat::SingleUnderline);
+        QCOMPARE(formats.at(secondAuch).underlineStyle(), QTextCharFormat::SingleUnderline);
+        QVERIFY(formats.at(firstAuch).hasProperty(QTextFormat::BackgroundBrush));
+
+        // Moving caret onto unique word "einmalig" clears "auch" and stays calm on "einmalig".
+        highlighter.setCaret(uniqueWord + 2);
+        formats = formatsOfFirstBlock();
+        QVERIFY(formats.at(firstAuch).underlineStyle() != QTextCharFormat::SingleUnderline);
+        QVERIFY(formats.at(uniqueWord).underlineStyle() != QTextCharFormat::SingleUnderline);
+    }
+
+    void highlightsLongAndMonotoneSentencesWithoutSplittingAbbreviations() {
+        // Abbreviation & ordinal date guard: must stay 1 single short sentence (10 words).
+        const auto sents = MarkdownHighlighter::proseSentences(
+            QStringLiteral("Am 28. November traf Dr. Müller z. B. eine Wahl."));
+        QCOMPARE(sents.size(), 1);
+        QCOMPARE(sents.first().wordCount, 10);
+
+        // Long (30 words) vs. very long (42 words) vs. short sentence.
+        QStringList thirtyWords;
+        for (int i = 1; i <= 30; ++i)
+            thirtyWords << QStringLiteral("w%1").arg(i);
+        QStringList fortyTwoWords;
+        for (int i = 1; i <= 42; ++i)
+            fortyTwoWords << QStringLiteral("v%1").arg(i);
+
+        QTextDocument document;
+        document.setPlainText(
+            QStringLiteral("Kurz und knapp.\n\n")
+            + thirtyWords.join(QLatin1Char(' ')) + QStringLiteral(".\n\n")
+            + fortyTwoWords.join(QLatin1Char(' ')) + QStringLiteral(".\n\n")
+            + QStringLiteral("Eins zwei drei vier funf sechs sieben acht neun zehn. "
+                             "Elf zwolf dreizehn vierzehn funfzehn sechzehn siebzehn achtzehn neunzehn zwanzig. "
+                             "Alpha beta gamma delta epsilon zeta eta theta iota kappa.\n\n")
+            + QStringLiteral("- Eins zwei drei vier funf sechs sieben acht neun zehn.\n"
+                             "- Elf zwolf dreizehn vierzehn funfzehn sechzehn siebzehn achtzehn neunzehn zwanzig.\n"
+                             "- Alpha beta gamma delta epsilon zeta eta theta iota kappa.\n"));
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setTheme(true, "#101010", "#eeeeee", "#5584aa", "#23372b", "#e2c27a", "#d0786a");
+        highlighter.setProseXRay(true);
+
+        const auto firstFormat = [](const QTextBlock &block, int offset = 0) {
+            for (const auto &range : block.layout()->formats()) {
+                if (offset >= range.start && offset < range.start + range.length)
+                    return range.format;
+            }
+            return QTextCharFormat();
+        };
+
+        // Block 0: short sentence has no background wash.
+        QVERIFY(!firstFormat(document.findBlockByNumber(0)).hasProperty(QTextFormat::BackgroundBrush));
+        // Block 2: 30-word sentence gets amber wash; Block 4: 42-word sentence gets distinct coral wash.
+        const QTextCharFormat longFmt = firstFormat(document.findBlockByNumber(2));
+        const QTextCharFormat veryLongFmt = firstFormat(document.findBlockByNumber(4));
+        QVERIFY(longFmt.hasProperty(QTextFormat::BackgroundBrush));
+        QVERIFY(veryLongFmt.hasProperty(QTextFormat::BackgroundBrush));
+        QVERIFY(longFmt.background().color() != veryLongFmt.background().color());
+
+        // Block 6: 3 consecutive 10-word prose sentences get DotLine monotony underline.
+        const QTextCharFormat monoFmt = firstFormat(document.findBlockByNumber(6));
+        QCOMPARE(monoFmt.underlineStyle(), QTextCharFormat::DotLine);
+
+        // Block 8..10: parallel bullet list items must NOT get monotony underline.
+        const QTextCharFormat listFmt = firstFormat(document.findBlockByNumber(8), 3);
+        QVERIFY(listFmt.underlineStyle() != QTextCharFormat::DotLine);
+    }
+
+    void keepsHiddenMarkersAndSearchIntactUnderProseXRay() {
+        QStringList words;
+        for (int i = 1; i <= 29; ++i)
+            words << QStringLiteral("wort%1").arg(i);
+        const QString line = QStringLiteral("Ein **fettes** Wort und ")
+            + words.join(QLatin1Char(' ')) + QLatin1Char('.');
+
+        QTextDocument document;
+        document.setPlainText(line);
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setTheme(true, "#101010", "#eeeeee", "#5584aa", "#23372b", "#e2c27a", "#d0786a");
+        highlighter.setProseXRay(true);
+
+        const auto formatsOfBlock = [&]() {
+            QList<QTextCharFormat> formats(line.length());
+            for (const auto &range : document.firstBlock().layout()->formats()) {
+                for (int i = range.start; i < range.start + range.length; ++i)
+                    formats[i] = range.format;
+            }
+            return formats;
+        };
+
+        auto formats = formatsOfBlock();
+        const int starPos = line.indexOf(QStringLiteral("**"));
+        const int boldWordPos = starPos + 2;
+        // Hidden "**" markers must remain 1pt and unpainted by sentence background wash.
+        QCOMPARE(formats.at(starPos).fontPointSize(), 1.0);
+        QVERIFY(!formats.at(starPos).hasProperty(QTextFormat::BackgroundBrush));
+        // "fettes" keeps bold weight and gets the long-sentence wash.
+        QCOMPARE(formats.at(boldWordPos).fontWeight(), int(QFont::Bold));
+        QVERIFY(formats.at(boldWordPos).hasProperty(QTextFormat::BackgroundBrush));
+        const QColor sentenceBg = formats.at(boldWordPos).background().color();
+
+        // Active search highlight overrides Prose X-Ray background.
+        highlighter.setSearch(QStringLiteral("fettes"), boldWordPos);
+        formats = formatsOfBlock();
+        QVERIFY(formats.at(boldWordPos).background().color() != sentenceBg);
+    }
+
+    void togglesProseXRayWithoutClobberingStatus() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+        window->requestActivate();
+        QTRY_VERIFY(window->isActive());
+
+        backend.setStatus(QStringLiteral("Saved notes.md"));
+        QVERIFY(!backend.proseXRay());
+
+        auto *xrayButton = window->findChild<QQuickItem *>(QStringLiteral("xrayButton"));
+        QVERIFY(xrayButton);
+        QVERIFY(xrayButton->opacity() < 0.7);
+
+        QTest::keyClick(window, Qt::Key_R, Qt::ControlModifier | Qt::ShiftModifier);
+        QTRY_VERIFY(backend.proseXRay());
+        QCOMPARE(backend.status(), QStringLiteral("Saved notes.md"));
+        QVERIFY(xrayButton->opacity() > 0.9);
+
+        QMetaObject::invokeMethod(xrayButton, "clicked");
+        QTRY_VERIFY(!backend.proseXRay());
+        QCOMPARE(backend.status(), QStringLiteral("Saved notes.md"));
+    }
+
+    void showsSelectedWordCountInFooter() {
+        const QString mainQmlPath = QFINDTESTDATA("../src/Main.qml");
+        Backend backend;
+        QQmlEngine engine;
+        engine.rootContext()->setContextProperty(QStringLiteral("backend"), &backend);
+        QQmlComponent component(&engine, QUrl::fromLocalFile(mainQmlPath));
+        QScopedPointer<QObject> object(component.create());
+        QVERIFY2(object, qPrintable(component.errorString()));
+        auto *window = qobject_cast<QQuickWindow *>(object.data());
+        QVERIFY(window);
+        window->show();
+        QVERIFY(QTest::qWaitForWindowExposed(window));
+
+        auto *editor = window->findChild<QQuickItem *>(QStringLiteral("sourceEditor"));
+        auto *wordCountLabel = window->findChild<QObject *>(QStringLiteral("wordCountLabel"));
+        QVERIFY(editor);
+        QVERIFY(wordCountLabel);
+
+        backend.loadDocumentText(QStringLiteral("One two three   four"));
+        QCOMPARE(wordCountLabel->property("text").toString(), QStringLiteral("4 Words"));
+
+        // Selecting "One two" shows "2 / 4 Words".
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 0), Q_ARG(int, 7)));
+        QTRY_COMPARE(wordCountLabel->property("text").toString(), QStringLiteral("2 / 4 Words"));
+
+        // Selecting only whitespace shows "0 / 4 Words".
+        QVERIFY(QMetaObject::invokeMethod(editor, "select", Q_ARG(int, 13), Q_ARG(int, 16)));
+        QTRY_COMPARE(wordCountLabel->property("text").toString(), QStringLiteral("0 / 4 Words"));
+
+        // Selecting all shows "4 / 4 Words".
+        QVERIFY(QMetaObject::invokeMethod(editor, "selectAll"));
+        QTRY_COMPARE(wordCountLabel->property("text").toString(), QStringLiteral("4 / 4 Words"));
+
+        // Deselecting returns to "4 Words".
+        QVERIFY(QMetaObject::invokeMethod(editor, "deselect"));
+        QTRY_COMPARE(wordCountLabel->property("text").toString(), QStringLiteral("4 Words"));
+    }
+
 private:
     // The character formats the highlighter gives a single line of text.
     static QList<QTextCharFormat> highlightedFormats(const QString &text, int caret = -1) {

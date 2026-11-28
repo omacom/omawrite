@@ -224,6 +224,17 @@ Backend::Backend(QObject *parent) : QObject(parent) {
             refreshWordCount();
         }
     });
+    m_selectionCountTimer.setSingleShot(true);
+    m_selectionCountTimer.setInterval(60);
+    connect(&m_selectionCountTimer, &QTimer::timeout, this, &Backend::refreshSelectionWordCount);
+    connect(&m_selectionCountWatcher, &QFutureWatcher<int>::finished, this, [this] {
+        if (!m_selectionCountStale && m_hasSelection)
+            setSelectionState(true, m_selectionCountWatcher.result());
+        if (m_selectionCountAgain) {
+            m_selectionCountAgain = false;
+            refreshSelectionWordCount();
+        }
+    });
     m_recoveryTimer.setSingleShot(true);
     m_recoveryTimer.setInterval(750);
     connect(&m_recoveryTimer, &QTimer::timeout, this, &Backend::writeRecovery);
@@ -352,8 +363,9 @@ void Backend::attachDocument(QObject *textDocument) {
     m_lastDocumentText = currentDocumentText();
     m_highlighter = new MarkdownHighlighter(m_document);
     m_highlighter->setTheme(m_darkMode, m_themeBackground, m_themeForeground, m_themeAccent,
-                            m_themePanelBackground);
+                            m_themePanelBackground, m_themeYellow, m_themeRed);
     m_highlighter->setCaret(m_caretPosition);
+    m_highlighter->setProseXRay(m_proseXRay);
 
     connect(m_document, &QTextDocument::contentsChange, this,
             [this](int position, int, int charsAdded) {
@@ -609,6 +621,9 @@ bool Backend::editorTextChanged() {
 
     reapplyTypographyToChange();
 
+    if (m_proseXRay && m_highlighter)
+        m_highlighter->rehighlightEchoNeighborhood(m_lastChangePos);
+
     scheduleWordCount();
 
     const QString &baseline = m_lastKnownFileText;
@@ -639,6 +654,58 @@ void Backend::setCaretPosition(int position) {
     m_caretPosition = position;
     if (m_highlighter)
         m_highlighter->setCaret(position);
+}
+
+void Backend::setProseXRay(bool enabled) {
+    if (m_proseXRay == enabled)
+        return;
+
+    m_proseXRay = enabled;
+    if (m_highlighter)
+        m_highlighter->setProseXRay(enabled);
+    emit proseXRayChanged();
+}
+
+void Backend::toggleProseXRay() {
+    setProseXRay(!m_proseXRay);
+}
+
+void Backend::setSelectionRange(int start, int end) {
+    const int size = int(m_lastDocumentText.size());
+    const int lo = qBound(0, qMin(start, end), size);
+    const int hi = qBound(lo, qMax(start, end), size);
+    m_selectionStart = lo;
+    m_selectionEnd = hi;
+
+    if (lo == hi) {
+        m_selectionCountTimer.stop();
+        m_selectionCountStale = true;
+        m_selectionCountAgain = false;
+        setSelectionState(false, 0);
+        return;
+    }
+
+    if (lo == 0 && hi == size) {
+        m_selectionCountTimer.stop();
+        m_selectionCountStale = true;
+        m_selectionCountAgain = false;
+        setSelectionState(true, m_wordCount);
+        return;
+    }
+
+    // Small and medium selections count directly in microseconds without
+    // allocating; multi-megabyte partial selections run off the UI thread.
+    constexpr int kSyncSelectionLimit = 32768;
+    if (hi - lo <= kSyncSelectionLimit) {
+        m_selectionCountTimer.stop();
+        m_selectionCountStale = true;
+        m_selectionCountAgain = false;
+        setSelectionState(true, countWordsInView(QStringView(m_lastDocumentText).mid(lo, hi - lo)));
+        return;
+    }
+
+    setSelectionState(true, m_selectedWordCount);
+    m_selectionCountTimer.start();
 }
 
 // The emphasis span of the marker's kind that the caret sits in or against,
@@ -938,6 +1005,13 @@ void Backend::loadDocumentText(const QString &text) {
     m_wordCountStale = true;
     m_wordCountAgain = false;
     setWordCount(countWords(text));
+
+    m_selectionCountTimer.stop();
+    m_selectionCountStale = true;
+    m_selectionCountAgain = false;
+    m_selectionStart = 0;
+    m_selectionEnd = 0;
+    setSelectionState(false, 0);
 }
 
 void Backend::setFileUrl(const QUrl &url) {
@@ -1214,6 +1288,8 @@ void Backend::loadOmarchyTheme() {
     QString selectionForeground;
     QString brightForeground;
     QString lighterBackground;
+    QString yellow;
+    QString red;
     QFile file(colorsPath);
     if (file.open(QIODevice::ReadOnly | QIODevice::Text)) {
         QTextStream in(&file);
@@ -1247,6 +1323,10 @@ void Backend::loadOmarchyTheme() {
                 brightForeground = value;
             else if (key == QStringLiteral("lighter_background"))
                 lighterBackground = value;
+            else if (key == QStringLiteral("yellow"))
+                yellow = value;
+            else if (key == QStringLiteral("red"))
+                red = value;
         }
     }
 
@@ -1276,6 +1356,8 @@ void Backend::loadOmarchyTheme() {
     m_themeForeground = m_darkMode ? QStringLiteral("#eeeeee") : QStringLiteral("#222324");
     m_themeAccent = m_darkMode ? QStringLiteral("#5584aa") : QStringLiteral("#2077b2");
     m_themeSelection = m_darkMode ? QStringLiteral("#186a9a") : QStringLiteral("#2077b2");
+    m_themeYellow = m_darkMode ? QStringLiteral("#e2c27a") : QStringLiteral("#c98a00");
+    m_themeRed = m_darkMode ? QStringLiteral("#d0786a") : QStringLiteral("#c94a38");
 
     // An unparseable colour reaches QML as black, so keep the default instead.
     // Later calls win, so each fallback is applied before what it falls back from.
@@ -1288,6 +1370,8 @@ void Backend::loadOmarchyTheme() {
     applyColor(m_themeAccent, accent);
     applyColor(m_themeSelection, selectionBackground);
     applyColor(m_themeSelection, selection);
+    applyColor(m_themeYellow, yellow);
+    applyColor(m_themeRed, red);
     m_themeSelectionForeground = m_themeForeground;
     applyColor(m_themeSelectionForeground, brightForeground);
     applyColor(m_themeSelectionForeground, selectionForeground);
@@ -1305,7 +1389,8 @@ void Backend::loadOmarchyTheme() {
 
     if (m_highlighter) {
         m_highlighter->setTheme(m_darkMode, m_themeBackground, m_themeForeground,
-                                m_themeAccent, m_themePanelBackground);
+                                m_themeAccent, m_themePanelBackground,
+                                m_themeYellow, m_themeRed);
     }
 
     if (m_darkMode != wasDark)
@@ -1357,7 +1442,7 @@ QString Backend::currentDocumentText() const {
     return text;
 }
 
-int Backend::countWords(const QString &text) {
+int Backend::countWordsInView(QStringView text) {
     const QChar *data = text.constData();
     const qsizetype size = text.size();
     int count = 0;
@@ -1396,6 +1481,10 @@ int Backend::countWords(const QString &text) {
     return count;
 }
 
+int Backend::countWords(const QString &text) {
+    return countWordsInView(text);
+}
+
 QString Backend::suggestedFileName(const QString &text) {
     QString name = text.section(QLatin1Char('\n'), 0, 0).trimmed();
     name.replace(QRegularExpression(QStringLiteral("[/\\x00-\\x1f\\x7f]")),
@@ -1414,6 +1503,38 @@ void Backend::setWordCount(int words) {
 
     m_wordCount = words;
     emit wordCountChanged();
+    if (m_hasSelection && m_selectionStart == 0 && m_selectionEnd >= int(m_lastDocumentText.size()))
+        setSelectionState(true, words);
+}
+
+void Backend::setSelectionState(bool hasSelection, int selectedWords) {
+    if (m_hasSelection == hasSelection && m_selectedWordCount == selectedWords)
+        return;
+
+    m_hasSelection = hasSelection;
+    m_selectedWordCount = selectedWords;
+    emit selectionChanged();
+}
+
+void Backend::refreshSelectionWordCount() {
+    if (!m_hasSelection)
+        return;
+    if (m_selectionCountWatcher.isRunning()) {
+        m_selectionCountAgain = true;
+        return;
+    }
+    const int size = int(m_lastDocumentText.size());
+    const int lo = qBound(0, m_selectionStart, size);
+    const int hi = qBound(lo, m_selectionEnd, size);
+    if (lo == hi) {
+        setSelectionState(false, 0);
+        return;
+    }
+    m_selectionCountStale = false;
+    const QString snapshot = m_lastDocumentText;
+    m_selectionCountWatcher.setFuture(QtConcurrent::run([snapshot, lo, hi]() {
+        return Backend::countWordsInView(QStringView(snapshot).mid(lo, hi - lo));
+    }));
 }
 
 void Backend::refreshWordCount() {

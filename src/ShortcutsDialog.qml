@@ -33,6 +33,7 @@ Dialog {
         { key: "Ctrl+Shift+X", desc: qsTr("Strikethrough") },
         { key: "Ctrl+K", desc: qsTr("Link") },
         { key: "Ctrl+Shift+C", desc: qsTr("Copy as HTML") },
+        { key: "Ctrl+Shift+R", desc: qsTr("Style X-Ray") },
         { key: "Ctrl+= / Ctrl++", desc: qsTr("Increase Text Size") },
         { key: "Ctrl+-", desc: qsTr("Decrease Text Size") },
         { key: "Ctrl+0", desc: qsTr("Reset Text Size") },
