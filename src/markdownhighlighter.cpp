@@ -1247,6 +1247,59 @@ bool isMonotoneTriple(int a, int b, int c) {
     return (hi - lo) <= tolerance;
 }
 
+struct JoinedParagraph {
+    QTextBlock firstBlock;
+    QTextBlock lastBlock;
+    QString text;
+    QList<MarkdownHighlighter::Span> excluded;
+    int targetStart = 0;
+    int targetLength = 0;
+};
+
+// Soft-wrapped Markdown lines without a blank line between them belong to one
+// prose paragraph, so join the contiguous run before measuring sentence length.
+JoinedParagraph joinParagraphRun(const QTextBlock &anchor) {
+    QList<QTextBlock> blocks;
+    QTextBlock prev = anchor.previous();
+    int steps = 0;
+    while (prev.isValid() && steps < kNeighborBlockLimit
+           && classifyProseBlock(prev) == ProseBlockKind::Paragraph) {
+        blocks.prepend(prev);
+        prev = prev.previous();
+        ++steps;
+    }
+
+    const int anchorIndex = int(blocks.size());
+    blocks.append(anchor);
+
+    QTextBlock next = anchor.next();
+    steps = 0;
+    while (next.isValid() && steps < kNeighborBlockLimit
+           && classifyProseBlock(next) == ProseBlockKind::Paragraph) {
+        blocks.append(next);
+        next = next.next();
+        ++steps;
+    }
+
+    JoinedParagraph joined;
+    joined.firstBlock = blocks.first();
+    joined.lastBlock = blocks.last();
+    for (int i = 0; i < blocks.size(); ++i) {
+        if (i > 0)
+            joined.text.append(QLatin1Char(' '));
+        const int base = int(joined.text.length());
+        const QString line = blocks.at(i).text();
+        if (i == anchorIndex) {
+            joined.targetStart = base;
+            joined.targetLength = int(line.length());
+        }
+        joined.text.append(line);
+        for (const auto &span : proseExcludedSpans(line, 0))
+            joined.excluded.append({base + span.start, span.length});
+    }
+    return joined;
+}
+
 } // namespace
 
 QList<MarkdownHighlighter::ProseSentence> MarkdownHighlighter::proseSentences(
@@ -1390,82 +1443,100 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
 
     // 1. Sentence cadence: overlong sentences (28+ / 40+ words) and monotone
     // length streaks (3+ consecutive prose sentences within +/-20%).
-    const QList<ProseSentence> currentSentences = proseSentences(text, excluded);
-    for (const ProseSentence &sentence : currentSentences) {
-        if (sentence.wordCount >= kVeryLongSentenceWords)
-            mergeNonHidden(sentence.span.start, sentence.span.length, m_veryLongSentenceFormat);
-        else if (sentence.wordCount >= kLongSentenceWords)
-            mergeNonHidden(sentence.span.start, sentence.span.length, m_longSentenceFormat);
-    }
+    if (kind == ProseBlockKind::ListItem) {
+        const QList<ProseSentence> currentSentences = proseSentences(text, excluded);
+        for (const ProseSentence &sentence : currentSentences) {
+            if (sentence.wordCount >= kVeryLongSentenceWords)
+                mergeNonHidden(sentence.span.start, sentence.span.length, m_veryLongSentenceFormat);
+            else if (sentence.wordCount >= kLongSentenceWords)
+                mergeNonHidden(sentence.span.start, sentence.span.length, m_longSentenceFormat);
+        }
+    } else {
+        const JoinedParagraph para = joinParagraphRun(block);
+        const QList<ProseSentence> paraSentences = proseSentences(para.text, para.excluded);
+        const int targetEnd = para.targetStart + para.targetLength;
+        const auto projectSpan = [&](const Span &span, const QTextCharFormat &fmt) {
+            const int overlapStart = std::max(para.targetStart, span.start);
+            const int overlapEnd = std::min(targetEnd, span.start + span.length);
+            if (overlapStart < overlapEnd)
+                mergeNonHidden(overlapStart - para.targetStart, overlapEnd - overlapStart, fmt);
+        };
 
-    if (kind == ProseBlockKind::Paragraph && !currentSentences.isEmpty()) {
-        QList<int> prevLengths;
-        QTextBlock prev = block.previous();
-        int visited = 0;
-        int traversed = 0;
-        while (prev.isValid() && visited < kNeighborBlockLimit
-               && traversed < kMaxNeighborTraversal && prevLengths.size() < 2) {
-            ++traversed;
-            int prevStart = 0;
-            const ProseBlockKind prevKind = classifyProseBlock(prev, &prevStart);
-            if (prevKind == ProseBlockKind::SectionBoundary || prevKind == ProseBlockKind::ListItem)
-                break;
-            if (prevKind == ProseBlockKind::Paragraph) {
-                const QString prevText = prev.text();
-                const QList<ProseSentence> prevSents =
-                    proseSentences(prevText, proseExcludedSpans(prevText, prevStart));
-                for (int idx = int(prevSents.size()) - 1; idx >= 0 && prevLengths.size() < 2; --idx)
-                    prevLengths.prepend(prevSents.at(idx).wordCount);
-                ++visited;
-            }
-            prev = prev.previous();
+        for (const ProseSentence &sentence : paraSentences) {
+            if (sentence.wordCount >= kVeryLongSentenceWords)
+                projectSpan(sentence.span, m_veryLongSentenceFormat);
+            else if (sentence.wordCount >= kLongSentenceWords)
+                projectSpan(sentence.span, m_longSentenceFormat);
         }
 
-        QList<int> nextLengths;
-        QTextBlock next = block.next();
-        visited = 0;
-        traversed = 0;
-        while (next.isValid() && visited < kNeighborBlockLimit
-               && traversed < kMaxNeighborTraversal && nextLengths.size() < 2) {
-            ++traversed;
-            int nextStart = 0;
-            const ProseBlockKind nextKind = classifyProseBlock(next, &nextStart);
-            if (nextKind == ProseBlockKind::SectionBoundary || nextKind == ProseBlockKind::ListItem)
-                break;
-            if (nextKind == ProseBlockKind::Paragraph) {
-                const QString nextText = next.text();
-                const QList<ProseSentence> nextSents =
-                    proseSentences(nextText, proseExcludedSpans(nextText, nextStart));
-                for (int idx = 0; idx < nextSents.size() && nextLengths.size() < 2; ++idx)
-                    nextLengths.append(nextSents.at(idx).wordCount);
-                ++visited;
+        if (!paraSentences.isEmpty()) {
+            QList<int> prevLengths;
+            QTextBlock prev = para.firstBlock.previous();
+            int visited = 0;
+            int traversed = 0;
+            while (prev.isValid() && visited < kNeighborBlockLimit
+                   && traversed < kMaxNeighborTraversal && prevLengths.size() < 2) {
+                ++traversed;
+                const ProseBlockKind prevKind = classifyProseBlock(prev);
+                if (prevKind == ProseBlockKind::SectionBoundary || prevKind == ProseBlockKind::ListItem)
+                    break;
+                if (prevKind == ProseBlockKind::Paragraph) {
+                    const JoinedParagraph prevPara = joinParagraphRun(prev);
+                    const QList<ProseSentence> prevSents =
+                        proseSentences(prevPara.text, prevPara.excluded);
+                    for (int idx = int(prevSents.size()) - 1; idx >= 0 && prevLengths.size() < 2; --idx)
+                        prevLengths.prepend(prevSents.at(idx).wordCount);
+                    ++visited;
+                    prev = prevPara.firstBlock.previous();
+                    continue;
+                }
+                prev = prev.previous();
             }
-            next = next.next();
-        }
 
-        QList<int> combined;
-        combined.reserve(prevLengths.size() + currentSentences.size() + nextLengths.size());
-        for (int len : prevLengths)
-            combined.append(len);
-        const int currentOffset = int(combined.size());
-        for (const ProseSentence &s : currentSentences)
-            combined.append(s.wordCount);
-        for (int len : nextLengths)
-            combined.append(len);
-
-        std::vector<bool> monotone(size_t(combined.size()), false);
-        for (int idx = 0; idx + 2 < combined.size(); ++idx) {
-            if (isMonotoneTriple(combined.at(idx), combined.at(idx + 1), combined.at(idx + 2))) {
-                monotone[size_t(idx)] = true;
-                monotone[size_t(idx + 1)] = true;
-                monotone[size_t(idx + 2)] = true;
+            QList<int> nextLengths;
+            QTextBlock next = para.lastBlock.next();
+            visited = 0;
+            traversed = 0;
+            while (next.isValid() && visited < kNeighborBlockLimit
+                   && traversed < kMaxNeighborTraversal && nextLengths.size() < 2) {
+                ++traversed;
+                const ProseBlockKind nextKind = classifyProseBlock(next);
+                if (nextKind == ProseBlockKind::SectionBoundary || nextKind == ProseBlockKind::ListItem)
+                    break;
+                if (nextKind == ProseBlockKind::Paragraph) {
+                    const JoinedParagraph nextPara = joinParagraphRun(next);
+                    const QList<ProseSentence> nextSents =
+                        proseSentences(nextPara.text, nextPara.excluded);
+                    for (int idx = 0; idx < nextSents.size() && nextLengths.size() < 2; ++idx)
+                        nextLengths.append(nextSents.at(idx).wordCount);
+                    ++visited;
+                    next = nextPara.lastBlock.next();
+                    continue;
+                }
+                next = next.next();
             }
-        }
-        for (int idx = 0; idx < currentSentences.size(); ++idx) {
-            if (monotone[size_t(currentOffset + idx)]) {
-                mergeNonHidden(currentSentences.at(idx).span.start,
-                               currentSentences.at(idx).span.length,
-                               m_monotoneSentenceFormat);
+
+            QList<int> combined;
+            combined.reserve(prevLengths.size() + paraSentences.size() + nextLengths.size());
+            for (int len : prevLengths)
+                combined.append(len);
+            const int currentOffset = int(combined.size());
+            for (const ProseSentence &s : paraSentences)
+                combined.append(s.wordCount);
+            for (int len : nextLengths)
+                combined.append(len);
+
+            std::vector<bool> monotone(size_t(combined.size()), false);
+            for (int idx = 0; idx + 2 < combined.size(); ++idx) {
+                if (isMonotoneTriple(combined.at(idx), combined.at(idx + 1), combined.at(idx + 2))) {
+                    monotone[size_t(idx)] = true;
+                    monotone[size_t(idx + 1)] = true;
+                    monotone[size_t(idx + 2)] = true;
+                }
+            }
+            for (int idx = 0; idx < paraSentences.size(); ++idx) {
+                if (monotone[size_t(currentOffset + idx)])
+                    projectSpan(paraSentences.at(idx).span, m_monotoneSentenceFormat);
             }
         }
     }

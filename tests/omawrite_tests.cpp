@@ -4746,6 +4746,23 @@ private slots:
         // Block 8..10: parallel bullet list items must NOT get monotony underline.
         const QTextCharFormat listFmt = firstFormat(document.findBlockByNumber(8), 3);
         QVERIFY(listFmt.underlineStyle() != QTextCharFormat::DotLine);
+
+        // Soft-wrapped 40-word sentence split across two adjacent lines still gets
+        // the very-long sentence wash on both lines.
+        QStringList firstHalf;
+        QStringList secondHalf;
+        for (int i = 1; i <= 20; ++i) {
+            firstHalf << QStringLiteral("a%1").arg(i);
+            secondHalf << QStringLiteral("b%1").arg(i);
+        }
+        document.setPlainText(firstHalf.join(QLatin1Char(' ')) + QLatin1Char('\n')
+                              + secondHalf.join(QLatin1Char(' ')) + QLatin1Char('.'));
+        const QTextCharFormat wrap1 = firstFormat(document.findBlockByNumber(0));
+        const QTextCharFormat wrap2 = firstFormat(document.findBlockByNumber(1));
+        QVERIFY(wrap1.hasProperty(QTextFormat::BackgroundBrush));
+        QVERIFY(wrap2.hasProperty(QTextFormat::BackgroundBrush));
+        QCOMPARE(wrap1.background().color(), veryLongFmt.background().color());
+        QCOMPARE(wrap2.background().color(), veryLongFmt.background().color());
     }
 
     void keepsHiddenMarkersAndSearchIntactUnderProseXRay() {
