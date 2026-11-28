@@ -1392,30 +1392,40 @@ void MarkdownHighlighter::rehighlightNeighborhoodBlocks(const QTextBlock &center
     QTextBlock prev = center.previous();
     int visited = 0;
     int traversed = 0;
-    while (prev.isValid() && visited < kNeighborBlockLimit && traversed < kMaxNeighborTraversal) {
+    ProseBlockKind lastKind = classifyProseBlock(center);
+    while (prev.isValid() && traversed < kMaxNeighborTraversal) {
         ++traversed;
         const ProseBlockKind kind = classifyProseBlock(prev);
         if (kind == ProseBlockKind::SectionBoundary)
             break;
         if (kind == ProseBlockKind::Paragraph || kind == ProseBlockKind::ListItem) {
+            if (visited >= kNeighborBlockLimit
+                    && !(kind == ProseBlockKind::Paragraph && lastKind == ProseBlockKind::Paragraph))
+                break;
             targets.append(prev);
             ++visited;
         }
+        lastKind = kind;
         prev = prev.previous();
     }
 
     QTextBlock next = center.next();
     visited = 0;
     traversed = 0;
-    while (next.isValid() && visited < kNeighborBlockLimit && traversed < kMaxNeighborTraversal) {
+    lastKind = classifyProseBlock(center);
+    while (next.isValid() && traversed < kMaxNeighborTraversal) {
         ++traversed;
         const ProseBlockKind kind = classifyProseBlock(next);
         if (kind == ProseBlockKind::SectionBoundary)
             break;
         if (kind == ProseBlockKind::Paragraph || kind == ProseBlockKind::ListItem) {
+            if (visited >= kNeighborBlockLimit
+                    && !(kind == ProseBlockKind::Paragraph && lastKind == ProseBlockKind::Paragraph))
+                break;
             targets.append(next);
             ++visited;
         }
+        lastKind = kind;
         next = next.next();
     }
 

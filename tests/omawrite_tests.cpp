@@ -4770,6 +4770,32 @@ private slots:
             "One two\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten.\n"
             "Alpha beta gamma delta epsilon zeta eta theta iota kappa."));
         QVERIFY(firstFormat(document.findBlockByNumber(0)).underlineStyle() != QTextCharFormat::DotLine);
+
+        // Editing a later paragraph refreshes all lines of an earlier 9-line
+        // soft-wrapped paragraph so stale monotone underlines do not survive.
+        QStringList nineLines;
+        for (int line = 0; line < 9; ++line) {
+            nineLines << QStringLiteral("a%1 b%1 c%1").arg(line)
+                             + (line == 8 ? QStringLiteral(" d8 e8 f8.") : QString());
+        }
+        QStringList thirtyA;
+        QStringList thirtyB;
+        for (int i = 1; i <= 30; ++i) {
+            thirtyA << QStringLiteral("p%1").arg(i);
+            thirtyB << QStringLiteral("q%1").arg(i);
+        }
+        document.setPlainText(nineLines.join(QLatin1Char('\n')) + QStringLiteral("\n\n")
+                              + thirtyA.join(QLatin1Char(' ')) + QStringLiteral(".\n\n")
+                              + thirtyB.join(QLatin1Char(' ')) + QLatin1Char('.'));
+        QCOMPARE(firstFormat(document.findBlockByNumber(0)).underlineStyle(), QTextCharFormat::DotLine);
+
+        QTextBlock lastBlock = document.lastBlock();
+        QTextCursor cursor(lastBlock);
+        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        cursor.insertText(QStringLiteral("Short."));
+        highlighter.rehighlightEchoNeighborhood(lastBlock.position());
+        QVERIFY(firstFormat(document.findBlockByNumber(0)).underlineStyle() != QTextCharFormat::DotLine);
+        QVERIFY(firstFormat(document.findBlockByNumber(1)).underlineStyle() != QTextCharFormat::DotLine);
     }
 
     void keepsHiddenMarkersAndSearchIntactUnderProseXRay() {
