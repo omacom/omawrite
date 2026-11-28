@@ -987,7 +987,7 @@ QList<ProseWord> extractProseWords(const QString &text, const std::vector<bool> 
             if (c.isLetter()) {
                 ++letters;
                 ++i;
-            } else if (c.isNumber()) {
+            } else if (c.isNumber() || c.isMark()) {
                 ++i;
             } else if (isWordJoiner(c) && i + 1 < n && !excluded[size_t(i + 1)]
                        && text.at(i + 1).isLetterOrNumber() && !isCjkUnit(text.at(i + 1))) {
@@ -998,7 +998,8 @@ QList<ProseWord> extractProseWords(const QString &text, const std::vector<bool> 
         }
         if (letters > 0) {
             const int len = i - start;
-            words.append({start, len, searchFolded(text.mid(start, len)), letters, false});
+            const QString normalized = text.mid(start, len).normalized(QString::NormalizationForm_C);
+            words.append({start, len, searchFolded(normalized), letters, false});
         }
     }
     return words;
@@ -1217,6 +1218,9 @@ int countProseWordsInRange(const QString &text, const std::vector<bool> &exclude
                 ++count;
             inWord = true;
             pendingJoiner = false;
+        } else if (ch.isMark()) {
+            if (inWord)
+                pendingJoiner = false;
         } else if (isWordJoiner(ch)) {
             if (inWord && !pendingJoiner) {
                 pendingJoiner = true;

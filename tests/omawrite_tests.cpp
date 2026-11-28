@@ -4603,6 +4603,18 @@ private slots:
         const QTextBlock fenceBlock = document.findBlockByNumber(10);
         const auto fenceFormats = formatsForBlock(fenceBlock);
         QVERIFY(fenceFormats.at(0).underlineStyle() != QTextCharFormat::DashUnderline);
+
+        // Decomposed combining marks stay one word (7 words total) and match precomposed echoes.
+        const QString combiningLine = QStringLiteral("A nai\u0308ve idea meets a na\u00efve plan.");
+        const auto combiningSents = MarkdownHighlighter::proseSentences(combiningLine);
+        QCOMPARE(combiningSents.size(), 1);
+        QCOMPARE(combiningSents.first().wordCount, 7);
+        document.setPlainText(combiningLine);
+        const auto combiningFormats = formatsForBlock(document.firstBlock());
+        const int decomposedPos = combiningLine.indexOf(QStringLiteral("nai\u0308ve"));
+        const int precomposedPos = combiningLine.indexOf(QStringLiteral("na\u00efve"));
+        QCOMPARE(combiningFormats.at(decomposedPos).underlineStyle(), QTextCharFormat::DashUnderline);
+        QCOMPARE(combiningFormats.at(precomposedPos).underlineStyle(), QTextCharFormat::DashUnderline);
     }
 
     void focusesEchoTwinsAroundTheCaret() {
