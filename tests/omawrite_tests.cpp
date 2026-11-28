@@ -4673,6 +4673,13 @@ private slots:
         QCOMPARE(sents.size(), 1);
         QCOMPARE(sents.first().wordCount, 10);
 
+        // Ordinary sentence-ending numbers still split sentences.
+        const auto numSents = MarkdownHighlighter::proseSentences(
+            QStringLiteral("The result was 42. Another sentence follows."));
+        QCOMPARE(numSents.size(), 2);
+        QCOMPARE(numSents.at(0).wordCount, 4);
+        QCOMPARE(numSents.at(1).wordCount, 3);
+
         // Long (30 words) vs. very long (42 words) vs. short sentence.
         QStringList thirtyWords;
         for (int i = 1; i <= 30; ++i)

@@ -1125,9 +1125,54 @@ bool isSentenceAbbreviation(const QString &text, int dotIndex, const std::vector
     int start = dotIndex - 1;
     if (excluded[size_t(start)])
         return false;
-    // Ordinal dates and numbered references ("28. November", "1. Kapitel").
-    if (text.at(start).isDigit())
-        return true;
+    // Narrow ordinal exception: 1..31 followed by a month name ("28. November")
+    // or a lowercase continuation ("im 1. schritt"). Ordinary sentence-ending
+    // numbers ("The result was 42. Another sentence.") still end the sentence.
+    if (text.at(start).isDigit()) {
+        int numStart = start;
+        while (numStart > 0 && !excluded[size_t(numStart - 1)] && text.at(numStart - 1).isDigit())
+            --numStart;
+        const int numLen = dotIndex - numStart;
+        if (numLen < 1 || numLen > 2)
+            return false;
+        if (numStart > 0 && !excluded[size_t(numStart - 1)] && text.at(numStart - 1).isLetter())
+            return false;
+        const int value = QStringView(text).mid(numStart, numLen).toInt();
+        if (value < 1 || value > 31)
+            return false;
+
+        int nextStart = dotIndex + 1;
+        while (nextStart < text.length() && (excluded[size_t(nextStart)] || text.at(nextStart).isSpace()))
+            ++nextStart;
+        if (nextStart >= text.length() || !text.at(nextStart).isLetter())
+            return false;
+        if (text.at(nextStart).isLower())
+            return true;
+
+        int nextEnd = nextStart;
+        while (nextEnd < text.length() && !excluded[size_t(nextEnd)]
+               && (text.at(nextEnd).isLetter() || text.at(nextEnd).isMark()))
+            ++nextEnd;
+        const QString nextToken = searchFolded(
+            text.mid(nextStart, nextEnd - nextStart).normalized(QString::NormalizationForm_C));
+        static constexpr std::array<QLatin1String, 30> kMonths = {
+            QLatin1String("apr"),       QLatin1String("april"),     QLatin1String("aug"),
+            QLatin1String("august"),    QLatin1String("dec"),       QLatin1String("december"),
+            QLatin1String("dez"),       QLatin1String("dezember"),  QLatin1String("feb"),
+            QLatin1String("februar"),   QLatin1String("february"),  QLatin1String("jan"),
+            QLatin1String("januar"),    QLatin1String("january"),   QLatin1String("jul"),
+            QLatin1String("juli"),      QLatin1String("july"),      QLatin1String("jun"),
+            QLatin1String("juni"),      QLatin1String("june"),      QLatin1String("mai"),
+            QLatin1String("mar"),       QLatin1String("march"),     QLatin1String("marz"),
+            QLatin1String("may"),       QLatin1String("nov"),       QLatin1String("november"),
+            QLatin1String("oct"),       QLatin1String("okt"),       QLatin1String("oktober"),
+        };
+        if (nextToken == QLatin1String("sep") || nextToken == QLatin1String("september")
+                || nextToken == QLatin1String("october"))
+            return true;
+        return std::binary_search(kMonths.cbegin(), kMonths.cend(), nextToken,
+                                  [](const auto &a, const auto &b) { return a < b; });
+    }
     while (start > 0 && !excluded[size_t(start - 1)] && text.at(start - 1).isLetter())
         --start;
     const int len = dotIndex - start;
