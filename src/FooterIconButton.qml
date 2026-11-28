@@ -79,6 +79,13 @@ Item {
                 context.lineTo(13, 13.5);
                 context.moveTo(5, 9.5);
                 context.lineTo(11, 9.5);
+            } else if (control.iconName === "xray") {
+                context.moveTo(2, 8);
+                context.lineTo(4.5, 8);
+                context.lineTo(6.5, 3.5);
+                context.lineTo(9.5, 12.5);
+                context.lineTo(11.5, 8);
+                context.lineTo(14, 8);
             } else {
                 context.moveTo(2.5, 13);
                 context.lineTo(2.5, 3.5);

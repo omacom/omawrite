@@ -30,6 +30,7 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+=` and `Ctrl+-` change the text size, `Ctrl+0` returns to the default.
   `Ctrl+scroll` does the same.
 - `Ctrl+Shift+C` copies the rendered document as HTML, with plain text as a fallback.
+- `Ctrl+Shift+R` toggles Style X-Ray to highlight nearby word echoes, long sentences, and monotone sentence streaks.
 - `Ctrl+?`, `Ctrl+/`, or `F1` shows the keyboard shortcut reference.
 - In the unsaved-changes dialog, `C`, `D`, and `S` choose Cancel, Discard, and Save, with or without `Alt`. `Escape` cancels.
 

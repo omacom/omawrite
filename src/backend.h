@@ -25,6 +25,9 @@ class Backend : public QObject {
     Q_PROPERTY(bool modified READ modified NOTIFY modifiedChanged)
     Q_PROPERTY(QString status READ status NOTIFY statusChanged)
     Q_PROPERTY(int wordCount READ wordCount NOTIFY wordCountChanged)
+    Q_PROPERTY(bool hasSelection READ hasSelection NOTIFY selectionChanged)
+    Q_PROPERTY(int selectedWordCount READ selectedWordCount NOTIFY selectionChanged)
+    Q_PROPERTY(bool proseXRay READ proseXRay WRITE setProseXRay NOTIFY proseXRayChanged)
     Q_PROPERTY(bool darkMode READ darkMode WRITE setDarkMode NOTIFY darkModeChanged)
     Q_PROPERTY(qreal textScale READ textScale NOTIFY textScaleChanged)
     Q_PROPERTY(QString themeBackground READ themeBackground NOTIFY themeColorsChanged)
@@ -49,6 +52,10 @@ public:
     bool modified() const { return m_modified; }
     QString status() const { return m_status; }
     int wordCount() const { return m_wordCount; }
+    bool hasSelection() const { return m_hasSelection; }
+    int selectedWordCount() const { return m_selectedWordCount; }
+    bool proseXRay() const { return m_proseXRay; }
+    void setProseXRay(bool enabled);
     bool darkMode() const { return m_darkMode; }
     void setDarkMode(bool darkMode);
     // What the desktop asks for, times what the user asked for on top of it.
@@ -67,6 +74,7 @@ public:
     static QString defaultEditorFont();
     static QStringList selectableFontFamilies(const QStringList &families);
     static int countWords(const QString &text);
+    static int countWordsInView(QStringView text);
     static QString normalizedLinkUrl(const QString &clipboardText);
     static QString suggestedFileName(const QString &text);
     static QString untitledName();
@@ -98,6 +106,8 @@ public:
     Q_INVOKABLE QString documentText() const { return currentDocumentText(); }
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE void setCaretPosition(int position);
+    Q_INVOKABLE void setSelectionRange(int start, int end);
+    Q_INVOKABLE void toggleProseXRay();
     Q_INVOKABLE QString linkUrlAt(int position) const;
     Q_INVOKABLE QVariantMap emphasisSpanAt(int position, const QString &marker) const;
     Q_INVOKABLE int cursorPositionStep(int position, int direction) const;
@@ -119,6 +129,8 @@ signals:
     void modifiedChanged();
     void statusChanged();
     void wordCountChanged();
+    void selectionChanged();
+    void proseXRayChanged();
     void darkModeChanged();
     void textScaleChanged();
     void themeColorsChanged();
@@ -142,7 +154,9 @@ private:
     QUrl suggestedSaveUrl() const;
     QString currentDocumentText() const;
     void setWordCount(int words);
+    void setSelectionState(bool hasSelection, int selectedWords);
     void refreshWordCount();
+    void refreshSelectionWordCount();
     void scheduleWordCount();
     void applyDocumentTypography();
     void reapplyTypographyToChange();
@@ -167,6 +181,11 @@ private:
     bool m_modified = false;
     QString m_status;
     int m_wordCount = 0;
+    bool m_hasSelection = false;
+    int m_selectedWordCount = 0;
+    int m_selectionStart = 0;
+    int m_selectionEnd = 0;
+    bool m_proseXRay = false;
     bool m_darkMode = true;
     // The desktop's light/dark setting, used when the Omarchy theme names none.
     bool m_systemDarkMode = true;
@@ -182,6 +201,10 @@ private:
     QFutureWatcher<int> m_wordCountWatcher;
     bool m_wordCountStale = false;
     bool m_wordCountAgain = false;
+    QTimer m_selectionCountTimer;
+    QFutureWatcher<int> m_selectionCountWatcher;
+    bool m_selectionCountStale = false;
+    bool m_selectionCountAgain = false;
     QTimer m_recoveryTimer;
     QTimer m_autoSaveTimer;
     QFileSystemWatcher m_fileWatcher;
@@ -206,6 +229,8 @@ private:
     QString m_themeSelection;
     QString m_themePanelBackground;
     QString m_themeSelectionForeground;
+    QString m_themeYellow;
+    QString m_themeRed;
     QString m_editorFont;
     QFileSystemWatcher m_themeWatcher;
     QTimer m_themeReloadTimer;

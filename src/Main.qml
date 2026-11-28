@@ -275,6 +275,11 @@ ApplicationWindow {
     }
 
     Shortcut {
+        sequence: "Ctrl+Shift+R"
+        onActivated: backend.toggleProseXRay()
+    }
+
+    Shortcut {
         sequences: ["Meta+F", "F11"]
         onActivated: toggleFullScreen()
     }
@@ -697,6 +702,8 @@ ApplicationWindow {
                 }
                 onCursorRectangleChanged: editorFlick.ensureCursorVisible()
                 onCursorPositionChanged: backend.setCaretPosition(cursorPosition)
+                onSelectionStartChanged: backend.setSelectionRange(selectionStart, selectionEnd)
+                onSelectionEndChanged: backend.setSelectionRange(selectionStart, selectionEnd)
                 onFontChanged: backend.documentFontChanged()
 
                 // The document's own characters, where `text` turns non-breaking
@@ -1021,6 +1028,7 @@ ApplicationWindow {
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
+                    backend.setSelectionRange(selectionStart, selectionEnd);
                     if (win.searchOpen && contentChanged && !win.searchReplacing)
                         win.updateSearch(false);
                 }
@@ -1144,6 +1152,19 @@ ApplicationWindow {
                 onClicked: fontPicker.opened ? fontPicker.close() : fontPicker.open()
             }
 
+            FooterIconButton {
+                id: xrayButton
+                objectName: "xrayButton"
+                iconName: "xray"
+                size: win.scaledSize(16)
+                iconColor: backend.proseXRay ? backend.themeAccent : win.mutedColor
+                opacity: backend.proseXRay ? 0.95 : 0.55
+                tooltip: qsTr("Style X-Ray")
+                tooltipColor: win.panelColor
+                tooltipTextColor: win.textColor
+                onClicked: backend.toggleProseXRay()
+            }
+
             Label {
                 text: backend.status
                 color: win.mutedColor
@@ -1182,11 +1203,13 @@ ApplicationWindow {
         }
 
         Label {
+            objectName: "wordCountLabel"
             anchors.right: parent.right
             anchors.bottom: parent.bottom
             anchors.rightMargin: 12
             anchors.bottomMargin: 10
-            text: qsTr("%n Words", "", backend.wordCount)
+            text: (backend.hasSelection ? backend.selectedWordCount + " / " : "")
+                + qsTr("%n Words", "", backend.wordCount)
             color: win.mutedColor
             opacity: 0.75
             font.family: "IBM Plex Mono"

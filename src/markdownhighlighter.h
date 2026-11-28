@@ -12,7 +12,11 @@ public:
     explicit MarkdownHighlighter(QTextDocument *document);
 
     void setTheme(bool darkMode, const QString &background, const QString &foreground,
-                  const QString &accent, const QString &codeBackground);
+                  const QString &accent, const QString &codeBackground,
+                  const QString &yellow = QString(), const QString &red = QString());
+    void setProseXRay(bool enabled);
+    bool proseXRay() const { return m_proseXRay; }
+    void rehighlightEchoNeighborhood(int position);
     void setSearch(const QString &query, int currentMatchStart);
     void clearCurrentMatch();
     void setCaret(int position);
@@ -21,6 +25,11 @@ public:
     struct Span {
         int start;
         int length;
+    };
+
+    struct ProseSentence {
+        Span span;
+        int wordCount = 0;
     };
 
     enum class InlineKind { Bold, Italic, Strikethrough, Link };
@@ -58,6 +67,8 @@ public:
     // as one. Folding keeps one UTF-16 unit per unit, so offsets and lengths
     // are the text's own.
     static QList<int> findMatches(const QString &text, const QString &query);
+    static QList<ProseSentence> proseSentences(const QString &text,
+                                               const QList<Span> &excluded = {});
 
 protected:
     void highlightBlock(const QString &text) override;
@@ -75,15 +86,21 @@ private:
 
     void rebuildFormats();
     void rehighlightAll();
+    void rehighlightNeighborhoodBlocks(const QTextBlock &center);
+    QString caretWordAt(const QTextBlock &block, int offset, int *wordStart = nullptr) const;
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
+    void highlightProseXRay(const QString &text);
     void highlightSearch(const QString &text);
 
     bool m_darkMode = true;
+    bool m_proseXRay = false;
     QString m_customBackground;
     QString m_customForeground;
     QString m_customAccent;
     QString m_customCodeBackground;
+    QString m_customYellow;
+    QString m_customRed;
     QTextCharFormat m_markerFormat;
     QTextCharFormat m_hiddenMarkerFormat;
     QTextCharFormat m_headingFormat;
@@ -93,6 +110,11 @@ private:
     QTextCharFormat m_fenceFormat;
     QTextCharFormat m_quoteFormat;
     QTextCharFormat m_linkFormat;
+    QTextCharFormat m_longSentenceFormat;
+    QTextCharFormat m_veryLongSentenceFormat;
+    QTextCharFormat m_monotoneSentenceFormat;
+    QTextCharFormat m_ambientEchoFormat;
+    QTextCharFormat m_caretEchoFormat;
     QString m_searchQuery;
     SearchPattern m_searchPattern;
     int m_currentMatchStart = -1;
@@ -102,6 +124,8 @@ private:
     // The markers of whatever markup the caret is in or against are shown,
     // so they can be seen and edited.
     QTextCursor m_caret;
+    QString m_caretEchoWord;
+    int m_caretEchoWordStart = -1;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };
