@@ -19,6 +19,7 @@ constexpr int kProseMaxBlockLength = 4096;
 constexpr int kAmbientEchoWindowWords = 50;
 constexpr int kCaretEchoWindowWords = 80;
 constexpr int kNeighborBlockLimit = 8;
+constexpr int kMaxNeighborTraversal = 32;
 constexpr int kLongSentenceWords = 28;
 constexpr int kVeryLongSentenceWords = 40;
 constexpr int kMonotoneMinWords = 6;
@@ -1332,7 +1333,9 @@ void MarkdownHighlighter::rehighlightNeighborhoodBlocks(const QTextBlock &center
 
     QTextBlock prev = center.previous();
     int visited = 0;
-    while (prev.isValid() && visited < kNeighborBlockLimit) {
+    int traversed = 0;
+    while (prev.isValid() && visited < kNeighborBlockLimit && traversed < kMaxNeighborTraversal) {
+        ++traversed;
         const ProseBlockKind kind = classifyProseBlock(prev);
         if (kind == ProseBlockKind::SectionBoundary)
             break;
@@ -1345,7 +1348,9 @@ void MarkdownHighlighter::rehighlightNeighborhoodBlocks(const QTextBlock &center
 
     QTextBlock next = center.next();
     visited = 0;
-    while (next.isValid() && visited < kNeighborBlockLimit) {
+    traversed = 0;
+    while (next.isValid() && visited < kNeighborBlockLimit && traversed < kMaxNeighborTraversal) {
+        ++traversed;
         const ProseBlockKind kind = classifyProseBlock(next);
         if (kind == ProseBlockKind::SectionBoundary)
             break;
@@ -1397,7 +1402,10 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
         QList<int> prevLengths;
         QTextBlock prev = block.previous();
         int visited = 0;
-        while (prev.isValid() && visited < kNeighborBlockLimit && prevLengths.size() < 2) {
+        int traversed = 0;
+        while (prev.isValid() && visited < kNeighborBlockLimit
+               && traversed < kMaxNeighborTraversal && prevLengths.size() < 2) {
+            ++traversed;
             int prevStart = 0;
             const ProseBlockKind prevKind = classifyProseBlock(prev, &prevStart);
             if (prevKind == ProseBlockKind::SectionBoundary || prevKind == ProseBlockKind::ListItem)
@@ -1416,7 +1424,10 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
         QList<int> nextLengths;
         QTextBlock next = block.next();
         visited = 0;
-        while (next.isValid() && visited < kNeighborBlockLimit && nextLengths.size() < 2) {
+        traversed = 0;
+        while (next.isValid() && visited < kNeighborBlockLimit
+               && traversed < kMaxNeighborTraversal && nextLengths.size() < 2) {
+            ++traversed;
             int nextStart = 0;
             const ProseBlockKind nextKind = classifyProseBlock(next, &nextStart);
             if (nextKind == ProseBlockKind::SectionBoundary || nextKind == ProseBlockKind::ListItem)
@@ -1479,7 +1490,10 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
 
     QTextBlock prev = block.previous();
     int visited = 0;
-    while (prev.isValid() && visited < kNeighborBlockLimit && prevWords.size() < kCaretEchoWindowWords) {
+    int traversed = 0;
+    while (prev.isValid() && visited < kNeighborBlockLimit
+           && traversed < kMaxNeighborTraversal && prevWords.size() < kCaretEchoWindowWords) {
+        ++traversed;
         int prevStart = 0;
         const ProseBlockKind prevKind = classifyProseBlock(prev, &prevStart);
         if (prevKind == ProseBlockKind::SectionBoundary)
@@ -1507,7 +1521,10 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
     QList<NeighborWord> nextWords;
     QTextBlock next = block.next();
     visited = 0;
-    while (next.isValid() && visited < kNeighborBlockLimit && nextWords.size() < kCaretEchoWindowWords) {
+    traversed = 0;
+    while (next.isValid() && visited < kNeighborBlockLimit
+           && traversed < kMaxNeighborTraversal && nextWords.size() < kCaretEchoWindowWords) {
+        ++traversed;
         int nextStart = 0;
         const ProseBlockKind nextKind = classifyProseBlock(next, &nextStart);
         if (nextKind == ProseBlockKind::SectionBoundary)

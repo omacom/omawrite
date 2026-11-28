@@ -4615,6 +4615,13 @@ private slots:
         const int precomposedPos = combiningLine.indexOf(QStringLiteral("na\u00efve"));
         QCOMPARE(combiningFormats.at(decomposedPos).underlineStyle(), QTextCharFormat::DashUnderline);
         QCOMPARE(combiningFormats.at(precomposedPos).underlineStyle(), QTextCharFormat::DashUnderline);
+
+        // A long run of skipped blank lines is bounded by the traversal limit.
+        QString gapped = QStringLiteral("Entscheidung hier.\n")
+            + QString(60, QLatin1Char('\n')) + QStringLiteral("Entscheidung weit unten.");
+        document.setPlainText(gapped);
+        const auto firstGapFormats = formatsForBlock(document.firstBlock());
+        QVERIFY(firstGapFormats.at(0).underlineStyle() != QTextCharFormat::DashUnderline);
     }
 
     void focusesEchoTwinsAroundTheCaret() {
