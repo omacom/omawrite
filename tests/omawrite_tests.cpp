@@ -4639,6 +4639,31 @@ private slots:
         formats = formatsOfFirstBlock();
         QVERIFY(formats.at(firstAuch).underlineStyle() != QTextCharFormat::SingleUnderline);
         QVERIFY(formats.at(uniqueWord).underlineStyle() != QTextCharFormat::SingleUnderline);
+
+        // Moving between distant occurrences of the same word in one paragraph
+        // updates which +/-80-word pair is highlighted.
+        QStringList filler;
+        for (int i = 1; i <= 59; ++i)
+            filler << QStringLiteral("f%1").arg(i);
+        const QString gap = filler.join(QLatin1Char(' '));
+        const QString longLine = QStringLiteral("echo ") + gap + QStringLiteral(" echo ")
+            + gap + QStringLiteral(" echo.");
+        document.setPlainText(longLine);
+        const int occ1 = 0;
+        const int occ2 = longLine.indexOf(QStringLiteral(" echo "), 1) + 1;
+        const int occ3 = longLine.lastIndexOf(QStringLiteral("echo"));
+
+        highlighter.setCaret(occ1 + 1);
+        formats = formatsOfFirstBlock();
+        QCOMPARE(formats.at(occ1).underlineStyle(), QTextCharFormat::SingleUnderline);
+        QCOMPARE(formats.at(occ2).underlineStyle(), QTextCharFormat::SingleUnderline);
+        QVERIFY(formats.at(occ3).underlineStyle() != QTextCharFormat::SingleUnderline);
+
+        highlighter.setCaret(occ3 + 1);
+        formats = formatsOfFirstBlock();
+        QVERIFY(formats.at(occ1).underlineStyle() != QTextCharFormat::SingleUnderline);
+        QCOMPARE(formats.at(occ2).underlineStyle(), QTextCharFormat::SingleUnderline);
+        QCOMPARE(formats.at(occ3).underlineStyle(), QTextCharFormat::SingleUnderline);
     }
 
     void highlightsLongAndMonotoneSentencesWithoutSplittingAbbreviations() {

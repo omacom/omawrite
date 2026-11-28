@@ -68,10 +68,13 @@ void MarkdownHighlighter::setProseXRay(bool enabled) {
         return;
 
     m_proseXRay = enabled;
-    if (m_proseXRay && !m_caret.isNull())
-        m_caretEchoWord = caretWordAt(m_caret.block(), m_caret.positionInBlock());
-    else
+    if (m_proseXRay && !m_caret.isNull()) {
+        m_caretEchoWord = caretWordAt(m_caret.block(), m_caret.positionInBlock(),
+                                      &m_caretEchoWordStart);
+    } else {
         m_caretEchoWord.clear();
+        m_caretEchoWordStart = -1;
+    }
     rehighlightAll();
 }
 
@@ -222,12 +225,15 @@ void MarkdownHighlighter::setCaret(int position) {
     if (!m_proseXRay)
         return;
 
-    const QString nextEchoWord = caretWordAt(entered, newOffset);
-    if (nextEchoWord == m_caretEchoWord && left == entered)
+    int nextEchoWordStart = -1;
+    const QString nextEchoWord = caretWordAt(entered, newOffset, &nextEchoWordStart);
+    if (nextEchoWord == m_caretEchoWord && nextEchoWordStart == m_caretEchoWordStart
+            && left == entered)
         return;
     const bool hadEchoWord = !m_caretEchoWord.isEmpty();
     const bool hasEchoWord = !nextEchoWord.isEmpty();
     m_caretEchoWord = nextEchoWord;
+    m_caretEchoWordStart = nextEchoWordStart;
     if (hadEchoWord && left.isValid() && left != entered)
         rehighlightNeighborhoodBlocks(left);
     if (hasEchoWord || hadEchoWord) {
@@ -1244,7 +1250,9 @@ QList<MarkdownHighlighter::ProseSentence> MarkdownHighlighter::proseSentences(
     return sentences;
 }
 
-QString MarkdownHighlighter::caretWordAt(const QTextBlock &block, int offset) const {
+QString MarkdownHighlighter::caretWordAt(const QTextBlock &block, int offset, int *wordStart) const {
+    if (wordStart)
+        *wordStart = -1;
     int contentStart = 0;
     const ProseBlockKind kind = classifyProseBlock(block, &contentStart);
     if (kind != ProseBlockKind::Paragraph && kind != ProseBlockKind::ListItem)
@@ -1255,8 +1263,11 @@ QString MarkdownHighlighter::caretWordAt(const QTextBlock &block, int offset) co
     const QList<ProseWord> words = extractProseWords(text, mask);
     for (const ProseWord &word : words) {
         if (offset >= word.start && offset <= word.start + word.length) {
-            if (word.isCjk || word.letterCount >= 4)
+            if (word.isCjk || word.letterCount >= 4) {
+                if (wordStart)
+                    *wordStart = block.position() + word.start;
                 return word.folded;
+            }
             return {};
         }
     }

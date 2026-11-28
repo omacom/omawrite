@@ -87,7 +87,7 @@ private:
     void rebuildFormats();
     void rehighlightAll();
     void rehighlightNeighborhoodBlocks(const QTextBlock &center);
-    QString caretWordAt(const QTextBlock &block, int offset) const;
+    QString caretWordAt(const QTextBlock &block, int offset, int *wordStart = nullptr) const;
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightProseXRay(const QString &text);
@@ -125,6 +125,7 @@ private:
     // so they can be seen and edited.
     QTextCursor m_caret;
     QString m_caretEchoWord;
+    int m_caretEchoWordStart = -1;
     QTextCharFormat m_searchFormat;
     QTextCharFormat m_currentSearchFormat;
 };
