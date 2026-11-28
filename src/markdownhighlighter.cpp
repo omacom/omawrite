@@ -1258,11 +1258,15 @@ struct JoinedParagraph {
 
 // Soft-wrapped Markdown lines without a blank line between them belong to one
 // prose paragraph, so join the contiguous run before measuring sentence length.
-JoinedParagraph joinParagraphRun(const QTextBlock &anchor) {
+// Optional block-number bounds prevent neighbor lookups from overlapping a
+// paragraph run that was already measured.
+JoinedParagraph joinParagraphRun(const QTextBlock &anchor, int minBlockNum = -1,
+                                 int maxBlockNum = -1) {
     QList<QTextBlock> blocks;
     QTextBlock prev = anchor.previous();
     int steps = 0;
     while (prev.isValid() && steps < kNeighborBlockLimit
+           && (minBlockNum < 0 || prev.blockNumber() >= minBlockNum)
            && classifyProseBlock(prev) == ProseBlockKind::Paragraph) {
         blocks.prepend(prev);
         prev = prev.previous();
@@ -1275,6 +1279,7 @@ JoinedParagraph joinParagraphRun(const QTextBlock &anchor) {
     QTextBlock next = anchor.next();
     steps = 0;
     while (next.isValid() && steps < kNeighborBlockLimit
+           && (maxBlockNum < 0 || next.blockNumber() <= maxBlockNum)
            && classifyProseBlock(next) == ProseBlockKind::Paragraph) {
         blocks.append(next);
         next = next.next();
@@ -1471,6 +1476,7 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
 
         if (!paraSentences.isEmpty()) {
             QList<int> prevLengths;
+            const int prevMaxBlock = para.firstBlock.blockNumber() - 1;
             QTextBlock prev = para.firstBlock.previous();
             int visited = 0;
             int traversed = 0;
@@ -1481,7 +1487,7 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
                 if (prevKind == ProseBlockKind::SectionBoundary || prevKind == ProseBlockKind::ListItem)
                     break;
                 if (prevKind == ProseBlockKind::Paragraph) {
-                    const JoinedParagraph prevPara = joinParagraphRun(prev);
+                    const JoinedParagraph prevPara = joinParagraphRun(prev, -1, prevMaxBlock);
                     const QList<ProseSentence> prevSents =
                         proseSentences(prevPara.text, prevPara.excluded);
                     for (int idx = int(prevSents.size()) - 1; idx >= 0 && prevLengths.size() < 2; --idx)
@@ -1494,6 +1500,7 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
             }
 
             QList<int> nextLengths;
+            const int nextMinBlock = para.lastBlock.blockNumber() + 1;
             QTextBlock next = para.lastBlock.next();
             visited = 0;
             traversed = 0;
@@ -1504,7 +1511,7 @@ void MarkdownHighlighter::highlightProseXRay(const QString &text) {
                 if (nextKind == ProseBlockKind::SectionBoundary || nextKind == ProseBlockKind::ListItem)
                     break;
                 if (nextKind == ProseBlockKind::Paragraph) {
-                    const JoinedParagraph nextPara = joinParagraphRun(next);
+                    const JoinedParagraph nextPara = joinParagraphRun(next, nextMinBlock, -1);
                     const QList<ProseSentence> nextSents =
                         proseSentences(nextPara.text, nextPara.excluded);
                     for (int idx = 0; idx < nextSents.size() && nextLengths.size() < 2; ++idx)

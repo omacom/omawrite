@@ -4763,6 +4763,13 @@ private slots:
         QVERIFY(wrap2.hasProperty(QTextFormat::BackgroundBrush));
         QCOMPARE(wrap1.background().color(), veryLongFmt.background().color());
         QCOMPARE(wrap2.background().color(), veryLongFmt.background().color());
+
+        // Two ten-word sentences across ten consecutive lines must NOT double-count
+        // the first sentence into a false three-sentence monotone warning.
+        document.setPlainText(QStringLiteral(
+            "One two\nthree\nfour\nfive\nsix\nseven\neight\nnine\nten.\n"
+            "Alpha beta gamma delta epsilon zeta eta theta iota kappa."));
+        QVERIFY(firstFormat(document.findBlockByNumber(0)).underlineStyle() != QTextCharFormat::DotLine);
     }
 
     void keepsHiddenMarkersAndSearchIntactUnderProseXRay() {
